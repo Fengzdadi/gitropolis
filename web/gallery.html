@@ -22,7 +22,7 @@
 <div id="labels"></div>
 <script type="module">
 import * as THREE from 'three';
-import { buildingGeometry, BASE_FORMS, LANDMARKS, INDUSTRY, CAMPUS, ERAS, ROOFS, STYLES } from './buildings.js';
+import { buildingGeometry, BASE_FORMS, LANDMARKS, INDUSTRY, CAMPUS, CAPITAL, ERAS, ROOFS, STYLES } from './buildings.js';
 
 // One scene, one orthographic iso camera, every building laid out on a grid.
 const W = innerWidth, H = innerHeight;
@@ -46,6 +46,7 @@ const sizes = { // representative footprints per form: [w, d, h]
   airport: [20, 13, 10], ruin: [10, 8, 10], site: [11, 9, 13], mega: [18, 16, 46],
   containers: [16, 9, 4], tanks: [12, 8, 6], warehouse: [16, 8, 6], lighthouse: [5, 5, 26],
   college: [16, 6, 10], chapel: [14, 6, 18], library: [14, 14, 18],
+  pilotis: [18, 5, 10], congress: [20, 12, 22], cathedral: [10, 10, 12],
 };
 const Q = new URLSearchParams(location.search), only = Q.get('only'), show = g => !only || only.split(',').includes(g);
 const group = (g, fn) => { if (show(g)) fn(); };
@@ -100,6 +101,13 @@ group('campus', () => {
   const it = (form, era, seed, extra = {}) => ({ spec: { form, era, seed, w: sizes[form][0], d: sizes[form][1], h: sizes[form][2], ...extra }, name: `${form} ${era}` });
   ERAS.forEach((era, r) => rows.push({ label: `campus ${era}`, items: CAMPUS.map((f, i) => it(f, era, 61 + r * 4 + i)) }));
   rows.push({ label: 'campus more', items: [it('college', 'old', 70, { w: 22, d: 6, h: 10 }), it('college', 'old', 71, { w: 6, d: 16, h: 10 }), it('chapel', 'old', 72, { w: 6, d: 14, h: 18 }), it('college', 'old', 73, { style: 'python' })] });
+});
+
+// the planned capital, in each era
+group('capital', () => {
+  const it = (form, era, seed, extra = {}) => ({ spec: { form, era, seed, w: sizes[form][0], d: sizes[form][1], h: sizes[form][2], ...extra }, name: `${form} ${era}` });
+  ERAS.forEach((era, r) => rows.push({ label: `capital ${era}`, items: CAPITAL.map((f, i) => it(f, era, 81 + r * 4 + i)) }));
+  rows.push({ label: 'capital more', items: [it('pilotis', 'new', 90, { w: 5, d: 16 }), it('pilotis', 'mid', 91, { w: 8, d: 6, h: 6 })] });
 });
 
 // ?f=courthouse,port keeps only those forms; ?s=rust,go keeps only those styles (for close inspection)

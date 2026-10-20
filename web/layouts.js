@@ -22,7 +22,7 @@ function shortLabel(t) {
   return s.length > 22 ? s.slice(0, 21) + '…' : s;
 }
 
-export const CITY_KINDS = ['mountain', 'university', 'port', 'smalltown', 'manhattan', 'hongkong', 'tokyo', 'la', 'paris', 'venice', 'barcelona'];
+export const CITY_KINDS = ['capital', 'mountain', 'university', 'port', 'smalltown', 'manhattan', 'hongkong', 'tokyo', 'la', 'paris', 'venice', 'barcelona'];
 
 // ---------------------------------------------------------------- shared helpers
 
@@ -86,6 +86,33 @@ function annularSector(r0, r1, t0, t1) {
   for (let k = 0; k <= steps; k++) { const t = t0 + (t1 - t0) * k / steps; pts.push([Math.cos(t) * r1, Math.sin(t) * r1]); }
   for (let k = steps; k >= 0; k--) { const t = t0 + (t1 - t0) * k / steps; pts.push([Math.cos(t) * r0, Math.sin(t) * r0]); }
   return pts;
+}
+
+// strongly connected components (iterative Tarjan): component id per node, numbered so that a
+// component only points at lower-numbered ones
+function tarjan(adj) {
+  const n = adj.length, idx = new Array(n).fill(-1), low = new Array(n).fill(0), on = new Array(n).fill(false), comp = new Array(n).fill(-1), stack = [];
+  const out = adj.map(x => [...x]);
+  let counter = 0, nc = 0;
+  for (let s = 0; s < n; s++) {
+    if (idx[s] >= 0) continue;
+    const work = [[s, 0]];
+    idx[s] = low[s] = counter++; stack.push(s); on[s] = true;
+    while (work.length) {
+      const top = work[work.length - 1], [v, k] = top;
+      if (k < out[v].length) {
+        top[1]++;
+        const w = out[v][k];
+        if (idx[w] < 0) { idx[w] = low[w] = counter++; stack.push(w); on[w] = true; work.push([w, 0]); }
+        else if (on[w]) low[v] = Math.min(low[v], idx[w]);
+      } else {
+        work.pop();
+        if (work.length) { const u = work[work.length - 1][0]; low[u] = Math.min(low[u], low[v]); }
+        if (low[v] === idx[v]) { let w; do { w = stack.pop(); on[w] = false; comp[w] = nc; } while (w !== v); nc++; }
+      }
+    }
+  }
+  return comp;
 }
 
 // ---------------------------------------------------------------- planners
@@ -429,6 +456,108 @@ const PLANNERS = {
       lots, blocks, labels, land: [rectPoly(-ST, -ST, W, H)],
       camera: { az: 45, el: 46, dist: 0.85 },
       height: (i, rel) => i === ctx.hub ? 9 : 1.45 + 0.2 * Math.tanh(Math.log(rel)),
+    };
+  },
+
+  // a planned capital: layers of the design laid out along a monumental axis. The foundation layer
+  // (what everything else builds on) stands at the head, on a plaza by a lake, with the congress; each
+  // layer above it steps back down the axis in rows of superblocks; and the biggest layer, with the
+  // tests and docs, sweeps across the axis as two curved wings.
+  capital(ds, ctx) {
+    const files = ctx.files;
+    const dirOf = p => p.includes('/') ? p.slice(0, p.lastIndexOf('/')) : '.';
+    const pk = new Map(); // package (directory) → { name, items, periphery }
+    for (const d of ds) for (const it of d.items) {
+      if (it.i === ctx.hub) continue;
+      const k = dirOf(files[it.i].p);
+      if (!pk.has(k)) pk.set(k, { name: k, items: [], periphery: PERIPH_RE.test(k + '/') });
+      pk.get(k).items.push(it);
+    }
+    const P = [...pk.values()], index = new Map(P.map((p, n) => [p.name, n]));
+    // package graph → layers: a package's layer is the longest chain of packages beneath it
+    const adj = P.map(() => new Set());
+    for (const [n, p] of P.entries()) for (const it of p.items) for (const j of files[it.i].imp) {
+      const m = index.get(dirOf(files[j].p));
+      if (m !== undefined && m !== n && !P[m].periphery) adj[n].add(m);
+    }
+    const comp = tarjan(adj), nc = Math.max(-1, ...comp) + 1, lvlC = new Array(nc).fill(0);
+    const cadj = Array.from({ length: nc }, () => new Set());
+    adj.forEach((out, a) => out.forEach(b => { if (comp[a] !== comp[b]) cadj[comp[a]].add(comp[b]); }));
+    for (let k = 0; k < nc; k++) for (const t of cadj[k]) lvlC[k] = Math.max(lvlC[k], lvlC[t] + 1);
+    P.forEach((p, n) => { p.area = sum(p.items.map(it => it.a)); p.side = clamp(Math.sqrt(p.area / 0.55), 1.6, 6.5); p.level = lvlC[comp[n]]; });
+    const core = P.filter(p => !p.periphery), periph = P.filter(p => p.periphery);
+    const levels = [];
+    for (const p of core) (levels[p.level] ||= []).push(p);
+    for (let l = 0; l < levels.length; l++) levels[l] = (levels[l] || []).sort((a, b) => b.area - a.area);
+    // the wings: the biggest layer above the foundation (and every test / doc package)
+    let wl = -1, wa = 0;
+    levels.forEach((ps, l) => { const a = sum(ps.map(p => p.area)); if (l > 0 && ps.length >= 3 && a > wa) { wa = a; wl = l; } });
+    const wing = [...(wl >= 0 ? levels[wl] : []), ...periph.sort((a, b) => b.area - a.area)];
+
+    const lots = [], blocks = [], labels = [], water = [];
+    const E = 2.2, G = 0.8; // half-width of the esplanade, gap between superblocks
+    const superblock = (p, x0, z0) => {
+      blocks.push({ poly: rectPoly(x0, z0, x0 + p.side, z0 + p.side), type: 'lawn' });
+      lots.push(...packRect(p.items, x0 + 0.2, z0 + 0.2, x0 + p.side - 0.2, z0 + p.side - 0.2, 0.14));
+      labels.push({ text: p.name.split('/').pop(), x: x0 + p.side / 2, z: z0 + p.side + 0.35, weight: p.area });
+    };
+    // the head: the congress on its plaza, the lake behind
+    const PL = 6;
+    blocks.push({ poly: rectPoly(0, -E - 2, PL, E + 2), type: 'plaza' });
+    lots.push({ i: ctx.hub, x: PL * 0.5, z: 0, w: 3.6, d: 2.6, rot: 0 });
+    const lake = [];
+    // wrapped round the head of the axis, just clear of the plaza
+    const r0 = Math.hypot(PL / 2, E + 2) + 1.2, r1 = r0 + 5.5;
+    for (let k = 0; k <= 36; k++) { const a = -1.75 + 3.5 * k / 36; lake.push([PL / 2 + Math.cos(a) * r0, Math.sin(a) * r0 * 1.1]); }
+    for (let k = 36; k >= 0; k--) { const a = -1.75 + 3.5 * k / 36; lake.push([PL / 2 + Math.cos(a) * r1, Math.sin(a) * r1 * 1.1]); }
+    water.push(lake);
+    // down the axis: each layer's packages in two rows either side of the esplanade
+    let x = -G, wingX = null;
+    levels.forEach((ps, l) => {
+      if (l === wl) { wingX = x - 3; x -= 6; return; } // the wings cross here
+      // each side of the esplanade gets columns of superblocks stacked outward, so a big layer is
+      // a deep sector rather than a very long row
+      const sides = [[], []];
+      ps.forEach((p, n) => sides[n % 2].push(p));
+      const len = sides.map(list => {
+        const K = Math.max(1, Math.ceil(Math.sqrt(list.length / 1.5)));
+        let cx = x;
+        for (let c = 0; c < list.length; c += K) {
+          const col = list.slice(c, c + K), cw = Math.max(...col.map(p => p.side));
+          let out = E + 0.6;
+          for (const p of col) { superblock(p, cx - cw / 2 - p.side / 2, list === sides[1] ? out : -out - p.side); out += p.side + G; }
+          cx -= cw + G;
+        }
+        return x - cx;
+      });
+      x -= Math.max(...len, 0) + 1.6;
+    });
+    // the wings: an arc bowed towards the head, half each side of the axis
+    if (wing.length) {
+      if (wingX === null) { wingX = x - 3; x -= 6; }
+      // each wing sweeps out to at most SWEEP radians; when a row is full the next row starts a block
+      // further out, so a huge layer makes thicker wings rather than a ring
+      const SWEEP = 1.25, total = sum(wing.map(p => p.side + G));
+      const RA = clamp(total / 2 / SWEEP, 10, 40), maxS = Math.max(...wing.map(p => p.side));
+      const cxA = wingX + RA;
+      const slot = [{ row: 0, th: (E + 1.2) / RA }, { row: 0, th: (E + 1.2) / RA }];
+      wing.forEach((p, n) => {
+        const sl = slot[n % 2], side = n % 2 ? 1 : -1;
+        let r = RA + sl.row * (maxS + G), a = sl.th + (p.side / 2) / r;
+        if (a + p.side / 2 / r > SWEEP) { sl.row++; r = RA + sl.row * (maxS + G); sl.th = (E + 1.2) / r; a = sl.th + (p.side / 2) / r; }
+        const px = cxA - Math.cos(a) * r, pz = side * Math.sin(a) * r;
+        superblock(p, px - p.side / 2, pz - p.side / 2);
+        sl.th = a + (p.side / 2 + G) / r;
+      });
+    }
+    // the esplanade: a long lawn from the plaza to the last layer
+    blocks.push({ poly: rectPoly(x, -E + 0.4, -G * 0.5, E - 0.4), type: 'lawn' });
+    return {
+      lots, blocks, labels, water, ground: 'land',
+      land: [rectPoly(x - 4, -E - 30, PL + 14, E + 30)],
+      camera: { az: 45, el: 40, dist: 0.95 },
+      // a planned city keeps an even skyline; the congress towers over it
+      height: (i, rel) => i === ctx.hub ? 3.4 : 0.95 + 0.18 * Math.tanh(Math.log(rel)),
     };
   },
 

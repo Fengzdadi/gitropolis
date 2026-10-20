@@ -53,6 +53,7 @@ const MIX = {
   port: { conifer: 2, round: 1 },
   university: { round: 3, autumn: 2, conifer: 1, blossom: 1 },
   mountain: { conifer: 3, round: 2, blossom: 1 },
+  capital: { round: 3, palm: 1 },
 };
 
 function pickSpecies(kind, seed) {

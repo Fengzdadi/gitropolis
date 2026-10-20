@@ -54,6 +54,10 @@ gitropolis reads the shape of your code and picks a plan to match it. A big mono
 <td><img src="docs/media/mountain-commons-lang.png" alt="Apache Commons Lang as a mountain city"><br><b>Mountain city</b>: Apache Commons Lang. Java's deep packages become terraced mountains, one terrace per package. The main code and the tests face each other across a river, with a cable car between their peaks.</td>
 <td><img src="docs/media/mountain-petclinic.png" alt="close-up of Spring PetClinic as a mountain city"><br><b>Mountain city</b>: Spring PetClinic, close up. The empty directories on the way down to <code>src/main/java/org/springframework/samples/petclinic</code> are a stone stairway, one step each, up from the river.</td>
 </tr>
+<tr>
+<td><img src="docs/media/capital-service.png" alt="ardanlabs/service as a planned capital"><br><b>Planned capital</b>: ardanlabs/service. A strictly layered design: no package depends on one that depends back on it. The foundation layer stands at the head of a monumental axis by a lake, each layer above steps back down the axis, and the biggest layer sweeps out as two wings.</td>
+<td><img src="docs/media/capital-service-close.png" alt="close-up of the capital's plaza"><br><b>Planned capital</b>, close up. The most-depended-on file is the congress, the file that imports the most is the cathedral, and everything else is a white slab on columns in a green superblock.</td>
+</tr>
 </table>
 
 <sub><sup>*</sup> These were forced with `--city`; left to itself, gitropolis plans these repos as Paris and Manhattan. Any repo can be drawn as any city.</sub>
@@ -80,6 +84,7 @@ Some repos also get a condition on top of their plan. A repo with no recent comm
 | The tallest spire | the most-imported file |
 | City hall · courthouse · clock tower | README · LICENSE · CHANGELOG |
 | Port · power plant · airport | lockfile · package manifest · deploy config |
+| Axis · superblock · congress · cathedral | a layer of the design · a package · the most-depended-on file · the file that imports the most |
 | Terrace · stairway | a package (subpackages are higher terraces) · the empty directories a path climbs through |
 | College · chapel · library | docs and books: a page · a table of contents · the most-linked page |
 | Container yard · warehouse · tank farm · factory | infrastructure as code: Kubernetes manifests · Helm, Kustomize and Ansible · jsonnet and Nix · Terraform |
@@ -103,7 +108,7 @@ Filming runs in headless Chrome, so it looks the same on every machine. It needs
 
 | Option | Default | |
 |---|---|---|
-| `--city <plan>` | `auto` | `mountain` `university` `port` `smalltown` `manhattan` `hongkong` `tokyo` `la` `paris` `venice` `barcelona` |
+| `--city <plan>` | `auto` | `capital` `mountain` `university` `port` `smalltown` `manhattan` `hongkong` `tokyo` `la` `paris` `venice` `barcelona` |
 | `--style <look>` | `pixel` | `maquette` `plan` `nocturne` are smooth-shaded alternatives |
 | `--pixel <n>` | `2` | size of one art pixel, in screen pixels |
 | `--zoom <n>` | `1` | close-up factor; `3` frames the city centre |

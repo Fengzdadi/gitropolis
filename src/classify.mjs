@@ -129,6 +129,18 @@ export function cityMetrics(city, now = Date.now() / 1000) {
     }
   }
 
+  // the planned capital: packages (directories) as a graph. Clean layering means no package depends,
+  // however indirectly, on one that depends back on it, and the layers are deep and well connected.
+  const pdir = p => p.includes('/') ? p.slice(0, p.lastIndexOf('/')) : '.';
+  const pkgOf = new Map();
+  F.forEach(f => { const d = pdir(f.p); if (!pkgOf.has(d)) pkgOf.set(d, pkgOf.size); });
+  const PN = pkgOf.size, padj = Array.from({ length: PN }, () => new Set());
+  F.forEach(f => f.imp.forEach(j => { const a = pkgOf.get(pdir(f.p)), b = pkgOf.get(pdir(F[j].p)); if (a !== b) padj[a].add(b); }));
+  const pcomp = sccOf(padj);
+  let pkgEdges = 0, pkgCyclic = 0;
+  padj.forEach((out, a) => out.forEach(b => { pkgEdges++; if (pcomp[a] === pcomp[b]) pkgCyclic++; }));
+  const pkgLevels = longestPath(padj, pcomp);
+
   // Berlin: two big districts that never talk to each other
   let split = 0;
   if (bigGroups.length >= 2 && edges >= 30) {
@@ -167,6 +179,10 @@ export function cityMetrics(city, now = Date.now() / 1000) {
     locCv: cv(locs),
     avgDepth,
     passShare,
+    pkgs: PN,
+    pkgEdges,
+    pkgAcyclic: pkgEdges ? 1 - pkgCyclic / pkgEdges : 0,
+    pkgLevels,
     climb,
     dirs: dirs.size,
     filesPerDir: mean(dirSizes),
@@ -200,6 +216,15 @@ export function cityMetrics(city, now = Date.now() / 1000) {
 
 // Each archetype: a list of [score 0..1, reason] terms; the city's score is their mean.
 const ARCHETYPES = {
+  capital: m => {
+    // the plan only counts if it holds: any package cycle and it's not a planned city
+    const clean = m.pkgEdges >= 20 ? ramp(m.pkgAcyclic, 0.9, 1) : 0;
+    return [
+      [clean, 'no package leans on one that leans back on it'],
+      [clean * ramp(m.pkgLevels, 2, 5), `${m.pkgLevels + 1} layers, each built only on the ones below`],
+      [clean * ramp(m.pkgEdges / Math.max(1, m.pkgs), 0.8, 1.6), `${m.pkgs} packages, ${(m.pkgEdges / Math.max(1, m.pkgs)).toFixed(1)} links each, all pointing down`],
+    ];
+  },
   mountain: m => [
     [ramp(m.passShare, 0.2, 0.4), m.climb.len ? `${m.climb.len} empty directories of stairs up to ${m.climb.to}/` : `${pct(m.passShare)} of every path is stairs`],
     [ramp(m.avgDepth, 4, 7), `terraces ${m.avgDepth.toFixed(1)} directories up`],
@@ -264,7 +289,7 @@ const STATES = {
 };
 
 export const CITY_NAMES = {
-  mountain: 'Mountain City', university: 'University Town', port: 'Port City', smalltown: 'Small Town', manhattan: 'Manhattan', hongkong: 'Hong Kong', tokyo: 'Tokyo',
+  capital: 'Planned Capital', mountain: 'Mountain City', university: 'University Town', port: 'Port City', smalltown: 'Small Town', manhattan: 'Manhattan', hongkong: 'Hong Kong', tokyo: 'Tokyo',
   la: 'Los Angeles', paris: 'Paris', venice: 'Venice', barcelona: 'Barcelona',
 };
 
@@ -290,4 +315,39 @@ export function classify(city) {
     chip: m.hardware,
     metrics: m,
   };
+}
+
+// strongly connected components (iterative Tarjan) of a graph given as adjacency sets → component per node
+function sccOf(adj) {
+  const n = adj.length, idx = new Array(n).fill(-1), low = new Array(n).fill(0), on = new Array(n).fill(false), comp = new Array(n).fill(-1), stack = [];
+  let counter = 0, nc = 0;
+  const out = adj.map(s => [...s]);
+  for (let s = 0; s < n; s++) {
+    if (idx[s] >= 0) continue;
+    const work = [[s, 0]];
+    idx[s] = low[s] = counter++; stack.push(s); on[s] = true;
+    while (work.length) {
+      const top = work[work.length - 1], [v, k] = top;
+      if (k < out[v].length) {
+        top[1]++;
+        const w = out[v][k];
+        if (idx[w] < 0) { idx[w] = low[w] = counter++; stack.push(w); on[w] = true; work.push([w, 0]); }
+        else if (on[w]) low[v] = Math.min(low[v], idx[w]);
+      } else {
+        work.pop();
+        if (work.length) { const u = work[work.length - 1][0]; low[u] = Math.min(low[u], low[v]); }
+        if (low[v] === idx[v]) { let w; do { w = stack.pop(); on[w] = false; comp[w] = nc; } while (w !== v); nc++; }
+      }
+    }
+  }
+  return comp;
+}
+// the longest chain of dependencies between components: how many layers deep the design goes
+function longestPath(adj, comp) {
+  const nc = Math.max(-1, ...comp) + 1, cadj = Array.from({ length: nc }, () => new Set());
+  adj.forEach((out, a) => out.forEach(b => { if (comp[a] !== comp[b]) cadj[comp[a]].add(comp[b]); }));
+  // Tarjan numbers components in reverse topological order: a component only points at lower numbers
+  const lvl = new Array(nc).fill(0);
+  for (let k = 0; k < nc; k++) for (const t of cadj[k]) lvl[k] = Math.max(lvl[k], lvl[t] + 1);
+  return Math.max(0, ...lvl);
 }

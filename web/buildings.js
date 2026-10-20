@@ -40,7 +40,8 @@ export const BASE_FORMS = ['slab', 'tower', 'setback', 'podium', 'house', 'shed'
 export const LANDMARKS = ['cityhall', 'courthouse', 'clocktower', 'port', 'airport', 'ruin', 'site', 'mega'];
 export const INDUSTRY = ['containers', 'tanks', 'warehouse', 'lighthouse']; // the port city
 export const CAMPUS = ['college', 'chapel', 'library']; // the university town
-export const FORMS = [...BASE_FORMS, ...LANDMARKS, ...INDUSTRY, ...CAMPUS];
+export const CAPITAL = ['pilotis', 'congress', 'cathedral']; // the planned capital
+export const FORMS = [...BASE_FORMS, ...LANDMARKS, ...INDUSTRY, ...CAMPUS, ...CAPITAL];
 export const STYLES = ['rust', 'c', 'cpp', 'go', 'python', 'js', 'ts', 'java', 'ruby', 'php', 'shell', 'default'];
 export const ERAS = ['old', 'mid', 'new'];
 export const ROOFS = ['flat', 'gable', 'hip', 'mansard', 'spire', 'dome'];
@@ -1622,6 +1623,82 @@ function buildLibrary(M, S) {
   return null;
 }
 
+// ------------------------------------------------------------ the planned capital
+// modernist slab on pilotis: an open ground floor of slim columns, a long white block with ribbon
+// windows, a plant room on the roof
+function buildPilotis(M, S) {
+  const { w, d, h, u } = S;
+  S.nb = 2;
+  const alongX = w >= d, L = alongX ? w : d, W = alongX ? d : w;
+  const white = S.era === 'old' ? rgb(S.P.concrete[3]) : S.era === 'mid' ? rgb(S.P.concrete[0]) : S.white;
+  const legs = Math.min(h * 0.18, u * 0.45), e = u * 0.03;
+  M.swap = !alongX;
+  const n = clamp(Math.round(L / (W * 0.8)), 2, 9), cr = Math.min(W * 0.06, u * 0.06);
+  for (let i = 0; i <= n; i++) for (const zz of [-W * 0.32, W * 0.32]) {
+    const x = -L * 0.44 + L * 0.88 * i / n;
+    M.box(x - cr, x + cr, 0, legs, zz - cr, zz + cr, [TRIM, S.trim], null, ['top']);
+  }
+  M.box(-L * 0.2, L * 0.05, 0, legs * 0.85, -W * 0.18, W * 0.18, [GLASS, S.win], [ROOF, S.flat]); // lobby
+  M.box(-L / 2, L / 2, legs, h, -W / 2, W / 2, [WALL, white], [ROOF, S.flat]);
+  const floors = clamp(Math.round((h - legs) / (u * 0.22)), 2, 12), fh = (h - legs) / floors;
+  for (let f = 0; f < floors; f++) { // ribbon windows the length of the block
+    const y0 = legs + f * fh + fh * 0.3, y1 = y0 + fh * 0.45;
+    M.box(-L / 2 + e, L / 2 - e, y0, y1, W / 2, W / 2 + e * 0.3, [GLASS, S.win], null, ['nz', 'top']);
+    M.box(L / 2, L / 2 + e * 0.3, y0, y1, -W / 2 + e, W / 2 - e, [GLASS, S.win], null, ['nx', 'top']);
+  }
+  M.box(-L * 0.15, L * 0.1, h, h + Math.min(u * 0.15, h * 0.08), -W * 0.25, W * 0.25, [WALL, white], [ROOF, S.flat]);
+  M.swap = false;
+  return null;
+}
+
+// congress: a long low platform, twin office towers joined by a bridge, one bowl up and one bowl down
+function buildCongress(M, S) {
+  const { w, d, h, u } = S;
+  S.nb = 3;
+  const white = S.white, conc = rgb(S.P.concrete[0]), ph = h * 0.1;
+  M.box(-w / 2, w / 2, 0, ph, -d / 2, d / 2, [WALL, conc], [ROOF, white]);
+  M.box(-w / 2 + u * 0.05, w / 2 - u * 0.05, ph * 0.2, ph * 0.8, d / 2, d / 2 + 1e-3, [GLASS, S.win], null, ['nz', 'top']);
+  const tw = u * 0.1, tl = d * 0.3, gap = u * 0.2;
+  for (const sx of [-1, 1]) { // the twin towers
+    const x = sx * (gap / 2 + tw / 2);
+    M.box(x - tw / 2, x + tw / 2, ph, h, -d * 0.35 - tl / 2, -d * 0.35 + tl / 2, [WALL, white], [ROOF, white]);
+    const floors = 12;
+    for (let f = 1; f < floors; f++) {
+      const y = ph + (h - ph) * f / floors;
+      M.box(x - tw / 2 - 1e-3, x + tw / 2 + 1e-3, y, y + (h - ph) / floors * 0.4, -d * 0.35 - tl / 2, -d * 0.35 + tl / 2 + 1e-3, [GLASS, S.win], null, ['nx', 'nz', 'top']);
+    }
+  }
+  M.box(-gap / 2, gap / 2, h * 0.72, h * 0.78, -d * 0.35 - tl * 0.3, -d * 0.35 + tl * 0.3, [WALL, white], [ROOF, white]);
+  const R = Math.min(w * 0.2, d * 0.36);
+  const bowl = (cx, up) => {
+    const rings = up
+      ? [[ph, R * 0.95, R * 0.95], [ph + R * 0.35, R * 0.8, R * 0.8], [ph + R * 0.6, R * 0.5, R * 0.5], [ph + R * 0.7, 0, 0]]
+      : [[ph, R * 0.25, R * 0.25], [ph + R * 0.2, R * 0.7, R * 0.7], [ph + R * 0.5, R * 1.05, R * 1.05], [ph + R * 0.56, R * 1.05, R * 1.05]];
+    M.loft(cx, d * 0.12, rings, 14, [WALL, white], up ? {} : { cap: [ROOF, conc] });
+  };
+  bowl(-w * 0.28, true); bowl(w * 0.28, false);
+  return null;
+}
+
+// cathedral: sixteen curved concrete ribs rising from a ring, glass between them
+function buildCathedral(M, S) {
+  const { w, d, h, u } = S;
+  S.nb = 2;
+  const R = Math.min(w, d) * 0.42, white = S.white, glass = rgb(S.P.glass[0]);
+  M.loft(0, 0, [[0, R * 1.08, R * 1.08], [h * 0.03, R * 1.08, R * 1.08]], 16, [POD, rgb(S.P.concrete[1])], { cap: [POD, rgb(S.P.concrete[1])] });
+  const prof = [[0, 1], [0.35, 0.42], [0.55, 0.36], [0.8, 0.52], [1, 0.72]];
+  M.loft(0, 0, prof.map(([f, k]) => [h * 0.03 + (h * 0.97) * f * 0.92, R * k * 0.92, R * k * 0.92]), 16, [GLASS, glass]);
+  const t = Math.max(u * 0.035, R * 0.07);
+  for (let k = 0; k < 16; k++) {
+    const a = k / 16 * TAU, c = Math.cos(a), s = Math.sin(a);
+    for (let i = 0; i < prof.length - 1; i++) {
+      const [f0, k0] = prof[i], [f1, k1] = prof[i + 1];
+      M.strut([c * R * k0, h * 0.03 + (h * 0.97) * f0, s * R * k0], [c * R * k1, h * 0.03 + (h * 0.97) * f1, s * R * k1], t, TRIM, white, i === prof.length - 2);
+    }
+  }
+  return null;
+}
+
 // a container ship moored in a basin: not a file, just the harbour's life. Bow towards +x.
 export function shipGeometry({ len, beam, seed = 1 }) {
   const M = new Builder(), rng = mulberry32(seed * 2654435761 + 7);
@@ -1658,7 +1735,8 @@ export function shipGeometry({ len, beam, seed = 1 }) {
 const BUILDERS = { slab: buildSlab, tower: buildTower, setback: buildSetback, podium: buildPodium, house: buildHouse, shed: buildShed, plant: buildPlant, hall: buildHall, frame: buildFrame,
   cityhall: buildCityhall, courthouse: buildCourthouse, clocktower: buildClocktower, port: buildPort, airport: buildAirport, ruin: buildRuin, site: buildSite, mega: buildMega,
   containers: buildContainers, tanks: buildTanks, warehouse: buildWarehouse, lighthouse: buildLighthouse,
-  college: buildCollege, chapel: buildChapel, library: buildLibrary };
+  college: buildCollege, chapel: buildChapel, library: buildLibrary,
+  pilotis: buildPilotis, congress: buildCongress, cathedral: buildCathedral };
 
 const FLAT = { old: 'flat', mid: 'flat', new: 'flat' };
 const DEFAULT_ROOF = {
@@ -1674,6 +1752,7 @@ const DEFAULT_ROOF = {
   cityhall: FLAT, courthouse: FLAT, clocktower: FLAT, port: FLAT, airport: FLAT, ruin: FLAT, site: FLAT, mega: FLAT,
   containers: FLAT, tanks: FLAT, warehouse: FLAT, lighthouse: FLAT,
   college: FLAT, chapel: FLAT, library: FLAT,
+  pilotis: FLAT, congress: FLAT, cathedral: FLAT,
 };
 // landmarks that ignore the era: a ruin is always weathered, a building site is always raw
 const FORCE_ERA = { ruin: 'old', site: 'mid' };

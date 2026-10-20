@@ -34,6 +34,7 @@ export function buildingSpecs({ files, B, inDeg, unit, kind, t01 }) {
   const locs = files.map(f => f.loc).sort((a, b) => a - b), medLoc = locs[N >> 1] || 1;
   const maxIn = Math.max(...inDeg);
   const crowdLoc = N > 6000 ? locs[Math.floor(N * 0.8)] : 0;
+  const entry = outDeg.indexOf(Math.max(...outDeg));
   // the city's own vernacular (for manifests, docs and other non-code buildings): its biggest language
   const byLang = {};
   for (const f of files) if (CODE.has(f.lang)) byLang[f.lang] = (byLang[f.lang] || 0) + f.loc;
@@ -102,9 +103,11 @@ export function buildingSpecs({ files, B, inDeg, unit, kind, t01 }) {
     const hub = inDeg[i] === maxIn && maxIn > 0;
     const status = new Set(f.s || []);
     if (status.has('giant') && role === 'source') form = 'mega';
-    else if (hub) form = town ? 'clocktower' : kind === 'port' ? 'lighthouse' : kind === 'university' ? 'library' : (a.c || 0) >= 2 ? 'setback' : 'tower';
+    else if (hub) form = town ? 'clocktower' : kind === 'port' ? 'lighthouse' : kind === 'university' ? 'library' : kind === 'capital' ? 'congress' : (a.c || 0) >= 2 ? 'setback' : 'tower';
+    else if (kind === 'capital' && i === entry) form = 'cathedral'; // the file that imports the most: where the plan is read from
     else if (status.has('dead')) form = 'ruin';
     else if (sites.has(i)) form = 'site';
+    if (kind === 'capital' && ['slab', 'tower', 'setback', 'podium', 'house', 'hall', 'frame', 'mega'].includes(form)) form = 'pilotis';
     const era = town && hub ? 'old' : bornRank[i] < 0.34 ? 'old' : bornRank[i] < 0.67 ? 'mid' : 'new';
     const LOW = { house: 1.1, shed: 1.4, hall: 1.4, plant: 1.4, cityhall: 1.8, courthouse: 1.4, port: 0.6, airport: 0.9, containers: 0.5, tanks: 0.7, warehouse: 0.8 };
     let h = LOW[form] ? Math.min(b.h, unit * LOW[form]) : b.h;
@@ -112,6 +115,7 @@ export function buildingSpecs({ files, B, inDeg, unit, kind, t01 }) {
     if (form === 'lighthouse') h = Math.max(b.h, unit * 3);
     if (form === 'chapel') h = Math.max(b.h, unit * 1.7);
     if (form === 'library') h = Math.max(b.h, unit * 2.4);
+    if (form === 'cathedral') h = Math.max(b.h * 0.8, unit * 1.3);
     if (form === 'ruin') h *= 0.6;
     if (form === 'site') h *= 0.35;
     return {
