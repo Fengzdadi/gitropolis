@@ -190,7 +190,9 @@ export function buildStudio(ctx) {
   // pixel style: streets come from a distance field over the blocks; asphalt only where streets are
   const streets = S.pixel && layout ? timed('streets (distance field)', () => buildStreets({ layout, B, files, inDeg, SIZE, t01 })) : null;
   // only what the street shader needs: copying the whole object would keep the routing closures (and the big field arrays they hold) alive
-  const street = streets && { texture: streets.texture, min: streets.min, size: streets.size, maxHalf: streets.maxHalf, asphalt: new THREE.Color(S.road), grass: new THREE.Color(S.land), mark: new THREE.Color('#e0d7b8') };
+  // a campus has footpaths, not roads: paved stone, no centre line
+  const pathC = layout?.paths ? new THREE.Color(S.plaza) : null;
+  const street = streets && { texture: streets.texture, min: streets.min, size: streets.size, maxHalf: streets.maxHalf, asphalt: pathC || new THREE.Color(S.road), grass: new THREE.Color(S.land), mark: pathC || new THREE.Color('#e0d7b8') };
   if (S.pixel && layout) addGroundDetail(groundMat, layout.ground === 'water' ? 'water' : 'street', { shared, street });
   const ground = new THREE.Mesh(new THREE.PlaneGeometry(SIZE * 14, SIZE * 14).rotateX(-Math.PI / 2), groundMat);
   ground.receiveShadow = true;
@@ -200,6 +202,7 @@ export function buildStudio(ctx) {
   if (layout) timed('terrain', () => buildTerrain(scene, layout, S, plateStep, shared, street));
   // traffic: lanes round every block, busier where the block's files import and are imported a lot
   // Venice has no cars, only boats
+  if (streets && layout.paths) { streets.lanes = []; streets.boats = []; } // footpaths: no traffic
   if (streets && layout.kind === 'venice') { streets.lanes = []; streets.boats = [...streets.boats, ...streets.boats.map(b => ({ ...b, pts: [...b.pts].reverse() }))]; }
   const traffic = streets ? timed('traffic', () => buildTraffic({ streets, unit: layout.unit })) : null;
   if (traffic) scene.add(traffic.mesh);

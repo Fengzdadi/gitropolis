@@ -8,6 +8,8 @@ const PERIPHERY = /(^|\/)(tests?|__tests__|specs?|e2e|fixtures?|samples?|example
 const ROOF_BY_CITY = { port: 'flat', paris: 'mansard', smalltown: 'gable', la: 'flat', venice: 'hip', barcelona: 'flat' };
 // each language builds in its own vernacular
 // kinds of infrastructure as code → port industry (Terraform is decided by size: plant or factory)
+// kinds of page → campus buildings
+const PAGE_FORM = { guide: 'college', page: 'college', i18n: 'college', index: 'chapel', api: 'hall', blog: 'house' };
 const INFRA_FORM = { k8s: 'containers', yaml: 'containers', chart: 'warehouse', values: 'warehouse', kustomize: 'warehouse', ansible: 'warehouse', jsonnet: 'tanks', nix: 'tanks', tmpl: 'shed' };
 const STYLE_BY_LANG = { rs: 'rust', c: 'c', cpp: 'cpp', go: 'go', py: 'python', js: 'js', ts: 'ts', java: 'java', kt: 'java', rb: 'ruby', php: 'php', sh: 'shell' };
 const CODE = new Set(Object.keys(STYLE_BY_LANG));
@@ -31,6 +33,7 @@ export function buildingSpecs({ files, B, inDeg, unit, kind, t01 }) {
   const cranes = top(recentChurn, 0.015, 5);
   const locs = files.map(f => f.loc).sort((a, b) => a - b), medLoc = locs[N >> 1] || 1;
   const maxIn = Math.max(...inDeg);
+  const crowdLoc = N > 6000 ? locs[Math.floor(N * 0.8)] : 0;
   // the city's own vernacular (for manifests, docs and other non-code buildings): its biggest language
   const byLang = {};
   for (const f of files) if (CODE.has(f.lang)) byLang[f.lang] = (byLang[f.lang] || 0) + f.loc;
@@ -61,11 +64,12 @@ export function buildingSpecs({ files, B, inDeg, unit, kind, t01 }) {
 
   return files.map((f, i) => {
     const b = B[i], a = f.a || {};
-    let role = a.r || (f.lang === 'cfg' ? 'manifest' : 'source');
+    let role = a.r || (f.lang === 'cfg' ? 'manifest' : 'source'), pageKind = a.k;
     const nested = PERIPHERY.test(f.p) || f.p.split('/').length > 3;
     // only a project's (or a package's) own manifests and lockfiles are infrastructure; the hundreds inside fixtures are sheds
     if ((role === 'manifest' || role === 'lock') && nested) role = 'config';
     if ((role === 'readme' || role === 'license' || role === 'changelog') && nested) role = 'docs';
+    if (kind === 'university' && f.lang === 'doc' && f.p.includes('/')) role = 'page', pageKind = 'index'; // a chapter's README is its contents page
     if (role === 'deploy' && i !== deploys[0]) role = 'build';
     const slender = b.h > 2.4 * Math.min(b.w, b.d);
     let form;
@@ -81,6 +85,9 @@ export function buildingSpecs({ files, B, inDeg, unit, kind, t01 }) {
       case 'types': form = 'frame'; break;
       case 'test': case 'docs': form = 'house'; break;
       // infrastructure is the port's industry: what a file describes decides what stands on the quay
+      // prose is the university's fabric: chapters are colleges, contents pages are chapels
+      // (a huge campus, like a 40,000-page wiki, keeps colleges for its longer pages: the rest are row houses)
+      case 'page': form = f.loc < medLoc * 0.3 || f.loc < crowdLoc ? 'house' : PAGE_FORM[pageKind] || 'college'; break;
       case 'infra': form = INFRA_FORM[a.k] || 'containers';
         if (a.k === 'tf') form = f.loc > medLoc * 2 ? 'plant' : 'shed';
         break;
@@ -95,7 +102,7 @@ export function buildingSpecs({ files, B, inDeg, unit, kind, t01 }) {
     const hub = inDeg[i] === maxIn && maxIn > 0;
     const status = new Set(f.s || []);
     if (status.has('giant') && role === 'source') form = 'mega';
-    else if (hub) form = town ? 'clocktower' : kind === 'port' ? 'lighthouse' : (a.c || 0) >= 2 ? 'setback' : 'tower';
+    else if (hub) form = town ? 'clocktower' : kind === 'port' ? 'lighthouse' : kind === 'university' ? 'library' : (a.c || 0) >= 2 ? 'setback' : 'tower';
     else if (status.has('dead')) form = 'ruin';
     else if (sites.has(i)) form = 'site';
     const era = town && hub ? 'old' : bornRank[i] < 0.34 ? 'old' : bornRank[i] < 0.67 ? 'mid' : 'new';
@@ -103,12 +110,15 @@ export function buildingSpecs({ files, B, inDeg, unit, kind, t01 }) {
     let h = LOW[form] ? Math.min(b.h, unit * LOW[form]) : b.h;
     if (form === 'clocktower') h = Math.max(b.h, unit * 2.6);
     if (form === 'lighthouse') h = Math.max(b.h, unit * 3);
+    if (form === 'chapel') h = Math.max(b.h, unit * 1.7);
+    if (form === 'library') h = Math.max(b.h, unit * 2.4);
     if (form === 'ruin') h *= 0.6;
     if (form === 'site') h *= 0.35;
     return {
       w: b.w, d: b.d, h, form, era, seed: i * 7919 + 13, cu: unit * 0.13,
       // a small town's clock tower is old stone whatever the code is written in
-      style: town && hub ? 'default' : STYLE_BY_LANG[f.lang] || cityStyle,
+      // prose has no vernacular: the campus is built in plain collegiate stone and brick
+      style: (town && hub) || role === 'page' || form === 'library' ? 'default' : STYLE_BY_LANG[f.lang] || cityStyle,
       tiers: Math.min(4, Math.max(2, a.c || 3)),
       roof: form === 'house' ? (ROOF_BY_CITY[kind] === 'mansard' ? 'mansard' : town && (i * 2654435761 >>> 0) % 3 === 0 ? 'hip' : 'gable') : form === 'shed' && kind === 'port' ? 'hip' : ROOF_BY_CITY[kind], // port sheds are saw-tooth factories
       tint: (() => {

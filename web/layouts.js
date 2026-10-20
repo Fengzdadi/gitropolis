@@ -22,7 +22,7 @@ function shortLabel(t) {
   return s.length > 22 ? s.slice(0, 21) + '…' : s;
 }
 
-export const CITY_KINDS = ['port', 'smalltown', 'manhattan', 'hongkong', 'tokyo', 'la', 'paris', 'venice', 'barcelona'];
+export const CITY_KINDS = ['university', 'port', 'smalltown', 'manhattan', 'hongkong', 'tokyo', 'la', 'paris', 'venice', 'barcelona'];
 
 // ---------------------------------------------------------------- shared helpers
 
@@ -432,6 +432,69 @@ const PLANNERS = {
     };
   },
 
+  // a university: every directory is a quadrangle, buildings round a lawn courtyard, footpaths between
+  // the quads, and the most-linked page (the table of contents, usually) as the library on the main square
+  university(ds, ctx) {
+    const S = 4.6, ST = 1.1, RD = 0.95, IN = 0.25;
+    const SIDE = S - 2 * IN;
+    const cap = (SIDE * 4 - RD * 4) * RD * 0.92;
+    const groups = [];
+    for (const d of ds) {
+      const byDir = new Map();
+      for (const it of d.items) if (it.i !== ctx.hub) { const key = d.name + '/' + it.dir; if (!byDir.has(key)) byDir.set(key, []); byDir.get(key).push(it); }
+      let cur = [], used = 0;
+      const flush = () => { if (cur.length) groups.push({ d, items: cur }); cur = []; used = 0; };
+      for (const items of byDir.values()) {
+        const tot = sum(items.map(it => it.a));
+        if (tot >= cap * 0.6) { flush(); for (const c of chunk(items, cap)) groups.push({ d, items: c }); continue; }
+        if (used + tot > cap) flush();
+        cur.push(...items); used += tot;
+      }
+      flush();
+    }
+    const K = groups.length + 1;
+    const C = Math.ceil(Math.sqrt(K * 1.3)), R = Math.ceil(K / C);
+    const center = Math.floor(R / 2) * C + Math.floor(C / 2);
+    const lots = [], blocks = [], labels = [], seen = new Set();
+    let g = 0;
+    for (let cell = 0; cell < C * R && g <= groups.length; cell++) {
+      const x0 = (cell % C) * (S + ST), z0 = Math.floor(cell / C) * (S + ST);
+      if (cell === center) { // the main square: the library on a paved court
+        blocks.push({ poly: rectPoly(x0, z0, x0 + S, z0 + S), type: 'plaza' });
+        lots.push({ i: ctx.hub, x: x0 + S / 2, z: z0 + S / 2, w: 2.2, d: 2.2, rot: 0 });
+        continue;
+      }
+      if (g >= groups.length) break;
+      const { d, items } = groups[g++];
+      blocks.push({ poly: rectPoly(x0, z0, x0 + S, z0 + S), type: 'lawn' });
+      // ranges along the four sides; corners belong to the north and south ranges. Buildings are never
+      // rotated (their windows face the camera); the east and west ranges just swap width and depth.
+      const sides = [
+        { x: x0 + IN, z: z0 + IN, dx: 1, dz: 0, len: SIDE },                  // north
+        { x: x0 + S - IN - RD, z: z0 + IN + RD, dx: 0, dz: 1, len: SIDE - 2 * RD }, // east
+        { x: x0 + IN, z: z0 + S - IN - RD, dx: 1, dz: 0, len: SIDE },          // south
+        { x: x0 + IN, z: z0 + IN + RD, dx: 0, dz: 1, len: SIDE - 2 * RD },     // west
+      ];
+      let s = 0, along = 0;
+      for (const it of items) {
+        let w = clamp(it.a / RD, 0.5, sides[s].len);
+        if (along + w > sides[s].len + 1e-6 && s < 3) { s++; along = 0; w = clamp(it.a / RD, 0.5, sides[s].len); }
+        w = Math.min(w, Math.max(0.3, sides[s].len - along));
+        const sd = sides[s], c = along + w / 2;
+        lots.push(sd.dx ? { i: it.i, x: sd.x + c, z: sd.z + RD / 2, w: w * 0.94, d: RD * 0.9, rot: 0 }
+          : { i: it.i, x: sd.x + RD / 2, z: sd.z + c, w: RD * 0.9, d: w * 0.94, rot: 0 });
+        along += w;
+      }
+      if (!seen.has(d) && d.name !== '·') { seen.add(d); labels.push({ text: d.name, x: x0 + S / 2, z: z0 + S + ST / 2 }); }
+    }
+    const W = C * (S + ST), H = R * (S + ST);
+    return {
+      lots, blocks, labels, paths: true, ground: 'land', land: [rectPoly(-ST, -ST, W, H)],
+      camera: { az: 45, el: 38, dist: 1.0 },
+      height: (i, rel) => i === ctx.hub ? 3.4 : Math.min(0.85 + 0.3 * Math.pow(rel, 0.4), 1.7),
+    };
+  },
+
   // a harbour: every infrastructure directory is a pier reaching into the water, basins between them
   // for the ships, a quay road along the shore, any application code in the town behind it, and the
   // most-depended-on file as a lighthouse at the end of the breakwater
@@ -649,6 +712,7 @@ export function buildLayout(kind, { files, inDeg, SIZE, frontAz }) {
     bridges: (L.bridges || []).map(b => ({ a: P(b.a), b: P(b.b), w: b.w * s })),
     roads: (L.roads || []).map(r => ({ a: P(r.a), b: P(r.b), w: r.w * s })),
     hills: (L.hills || []).map(h => ({ x: (h.x - mx) * s, z: (h.z - mz) * s, r: h.r * s, h: h.h * s })),
+    paths: !!L.paths,
     ships: (L.ships || []).map(sh => ({ ...sh, x: (sh.x - mx) * s, z: (sh.z - mz) * s, len: sh.len * s, beam: sh.beam * s })),
     labels: L.labels.map(l => ({ text: shortLabel(l.text), weight: areaOf.get(l.text.replace(' (downtown)', '')) || 0, x: (l.x - mx) * s, z: (l.z - mz) * s }))
       .sort((a, b) => b.weight - a.weight),

@@ -16,7 +16,13 @@ const LANGS = {
   // infrastructure as code: only kept when it's a real part of the repo (see INFRA_MIN)
   tf: 'hcl', tfvars: 'hcl', hcl: 'hcl', bicep: 'hcl', yaml: 'yaml', yml: 'yaml',
   jsonnet: 'jsonnet', libsonnet: 'jsonnet', nix: 'nix', j2: 'tmpl', tpl: 'tmpl',
+  // prose: documentation pages, books, guides (only kept in repos that are mostly prose, see PROSE_MIN)
+  md: 'md', mdx: 'md', markdown: 'md', rst: 'md', adoc: 'md',
 };
+export const PROSE = new Set(['md']);
+// a docs site or a book: its pages are the city (a university town). Ordinary repos' docs/ folders
+// stay out, so their cities don't change.
+const PROSE_MIN = 0.4;
 export const INFRA = new Set(['hcl', 'yaml', 'jsonnet', 'nix', 'tmpl']);
 // a repo keeps its infrastructure files as buildings when they're at least this share of its lines
 // (ordinary repos sit near 0%: a few CI and config YAMLs, which stay out of the city as before).
@@ -77,7 +83,9 @@ export async function scanRepo(repo, { maxCommits = 20000 } = {}) {
     else if (LINKED.has(lang) && text.includes('.')) for (const m of text.matchAll(STR_REF)) refs.add(stemOf(m[1]));
     if (!loc) for (const line of text.split('\n')) if (line.trim()) loc++;
     if (!loc) continue;
-    const a = INFRA.has(lang) ? { c: 0, f: 0, lf: 0, x: 0, r: 'infra', k: infraKind(p, text, lang) } : fileAnatomy(p, text, lang);
+    const a = INFRA.has(lang) ? { c: 0, f: 0, lf: 0, x: 0, r: 'infra', k: infraKind(p, text, lang) }
+      : PROSE.has(lang) ? { c: (text.match(/^#{1,3} /gm) || []).length, f: 0, lf: 0, x: 0, r: 'page', k: pageKind(p) }
+      : fileAnatomy(p, text, lang);
     files.push({ p, lang, loc, a, text, imp: new Set(), churn: 0, born: 0, last: 0 });
   }
   {
@@ -87,6 +95,11 @@ export async function scanRepo(repo, { maxCommits = 20000 } = {}) {
     }
     if (infraN < 8 || infraLoc / Math.max(1, infraLoc + codeLoc) < INFRA_MIN) {
       for (let k = files.length - 1; k >= 0; k--) if (INFRA.has(files[k].lang)) files.splice(k, 1);
+    }
+    let proseLoc = 0, proseN = 0;
+    for (const f of files) if (PROSE.has(f.lang) && !INFRA_FIXTURE.test(f.p.replace(/(^|\/)docs?\//, '$1'))) { proseLoc += f.loc; proseN++; }
+    if (proseN < 10 || proseLoc / Math.max(1, proseLoc + codeLoc + infraLoc) < PROSE_MIN) {
+      for (let k = files.length - 1; k >= 0; k--) if (PROSE.has(files[k].lang)) files.splice(k, 1);
     }
   }
   files.forEach((f, i) => index.set(f.p, i));
@@ -230,7 +243,8 @@ function resolveImports(root, files, index, listed) {
   const addEdge = (f, target) => {
     const j = index.get(target);
     // manifests are buildings but never import targets (`import pkg from './package.json'`)
-    if (j !== undefined && files[j] !== f && !NONCODE.has(files[j].lang)) f.imp.add(j);
+    // (in a book or docs site a chapter's README is a page like any other, so it can be linked to)
+    if (j !== undefined && files[j] !== f && (!NONCODE.has(files[j].lang) || (files[j].lang === 'doc' && proseSuffix.size && target.includes('/')))) f.imp.add(j);
   };
 
   // python module index: dotted path -> idx, also with a leading "src/" or package root stripped
@@ -263,6 +277,13 @@ function resolveImports(root, files, index, listed) {
     const segs = p.split('/');
     for (let k = 1; k <= Math.min(3, segs.length); k++) { const key = segs.slice(-k).join('/'); if (!infraByDir.suffix.has(key)) infraByDir.suffix.set(key, p); }
   }
+  // prose: "guide/intro.md" → path, for site-absolute links like (/guide/intro)
+  const proseSuffix = new Map();
+  for (const f of files) if (PROSE.has(f.lang) || f.lang === 'doc') {
+    const segs = f.p.replace(/\.(md|mdx|markdown|rst|adoc)$/i, '').split('/');
+    for (let k = 1; k <= Math.min(3, segs.length); k++) { const key = segs.slice(-k).join('/'); if (!proseSuffix.has(key)) proseSuffix.set(key, f.p); }
+  }
+  if (!files.some(f => PROSE.has(f.lang))) proseSuffix.clear();
   let goModule = '';
   try { goModule = /^module\s+(\S+)/m.exec(readFileSync(path.join(root, 'go.mod'), 'utf8'))[1]; } catch { }
 
@@ -369,6 +390,8 @@ function resolveImports(root, files, index, listed) {
       }
     } else if (INFRA.has(f.lang)) {
       linkInfra(f, dir, text, index, infraByDir, addEdge);
+    } else if (PROSE.has(f.lang) || (f.lang === 'doc' && proseSuffix.size)) {
+      linkPages(f, dir, text, index, proseSuffix, addEdge);
     }
     f.text = null;
   }
@@ -443,5 +466,41 @@ function linkInfra(f, dir, text, index, byDir, addEdge) {
         for (const ext of ['yml', 'yaml']) { const t = `${root}${m[1]}/tasks/main.${ext}`; if (index.has(t)) addEdge(f, t); }
       }
     }
+  }
+}
+
+// ---------------------------------------------------------------- prose
+// what kind of page this is: it decides which campus building it gets
+const LOCALE = /^(zh|ja|ko|fr|de|es|pt|ru|it|tr|uk|vi|id|pl|nl|ar|fa|he|hi|th|cs|sv|da|fi|no|nb|hu|ro|bn|ta|ms)([-_][a-zA-Z]{2,4})?$/;
+function pageKind(p) {
+  const segs = p.toLowerCase().split('/');
+  const base = segs[segs.length - 1].replace(/\.[^.]+$/, '');
+  // translations: zh/, pt-br/, i18n/, or tldr-style pages.zh/
+  const locale = s => LOCALE.test(s) || /^(i18n|translations?|locales?)$/.test(s) || (/^[a-z]+\.[a-z]{2}([_-][a-zA-Z]{2,4})?$/.test(s) && LOCALE.test(s.slice(s.indexOf('.') + 1)));
+  if (segs.slice(0, -1).some(locale)) return 'i18n';
+  if (/^(index|_index|summary|toc|contents|sidebar)$/.test(base)) return 'index';
+  if (segs.some(s => /^(api|reference|references|ref|apis)$/.test(s))) return 'api';
+  if (segs.some(s => /^(blog|posts?|news|releases?|changelogs?)$/.test(s))) return 'blog';
+  if (segs.some(s => /^(guide|guides|tutorials?|learn|chapters?|lessons?|book|src|getting-started|handbook)$/.test(s)) || /^ch\d|chapter/.test(base)) return 'guide';
+  return 'page';
+}
+
+const MD_LINK = /\]\(\s*<?([^)\s>#?]+)/g;
+function linkPages(f, dir, text, index, suffix, addEdge) {
+  for (const m of text.matchAll(MD_LINK)) {
+    const href = m[1];
+    if (/^[a-z]+:/i.test(href) || /\.(png|jpe?g|gif|svg|webp|pdf|zip)$/i.test(href)) continue;
+    const bare = href.replace(/\.(md|mdx|markdown|rst|adoc|html)$/i, '').replace(/\/$/, '');
+    const rel = path.posix.normalize(path.posix.join(dir, bare));
+    let hit = null;
+    if (!href.startsWith('/')) for (const c of [href, rel + '.md', rel + '.mdx', rel + '/index.md', rel + '/README.md', rel + '.rst']) {
+      const q = c === href ? path.posix.normalize(path.posix.join(dir, href)) : c;
+      if (index.has(q)) { hit = q; break; }
+    }
+    if (!hit) {
+      const segs = bare.split('/').filter(s => s && s !== '.' && s !== '..');
+      for (let k = Math.min(3, segs.length); k > 0 && !hit; k--) hit = suffix.get(segs.slice(-k).join('/')) || suffix.get([...segs.slice(-k), 'index'].join('/')) || null;
+    }
+    if (hit && hit !== f.p) addEdge(f, hit);
   }
 }

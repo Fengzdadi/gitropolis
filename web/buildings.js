@@ -39,7 +39,8 @@ export const PALETTE = {
 export const BASE_FORMS = ['slab', 'tower', 'setback', 'podium', 'house', 'shed', 'plant', 'hall', 'frame'];
 export const LANDMARKS = ['cityhall', 'courthouse', 'clocktower', 'port', 'airport', 'ruin', 'site', 'mega'];
 export const INDUSTRY = ['containers', 'tanks', 'warehouse', 'lighthouse']; // the port city
-export const FORMS = [...BASE_FORMS, ...LANDMARKS, ...INDUSTRY];
+export const CAMPUS = ['college', 'chapel', 'library']; // the university town
+export const FORMS = [...BASE_FORMS, ...LANDMARKS, ...INDUSTRY, ...CAMPUS];
 export const STYLES = ['rust', 'c', 'cpp', 'go', 'python', 'js', 'ts', 'java', 'ruby', 'php', 'shell', 'default'];
 export const ERAS = ['old', 'mid', 'new'];
 export const ROOFS = ['flat', 'gable', 'hip', 'mansard', 'spire', 'dome'];
@@ -1529,6 +1530,98 @@ function buildLighthouse(M, S) {
   return null;
 }
 
+// ------------------------------------------------------------ the university town
+// Built along local x (the long side is x), so a quad can lay them on any side without rotating
+// them: windows stay on the faces the camera sees.
+
+// college range: walls, two or three floors of tall windows, a steep slate roof with chimneys,
+// and on the longer ones a gate tower in the middle
+function buildCollege(M, S) {
+  const { w, d, h, u } = S, rng = S.rng;
+  S.nb = 2; S.pitch = S.slate; // collegiate slate, whatever the era
+  const alongX = w >= d, L = alongX ? w : d, W = alongX ? d : w;
+  const rise = Math.min(W * 0.6, h * 0.45), wallH = h - rise;
+  const b = block(M, S, { cx: 0, cz: 0, w, d, y0: 0, y1: wallH, last: true });
+  const floors = clamp(Math.round(wallH / (u * 0.45)), 1, 3);
+  lwin(M, S, rectG(0, 0, w, d), wallH * 0.1, wallH * 0.92, floors, { maxC: 6, bay: u * 0.32, ww: 0.32, wh: 0.72 });
+  roofOn(M, S, { cx: 0, cz: 0, w, d, y: wallH, ex: b.ex, flat: true }, 'gable', rise, alongX ? 'x' : 'z');
+  const cr = u * 0.07;
+  for (const k of [-0.32, 0.32]) { // chimney stacks on the ridge
+    const x = alongX ? L * k : 0, z = alongX ? 0 : L * k;
+    M.box(x - cr, x + cr, wallH + rise * 0.5, h + u * 0.12, z - cr, z + cr, [WALL, S.wall], [TRIM, S.dark]);
+  }
+  if (L > W * 2.6 && rng() < 0.6) { // gate tower
+    const tw = W * 0.62, th = h + u * 0.35;
+    const t = block(M, S, { cx: 0, cz: 0, w: alongX ? tw : W * 1.08, d: alongX ? W * 1.08 : tw, y0: 0, y1: th, last: true });
+    for (const sx of [-1, 1]) for (const sz of [-1, 1]) { // corner turrets
+      const x = sx * (alongX ? tw : W * 1.08) / 2, z = sz * (alongX ? W * 1.08 : tw) / 2, r = u * 0.06;
+      M.box(x - r, x + r, th, th + u * 0.1, z - r, z + r, [TRIM, S.trim], [TRIM, S.trim]);
+    }
+    put(M, rectG(0, 0, alongX ? tw : W * 1.08, alongX ? W * 1.08 : tw), alongX ? 0 : 1, -tw * 0.18, tw * 0.18, 0, wallH * 0.45, Math.max(u * 0.015, 0.004), TRIM, S.dark); // archway
+    void t;
+  }
+  return null;
+}
+
+// chapel: a tall narrow nave between buttresses, pointed windows, a spired tower at the west end
+function buildChapel(M, S) {
+  const { w, d, h, u } = S;
+  S.nb = 2; S.pitch = S.slate;
+  const alongX = w >= d, L = alongX ? w : d, W = alongX ? d : w;
+  const nh = h * 0.42, rise = Math.min(W * 0.75, h * 0.25), tw = Math.min(W * 0.95, L * 0.3);
+  const ax = v => alongX ? [v, 0] : [0, v];
+  const [nx, nz] = ax(tw / 2);
+  const nw = alongX ? L - tw : W, nd = alongX ? W : L - tw;
+  const nb = block(M, S, { cx: nx, cz: nz, w: nw, d: nd, y0: 0, y1: nh, last: true, fins: false });
+  lwin(M, S, rectG(nx, nz, nw, nd), nh * 0.15, nh * 0.9, 1, { maxC: 5, bay: u * 0.3, ww: 0.28, wh: 0.9, col: rgb(S.P.glass[0]) });
+  roofOn(M, S, { cx: nx, cz: nz, w: nw, d: nd, y: nh, ex: nb.ex, flat: true }, 'gable', rise, alongX ? 'x' : 'z');
+  const n = clamp(Math.round((L - tw) / (u * 0.35)), 2, 6), bt = u * 0.06;
+  for (let i = 0; i <= n; i++) { // buttresses on the side the camera sees
+    const a = -L / 2 + tw + (L - tw) * i / n;
+    if (alongX) M.box(a - bt, a + bt, 0, nh * 0.8, W / 2, W / 2 + bt * 1.6, [TRIM, S.trim], [TRIM, S.trim], ['nz']);
+    else M.box(W / 2, W / 2 + bt * 1.6, 0, nh * 0.8, a - bt, a + bt, [TRIM, S.trim], [TRIM, S.trim], ['nx']);
+  }
+  const [tx, tz] = ax(-L / 2 + tw / 2), ty = h * 0.7;
+  const tb = block(M, S, { cx: tx, cz: tz, w: tw, d: tw, y0: 0, y1: ty, last: true, fins: false });
+  lwin(M, S, rectG(tx, tz, tw, tw), ty * 0.72, ty * 0.92, 1, { maxC: 1, ww: 0.3, wh: 0.8, col: S.dark, part: TRIM, frame: null });
+  roofOn(M, S, { cx: tx, cz: tz, w: tw, d: tw, y: ty, ex: tb.ex, flat: true }, 'spire', h - ty);
+  return null;
+}
+
+// library: the campus's heart. A columned portico in front of an octagonal reading room under a
+// great dome with a lantern.
+function buildLibrary(M, S) {
+  const { w, d, h, u } = S;
+  S.nb = 3;
+  const stone = S.era === 'new' ? S.solid : rgb(S.P.stone[0]), trim = rgb(S.P.stone[1]);
+  const ph = Math.min(h * 0.06, u * 0.1);
+  M.box(-w / 2, w / 2, 0, ph, -d / 2, d / 2, [POD, S.base], [TRIM, trim]);
+  const R = Math.min(w, d) * 0.4, drum = h * 0.38;
+  M.loft(0, -d * 0.05, [[ph, R, R], [ph + drum, R, R]], 8, [WALL, stone], { rot: Math.PI / 8 });
+  M.loft(0, -d * 0.05, [[ph + drum, R * 1.06, R * 1.06], [ph + drum + h * 0.03, R * 1.06, R * 1.06]], 8, [TRIM, trim], { rot: Math.PI / 8 });
+  // tall windows round the drum, on the faces that show
+  for (let k = 0; k < 8; k++) {
+    const a = Math.PI / 8 + (k + 0.5) * Math.PI / 4, cx = Math.cos(a), cz = Math.sin(a);
+    if (cx + cz < 0.2) continue;
+    const r = R * Math.cos(Math.PI / 8) + 1e-3, x = cx * r, z = -d * 0.05 + cz * r, hw = R * 0.18, tx = -cz * hw, tz = cx * hw;
+    const y0 = ph + drum * 0.25, y1 = ph + drum * 0.85;
+    M.quad([x - tx, y0, z - tz], [x + tx, y0, z + tz], [x + tx, y1, z + tz], [x - tx, y1, z - tz], GLASS, S.win);
+  }
+  const yd = ph + drum + h * 0.03, dome = [];
+  for (let k = 0; k <= 5; k++) { const t = k / 5 * Math.PI / 2; dome.push([yd + Math.sin(t) * R * 0.95, Math.cos(t) * R * 0.98, Math.cos(t) * R * 0.98]); }
+  M.loft(0, -d * 0.05, dome, 12, [ROOF, S.domeC || rgb(S.P.roof[3])]);
+  const lr = R * 0.16, ly = yd + R * 0.95;
+  M.loft(0, -d * 0.05, [[ly - R * 0.05, lr, lr], [ly + h * 0.07, lr, lr]], 6, [TRIM, S.white]);
+  M.loft(0, -d * 0.05, [[ly + h * 0.07, lr * 1.2, lr * 1.2], [Math.max(h, ly + h * 0.12), 0, 0]], 6, [ROOF, S.domeC || rgb(S.P.roof[3])]);
+  // portico: six columns and a pediment on the front (+z)
+  const pw = R * 1.5, zf = d / 2 - u * 0.06, zb = -d * 0.05 + R * 0.85, colH = drum * 0.82, cr = Math.min(pw / 16, u * 0.04);
+  M.box(-pw / 2, pw / 2, ph, ph + colH, zb - R * 0.3, zb, [WALL, stone], [TRIM, trim]);
+  for (let i = 0; i < 6; i++) M.loft(-pw / 2 + cr + (pw - 2 * cr) * i / 5, zf - cr, [[ph, cr, cr], [ph + colH, cr * 0.85, cr * 0.85]], 6, [TRIM, S.white]);
+  M.box(-pw / 2 - cr, pw / 2 + cr, ph + colH, ph + colH + h * 0.04, zb - R * 0.3, zf, [TRIM, trim], [TRIM, trim]);
+  gable(M, 0, (zb - R * 0.3 + zf) / 2, pw + cr * 2, zf - zb + R * 0.3, ph + colH + h * 0.04, Math.min(pw * 0.2, h * 0.1), 0, 'z', S.slate, TRIM, stone);
+  return null;
+}
+
 // a container ship moored in a basin: not a file, just the harbour's life. Bow towards +x.
 export function shipGeometry({ len, beam, seed = 1 }) {
   const M = new Builder(), rng = mulberry32(seed * 2654435761 + 7);
@@ -1564,7 +1657,8 @@ export function shipGeometry({ len, beam, seed = 1 }) {
 
 const BUILDERS = { slab: buildSlab, tower: buildTower, setback: buildSetback, podium: buildPodium, house: buildHouse, shed: buildShed, plant: buildPlant, hall: buildHall, frame: buildFrame,
   cityhall: buildCityhall, courthouse: buildCourthouse, clocktower: buildClocktower, port: buildPort, airport: buildAirport, ruin: buildRuin, site: buildSite, mega: buildMega,
-  containers: buildContainers, tanks: buildTanks, warehouse: buildWarehouse, lighthouse: buildLighthouse };
+  containers: buildContainers, tanks: buildTanks, warehouse: buildWarehouse, lighthouse: buildLighthouse,
+  college: buildCollege, chapel: buildChapel, library: buildLibrary };
 
 const FLAT = { old: 'flat', mid: 'flat', new: 'flat' };
 const DEFAULT_ROOF = {
@@ -1579,6 +1673,7 @@ const DEFAULT_ROOF = {
   frame:   { old: 'flat', mid: 'flat', new: 'flat' },
   cityhall: FLAT, courthouse: FLAT, clocktower: FLAT, port: FLAT, airport: FLAT, ruin: FLAT, site: FLAT, mega: FLAT,
   containers: FLAT, tanks: FLAT, warehouse: FLAT, lighthouse: FLAT,
+  college: FLAT, chapel: FLAT, library: FLAT,
 };
 // landmarks that ignore the era: a ruin is always weathered, a building site is always raw
 const FORCE_ERA = { ruin: 'old', site: 'mid' };
