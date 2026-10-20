@@ -35,6 +35,9 @@ export const INFRA = new Set(['hcl', 'yaml', 'jsonnet', 'nix', 'tmpl']);
 // Test data doesn't count, or a YAML parser's fixtures would make it a port.
 const INFRA_MIN = 0.1;
 const INFRA_FIXTURE = /(^|\/)(tests?|__tests__|specs?|e2e|fixtures?|__fixtures__|testdata|samples?|docs?)(\/|$)/;
+// YAML that is a dictionary of translations (config/locales/fr.yml, i18n/) isn't infrastructure
+const SMARTY = /\{\$\w|\{\/(?:if|foreach|section|block|capture|literal)\}|\{(?:include|extends)\s+file=/;
+const LOCALE_DIR = /(^|\/)(locales?|i18n|l10n|translations?|lang)\//;
 // non-code files that still matter in the city: dependency manifests and build/CI definitions
 const CFG_FILE = /(^|\/)(package\.json|Cargo\.toml|pyproject\.toml|setup\.cfg|go\.mod|Gemfile|pom\.xml|build\.gradle(\.kts)?|requirements[^/]*\.txt|Dockerfile[^/]*|docker-compose[^/]*\.ya?ml|compose\.ya?ml|fly\.toml|vercel\.json|netlify\.toml|Procfile|Makefile|tsconfig[^/]*\.json)$|^\.github\/workflows\/[^/]+\.ya?ml$/;
 const SKIP_DIR = /(^|\/)(node_modules|vendor|third_party|deps|dist|build|out|\.next|target|__pycache__|\.git)\//;
@@ -73,6 +76,7 @@ export async function scanRepo(repo, { maxCommits = 20000 } = {}) {
     const lang = LOCKFILE.test(p) ? 'lock' : CFG_FILE.test(p) ? 'cfg' : docRole(base) ? 'doc'
       : ext === 'ipynb' ? 'nb' : DATA_EXT.test(p) ? 'data' : MODEL_EXT.test(p) && !/(^|\/)(node_modules|tests?)\//.test(p) ? 'model' : LANGS[ext];
     if (!lang || SKIP_DIR.test(p) || SKIP_FILE.test(p)) continue;
+    if (lang === 'yaml' && LOCALE_DIR.test(p)) continue;
     let text, loc = 0;
     try {
       const full = path.join(root, p);
@@ -99,6 +103,9 @@ export async function scanRepo(repo, { maxCommits = 20000 } = {}) {
       } else if (base === 'bun.lockb') { loc = Math.round(size / 40); text = ''; } // binary
       else text = readFileSync(full, 'utf8');
     } catch { continue; }
+    // a .tpl is infrastructure when it's a Helm / Go ({{ .Values.x }}) or Terraform (${x}, %{ if }) template,
+    // not when it's a PHP Smarty page ({$title}, {if $x}…{/if}, {include file=…})
+    if (ext === 'tpl' && !text.includes('{{') && SMARTY.test(text)) continue;
     // manifests, scripts and docs often name entry files (package.json exports, Makefile, README): keep their stems
     // (stems, because exports point at built `x.js` while the source is `x.ts`)
     if (text && (lang === 'cfg' || lang === 'doc')) for (const m of text.matchAll(SRC_REF)) refs.add(stemOf(m[0]));
@@ -130,7 +137,7 @@ export async function scanRepo(repo, { maxCommits = 20000 } = {}) {
   }
   files.forEach((f, i) => index.set(f.p, i));
 
-  const tails = resolveImports(root, files, index, listed);
+  const { tails, jvmUsed } = resolveImports(root, files, index, listed);
 
   // ---- git history: one pass over `git log --numstat`, oldest first, following renames
   // so a file moved into src/ keeps the birthday of its original path.
@@ -174,14 +181,20 @@ export async function scanRepo(repo, { maxCommits = 20000 } = {}) {
   const start = touched.length ? touched[0].t : 0;
   const end = touched.length ? touched[touched.length - 1].t : 0;
   for (const f of files) { if (!f.born) f.born = f.last = start; }
+  // --max-count keeps only the newest commits: when it bit, remember when the repo really began
+  const truncated = commits.length >= maxCommits;
+  let firstCommit = 0;
+  if (truncated) try {
+    for (const t of git(root, ['log', '--max-parents=0', '--format=%ct', 'HEAD']).split('\n')) if (+t && (!firstCommit || +t < firstCommit)) firstCommit = +t;
+  } catch { }
 
-  const status = fileStatus(files, start, end, tails, refs);
+  const status = fileStatus(files, start, end, tails, refs, jvmUsed);
   const edges = files.reduce((n, f) => n + f.imp.size, 0);
   const city = {
     name: path.basename(root),
     scannedAt: Math.floor(Date.now() / 1000),
     scanMs: Date.now() - t0,
-    start, end,
+    start, end, ...(truncated && { truncated, firstCommit }),
     stats: { files: files.length, loc: files.reduce((n, f) => n + f.loc, 0), edges, commits: touched.length },
     files: files.map(f => ({ p: f.p, lang: f.lang, loc: f.loc, imp: [...f.imp], a: f.a, churn: f.churn, born: f.born, last: f.last, ...(status.get(f) && { s: status.get(f) }) })),
     // compact: [time, fileIdx, fileIdx, ...]; skip giant sweeping commits (formatting, renames)
@@ -194,7 +207,7 @@ export async function scanRepo(repo, { maxCommits = 20000 } = {}) {
 
 // Per-file status flags, once history is known. Each is deliberately conservative:
 // a wrong "dead" label on a living file is worse than a missed one.
-function fileStatus(files, start, end, tails, refs) {
+function fileStatus(files, start, end, tails, refs, jvmUsed) {
   const out = new Map();
   const add = (f, s) => { if (!out.has(f)) out.set(f, []); out.get(f).push(s); };
   const inDeg = new Array(files.length).fill(0);
@@ -202,6 +215,10 @@ function fileStatus(files, start, end, tails, refs) {
   // go imports link a whole package (to its biggest file), so a package counts as used if any file in it is
   const goUsed = new Set();
   files.forEach((f, i) => { if (f.lang === 'go' && inDeg[i]) goUsed.add(path.posix.dirname(f.p)); });
+  // java / kotlin: a class used from its own package needs no import (jvmUsed: named by a package-mate),
+  // and kotlin's top-level functions are used without naming the file, so there the Go rule applies too
+  const ktUsed = new Set();
+  files.forEach((f, i) => { if (f.lang === 'kt' && (inDeg[i] || jvmUsed.has(i))) ktUsed.add(path.posix.dirname(f.p)); });
 
   const span = end - start, win = Math.max(span * 0.02, 21 * DAY);
   const code = files.filter(f => !NONCODE.has(f.lang));
@@ -215,6 +232,7 @@ function fileStatus(files, start, end, tails, refs) {
     if (f.a.r === 'source' && LINKED.has(f.lang) && !inDeg[i] && !ENTRY.test(f.p) && !LOOSE.test(f.p) && !refs.has(stem)
         && (f.lang !== 'c' && f.lang !== 'cpp' || f.p.endsWith('.h') || f.p.endsWith('.hpp')) // .c files are compiled, not included
         && !(f.lang === 'go' && goUsed.has(path.posix.dirname(f.p)))
+        && !jvmUsed.has(i) && !(f.lang === 'kt' && ktUsed.has(path.posix.dirname(f.p)))
         && !(tails.has(stem) || tails.has(path.posix.basename(path.posix.dirname(f.p)) + '/' + stem)) // aliased imports (`@/x/foo`) we could not resolve
         && (f.imp.size || f.loc >= 30) && end - f.last > 2 * YEAR) add(f, 'dead');
     if (end - f.born <= win) add(f, 'new');
@@ -252,7 +270,10 @@ function renamePaths(raw) {
 
 // ---------------------------------------------------------------- imports
 
-const JS_RE = /(?:import|export)\s[^'"]*?from\s*['"]([^'"]+)['"]|import\s*\(?\s*['"]([^'"]+)['"]|require\s*\(\s*['"]([^'"]+)['"]/g;
+// (between `import`/`export` and `from` there are only names, braces, commas, `*`, whitespace and comments, never
+// another import or export: the run ends at the next statement, so a 40,000-line file of exports is read
+// once, not once per export; a // comment runs to its line's end, so it can't be split and re-read either)
+const JS_RE = /(?:import|export)\s(?:\/\/[^\n]*(?![^\n])|\/\*[^*]*\*+(?:[^/*][^*]*\*+)*\/|(?!\b(?:import|export)\b)[\w$\s{},*])*?from\s*['"]([^'"]+)['"]|import\s*\(?\s*['"]([^'"]+)['"]|require\s*\(\s*['"]([^'"]+)['"]/g;
 const PY_RE = /^\s*from\s+(\.*[\w.]*)\s+import\s+([\w*, ()]+)|^\s*import\s+([\w.]+(?:\s*,\s*[\w.]+)*)/gm;
 const GO_BLOCK = /import\s*\(([\s\S]*?)\)|import\s+(?:\w+\s+)?"([^"]+)"/g;
 const RS_RE = /^\s*(?:pub(?:\([^)]*\))?\s+)?mod\s+(\w+)\s*;|use\s+(crate|super|self)((?:::\w+)+)/gm;
@@ -294,7 +315,10 @@ function resolveImports(root, files, index, listed) {
     if (j !== undefined && files[j] !== f && (!NONCODE.has(files[j].lang) || (files[j].lang === 'doc' && proseSuffix.size && target.includes('/')))) f.imp.add(j);
   };
 
-  // python module index: dotted path -> idx, also with a leading "src/" or package root stripped
+  // python module index: dotted path -> idx, also by the shorter names it is imported by when it sits
+  // under a directory that isn't itself a package (src/, a scripts folder): pkg/util/logging.py is
+  // pkg.util.logging, never a bare `logging` (that's the standard library)
+  const pyPkgDirs = new Set(listed.filter(p => /(^|\/)__init__\.py$/.test(p)).map(p => path.posix.dirname(p)));
   const pyMods = new Map();
   // go: package dir -> files
   const goDirs = new Map();
@@ -303,6 +327,7 @@ function resolveImports(root, files, index, listed) {
       let m = f.p.replace(/\.py$/, '').replace(/\/__init__$/, '');
       const parts = m.split('/');
       for (let k = 0; k < Math.min(parts.length, 3); k++) {
+        if (k && pyPkgDirs.has(parts.slice(0, k).join('/'))) continue;
         const key = parts.slice(k).join('.');
         if (!pyMods.has(key)) pyMods.set(key, i);
       }
@@ -333,6 +358,15 @@ function resolveImports(root, files, index, listed) {
     if (!jvmPkg.has(pkg)) jvmPkg.set(pkg, []);
     jvmPkg.get(pkg).push(i);
   }
+  // same-package use: which class names each package's files mention (a class needs no import there)
+  const jvmUsed = new Set();
+  for (const ids of jvmPkg.values()) {
+    if (ids.length < 2) continue;
+    const words = ids.map(i => new Set(files[i].text.match(/\b[A-Z][\w$]*/g) || []));
+    const seen = new Map(); // capitalised word → how many of the package's files mention it
+    for (const ws of words) for (const w of ws) seen.set(w, (seen.get(w) || 0) + 1);
+    ids.forEach((i, k) => { const name = stemOf(files[i].p); if ((seen.get(name) || 0) > (words[k].has(name) ? 1 : 0)) jvmUsed.add(i); });
+  }
   // prose: "guide/intro.md" → path, for site-absolute links like (/guide/intro)
   const proseSuffix = new Map();
   for (const f of files) if (PROSE.has(f.lang) || f.lang === 'doc') {
@@ -340,6 +374,7 @@ function resolveImports(root, files, index, listed) {
     for (let k = 1; k <= Math.min(3, segs.length); k++) { const key = segs.slice(-k).join('/'); if (!proseSuffix.has(key)) proseSuffix.set(key, f.p); }
   }
   if (!files.some(f => PROSE.has(f.lang))) proseSuffix.clear();
+  const incDirs = [...new Set(files.filter(f => f.lang === 'c' || f.lang === 'cpp').map(f => f.p.match(/^(.*\/)?include\//)?.[0]).filter(Boolean))].map(d => d.replace(/\/$/, '')).sort();
   let goModule = '';
   try { goModule = /^module\s+(\S+)/m.exec(readFileSync(path.join(root, 'go.mod'), 'utf8'))[1]; } catch { }
 
@@ -424,14 +459,16 @@ function resolveImports(root, files, index, listed) {
         }
         if (!hit) addEdge(f, dir + 'src/lib.rs');
       }
+      // the module a file *is*: src/a/mod.rs and src/a.rs are both `a`, but a.rs's children live in src/a/
+      const own = /(^|\/)(mod|lib|main)\.rs$/.test(f.p) ? dir : f.p.replace(/\.rs$/, '');
       for (const m of text.matchAll(RS_RE)) {
         if (m[1]) {
-          const own = /(^|\/)(mod|lib|main)\.rs$/.test(f.p) ? dir : f.p.replace(/\.rs$/, '');
           const b = (own === '.' ? '' : own + '/') + m[1];
           addEdge(f, b + '.rs'); addEdge(f, b + '/mod.rs');
         } else {
           const segs = m[3].split('::').filter(Boolean);
-          let base = m[2] === 'crate' ? crateRoot.replace(/\/$/, '') : dir;
+          // self:: is this module's own directory, super:: its parent's
+          let base = m[2] === 'crate' ? crateRoot.replace(/\/$/, '') : own;
           if (m[2] === 'super') base = path.posix.dirname(base);
           for (let k = segs.length; k > 0; k--) {
             const b = [base, ...segs.slice(0, k)].filter(x => x && x !== '.').join('/');
@@ -441,8 +478,14 @@ function resolveImports(root, files, index, listed) {
         }
       }
     } else if (f.lang === 'c' || f.lang === 'cpp') {
+      // the include path: the file's own directory, then each directory above it up to the repo root
+      // (-Isrc, -I.), then every include/ directory in the repo
       for (const m of text.matchAll(C_RE)) {
-        addEdge(f, path.posix.normalize(path.posix.join(dir, m[1])));
+        for (let d = dir; ; d = path.posix.dirname(d)) {
+          const q = path.posix.normalize(path.posix.join(d, m[1]));
+          if (index.has(q)) { addEdge(f, q); break; }
+          if (d === '.' || d === '/') { const hit = incDirs.map(inc => path.posix.join(inc, m[1])).find(q => index.has(q)); if (hit) addEdge(f, hit); break; }
+        }
       }
     } else if ((f.lang === 'java' || f.lang === 'kt') && jvmClass.size) {
       for (const m of text.matchAll(JVM_IMPORT)) {
@@ -463,7 +506,7 @@ function resolveImports(root, files, index, listed) {
     }
     f.text = null;
   }
-  return tails;
+  return { tails, jvmUsed };
 }
 
 // ---------------------------------------------------------------- infrastructure as code

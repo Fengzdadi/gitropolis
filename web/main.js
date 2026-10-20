@@ -120,7 +120,11 @@ const inDeg = new Array(N).fill(0);
 // outside a port, infrastructure files never become the city's landmark (a chart's values.yaml isn't downtown)
 const PORT = (params.get('city') || 'auto') === 'auto' ? data.identity?.city === 'port' : params.get('city') === 'port';
 files.forEach(f => f.imp.forEach(j => { if (PORT || files[j].a?.r !== 'infra') inDeg[j]++; }));
-const maxChurn = Math.max(1, ...files.map(f => f.churn));
+// the city's one landmark, for the planner, the architect and the camera alike: the most-imported file
+// (the first of a tie; the first file when nothing imports anything)
+let hub = 0;
+for (let i = 1; i < N; i++) if (inDeg[i] > inDeg[hub]) hub = i;
+const maxChurn = files.reduce((m, f) => Math.max(m, f.churn), 1);
 
 // per-file render info
 const B = files.map(() => ({}));
@@ -143,7 +147,7 @@ for (const l of leaves) {
 // city planners (lit styles only): ?city=auto picks the repo's own archetype, ?city=classic keeps the treemap
 const CITY = params.get('city') || 'auto';
 const cityKind = NEON || CITY === 'classic' ? null : CITY === 'auto' ? data.identity?.city : CITY;
-const layout = cityKind && CITY_KINDS.includes(cityKind) ? timed('layout', () => buildLayout(cityKind, { files, inDeg, SIZE, frontAz: PIXEL ? 45 : undefined })) : null;
+const layout = cityKind && CITY_KINDS.includes(cityKind) ? timed('layout', () => buildLayout(cityKind, { files, inDeg, hub, SIZE, frontAz: PIXEL ? 45 : undefined })) : null;
 if (layout) {
   unit = layout.unit;
   plateStep = unit * 0.06;
@@ -210,7 +214,7 @@ function planCamera({ az, el, dist, target }) {
   // pixel art keeps the classic 2:1 isometric angle for every city; the city's framing becomes zoom
   if (PIXEL) {
     camera.zoom = 0.9 / dist * ZOOM; camera.updateProjectionMatrix(); az = 45; el = 30;
-    if (ZOOM > 1.5) { const h = B[inDeg.indexOf(Math.max(...inDeg))]; target = [h.x, h.z]; }
+    if (ZOOM > 1.5) { const h = B[hub]; target = [h.x, h.z]; }
   }
   const A = THREE.MathUtils.degToRad(az), E = THREE.MathUtils.degToRad(el);
   const t = new THREE.Vector3(target[0], unit * 0.5, target[1]);
@@ -285,7 +289,7 @@ if (NEON) {
 // ---- district plates (one instanced mesh)
 const districts = [];
 root.each(n => { if (n.depth >= 1 && n.children) districts.push(n); });
-for (const n of districts) n.born = Math.min(...n.leaves().map(l => l.data.i !== undefined ? B[l.data.i].born : 1));
+for (const n of districts) n.born = n.leaves().reduce((m, l) => Math.min(m, l.data.i !== undefined ? B[l.data.i].born : 1), Infinity);
 if (NEON) {
   const geo = new THREE.BoxGeometry(1, 1, 1).translate(0, 0.5, 0);
   const hue = new Float32Array(districts.length * 3);
@@ -334,7 +338,7 @@ if (NEON) {
 const heat = new Float32Array(N);
 const focusAttr = new Float32Array(N).fill(1);
 const studio = NEON ? null : timed('studio (all)', () => buildStudio({ name: STYLE, scene, renderer, B, files, districts, unit, SIZE, plateStep, cx, cz,
-  shared, heat, focusAttr, inDeg, t01, layout }));
+  shared, heat, focusAttr, inDeg, hub, t01, layout }));
 if (studio) {
   document.body.classList.add('studio', `style-${STYLE}`);
   if (studio.style.uiFont) document.body.style.setProperty('--ui-font', studio.style.uiFont);
@@ -838,10 +842,18 @@ function report(url, body) { return fetch(url, { method: 'POST', body }); }
 async function record() {
   document.body.classList.add('recording');
   controls.enabled = false;
-  await document.fonts.ready;
+  // the web fonts are optional: offline their stylesheet may never arrive, and while it's pending
+  // document.fonts.ready doesn't resolve either. Give them a few seconds, then draw with what there is.
+  const sheet = document.getElementById('webfonts');
+  await Promise.race([
+    (async () => {
+      if (sheet && !sheet.dataset.done) await new Promise(r => { sheet.addEventListener('load', r); sheet.addEventListener('error', r); });
+      await document.fonts.ready;
+    })(),
+    new Promise(r => setTimeout(r, 5000)),
+  ]);
 
   // the landmark the film ends on: the most imported file (the city's CBD)
-  const hub = inDeg.indexOf(Math.max(...inDeg));
   const hb = B[hub];
   const hubPos = new THREE.Vector3(hb.x, hb.y + hb.h * 0.5, hb.z);
   const R = camera.position.length();

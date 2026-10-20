@@ -80,6 +80,26 @@ function chunk(items, cap) {
   return out;
 }
 
+// buildings along a block's four street fronts, one side after another: [side, offset, width] each.
+// When they don't all fit, every building narrows a little until they do, so none runs past the
+// block's last corner onto its neighbours.
+function ringWidths(want, lens) {
+  for (let f = 1; ; f *= 0.92) {
+    const out = [];
+    let s = 0, along = 0;
+    for (const w0 of want) {
+      let w = Math.min(w0 * f, lens[s]);
+      if (along + w > lens[s] + 1e-6) {
+        if (s === lens.length - 1) break;
+        s++; along = 0; w = Math.min(w0 * f, lens[s]);
+      }
+      out.push([s, along, w]);
+      along += w;
+    }
+    if (out.length === want.length) return out;
+  }
+}
+
 function annularSector(r0, r1, t0, t1) {
   const steps = Math.max(2, Math.ceil(Math.abs(t1 - t0) / 0.06));
   const pts = [];
@@ -180,16 +200,25 @@ const PLANNERS = {
       const cells = [];
       split(leaf.x0, leaf.y0, leaf.x1, leaf.y1, 4.5, cells);
       const capTotal = sum(cells.map(([a, b, c, e]) => (c - a) * (e - b)));
-      let idx = 0;
-      for (const [x0, z0, x1, z1] of cells) {
-        const cap = (x1 - x0) * (z1 - z0) * (d.area / capTotal);
-        const take = [];
-        let used = 0;
-        while (idx < d.items.length && (used + d.items[idx].a <= cap || !take.length)) { used += d.items[idx].a; take.push(d.items[idx++]); }
+      // fill the blocks in order, each up to its share; when that leaves files over, every block takes
+      // a little more, so the overflow spreads out instead of piling into the last block
+      const fill = fac => {
+        let idx = 0;
+        const takes = cells.map(([x0, z0, x1, z1]) => {
+          const cap = (x1 - x0) * (z1 - z0) * (d.area / capTotal) * fac, take = [];
+          let used = 0;
+          while (idx < d.items.length && (used + d.items[idx].a <= cap || !take.length)) { used += d.items[idx].a; take.push(d.items[idx++]); }
+          return take;
+        });
+        return { takes, left: d.items.slice(idx) };
+      };
+      let fac = 1, plan = fill(fac);
+      while (plan.left.length && fac < 4) plan = fill(fac *= 1.03);
+      plan.takes[cells.length - 1].push(...plan.left); // (never more than a sliver by now)
+      cells.forEach(([x0, z0, x1, z1], n) => {
         blocks.push({ poly: rectPoly(x0, z0, x1, z1), type: ground(d) });
-        if (take.length) lots.push(...packRect(take, x0, z0, x1, z1, 0.06));
-      }
-      if (idx < d.items.length) { const [x0, z0, x1, z1] = cells[cells.length - 1]; lots.push(...packRect(d.items.slice(idx), x0, z0, x1, z1, 0.04)); }
+        if (plan.takes[n].length) lots.push(...packRect(plan.takes[n], x0, z0, x1, z1, 0.06));
+      });
       if (d.name !== '·') labels.push({ text: d.name, x: (leaf.x0 + leaf.x1) / 2, z: leaf.y1 + 0.4 });
     }
     // the busiest junctions become station towers
@@ -331,25 +360,32 @@ const PLANNERS = {
       const d = l.data.d, cx = l.x * k, cz = l.y * k, R = l.r * k;
       isle.set(d, { cx, cz, R });
       land.push(circlePoly(cx, cz, R, 48));
+      // rows of houses across the island; when they don't all fit, the island is laid out as if it were
+      // a little bigger and then drawn back to its true size, so everyone has a plot of their own
       const ROW = 0.9, GAP = 0.16, M = 0.35;
-      let z = cz - R + M + ROW / 2, idx = 0, row = 0;
-      while (idx < d.items.length && z < cz + R) {
-        const dz = Math.max(Math.abs(z - ROW / 2 - cz), Math.abs(z + ROW / 2 - cz));
-        const half = Math.sqrt(Math.max(0, (R - M) ** 2 - dz * dz));
-        let x = cx - half;
-        const start = idx;
-        while (idx < d.items.length && half > 0.3) {
-          const it = d.items[idx], w = Math.min(it.a / ROW, half * 2);
-          if (x + w > cx + half && x > cx - half) break;
-          lots.push({ i: it.i, x: x + w / 2, z, w: w * 0.9, d: ROW * 0.88, rot: 0 });
-          x += w; idx++;
+      for (let f = 1; ; f *= 0.9) {
+        const Rv = R / f, myLots = [], myBlocks = [];
+        let z = -Rv + M + ROW / 2, idx = 0, row = 0;
+        while (idx < d.items.length && z < Rv) {
+          const dz = Math.max(Math.abs(z - ROW / 2), Math.abs(z + ROW / 2));
+          const half = Math.sqrt(Math.max(0, (Rv - M) ** 2 - dz * dz));
+          let x = -half;
+          const start = idx;
+          while (idx < d.items.length && half > 0.3) {
+            const it = d.items[idx], w = Math.min(it.a / ROW, half * 2);
+            if (x + w > half && x > -half) break;
+            myLots.push({ i: it.i, x: x + w / 2, z, w: w * 0.9, d: ROW * 0.88, rot: 0 });
+            x += w; idx++;
+          }
+          if (idx > start) myBlocks.push({ poly: rectPoly(-half, z - ROW / 2, x, z + ROW / 2), type: ground(d) });
+          row++;
+          z += ROW + (row % 3 === 0 ? 0.45 : GAP);
         }
-        if (idx > start) blocks.push({ poly: rectPoly(cx - half, z - ROW / 2, x, z + ROW / 2), type: ground(d) });
-        row++;
-        z += ROW + (row % 3 === 0 ? 0.45 : GAP);
+        if (idx < d.items.length) continue;
+        for (const l of myLots) lots.push({ ...l, x: cx + l.x * f, z: cz + l.z * f, w: l.w * f, d: l.d * f });
+        for (const b of myBlocks) blocks.push({ ...b, poly: b.poly.map(([x, z]) => [cx + x * f, cz + z * f]) });
+        break;
       }
-      // anything left over crowds onto the island's last row
-      for (; idx < d.items.length; idx++) lots.push({ i: d.items[idx].i, x: cx, z: cz, w: 0.3, d: 0.3, rot: 0 });
       if (d.name !== '·') labels.push({ text: d.name, x: cx, z: cz + R + 0.9 });
     }
     // bridges between islands that import each other
@@ -402,7 +438,8 @@ const PLANNERS = {
   barcelona(ds, ctx) {
     const S = 4.4, ST = 1.0, RD = 1.1, CH = 0.9;
     const SIDE = S - 2 * CH * 0.75;
-    const cap = SIDE * 4 * RD * 0.95;
+    // the north and south ranges run corner to corner; the east and west ones fit between them
+    const cap = (SIDE + S - 2 * RD) * 2 * RD * 0.95;
     // one directory per block where possible: Cerdà would approve
     // a directory big enough fills its own block (Cerdà would approve); small neighbouring directories
     // share one, so a small repo isn't a grid of near-empty blocks
@@ -427,28 +464,27 @@ const PLANNERS = {
     const lots = [], blocks = [], labels = [], seen = new Set();
     const oct = (x0, z0) => [[x0 + CH, z0], [x0 + S - CH, z0], [x0 + S, z0 + CH], [x0 + S, z0 + S - CH], [x0 + S - CH, z0 + S], [x0 + CH, z0 + S], [x0, z0 + S - CH], [x0, z0 + CH]];
     let g = 0;
-    for (let cell = 0; cell < C * R && g <= groups.length; cell++) {
+    // (the plaza is always laid out, even when the blocks run out before the grid's centre)
+    for (let cell = 0; cell < C * R; cell++) {
       const x0 = (cell % C) * (S + ST), z0 = Math.floor(cell / C) * (S + ST);
       if (cell === center) {
         blocks.push({ poly: oct(x0, z0), type: 'plaza' });
         lots.push({ i: ctx.hub, x: x0 + S / 2, z: z0 + S / 2, w: 1.7, d: 1.7, rot: 0 });
         continue;
       }
-      if (g >= groups.length) break;
+      if (g >= groups.length) continue;
       const { d, items } = groups[g++];
       blocks.push({ poly: oct(x0, z0), type: ground(d) });
-      // walk the four sides clockwise, laying buildings along the street front
-      const sides = [[x0 + CH * 0.75, z0 + RD / 2, 1, 0, 0], [x0 + S - RD / 2, z0 + CH * 0.75, 0, 1, -Math.PI / 2],
-        [x0 + S - CH * 0.75, z0 + S - RD / 2, -1, 0, Math.PI], [x0 + RD / 2, z0 + S - CH * 0.75, 0, -1, Math.PI / 2]];
-      let s = 0, along = 0;
-      for (const it of items) {
-        let w = Math.min(it.a / RD, SIDE);
-        if (along + w > SIDE && s < 3) { s++; along = 0; }
-        w = Math.min(w, Math.max(0.2, SIDE - along));
-        const [sx, sz, dx, dz, rot] = sides[s];
-        lots.push({ i: it.i, x: sx + dx * (along + w / 2), z: sz + dz * (along + w / 2), w: w * 0.94, d: RD * 0.9, rot });
-        along += w;
-      }
+      // walk the four sides clockwise, laying buildings along the street front. Buildings are never
+      // rotated (their windows face the camera): the east and west ranges swap width and depth instead.
+      const sides = [[x0 + CH * 0.75, z0 + RD / 2, 1, 0], [x0 + S - RD / 2, z0 + RD, 0, 1],
+        [x0 + S - CH * 0.75, z0 + S - RD / 2, -1, 0], [x0 + RD / 2, z0 + S - RD, 0, -1]];
+      const ring = ringWidths(items.map(it => it.a / RD), [SIDE, S - 2 * RD, SIDE, S - 2 * RD]);
+      items.forEach((it, n) => {
+        const [s, along, w] = ring[n], [sx, sz, dx, dz] = sides[s];
+        const x = sx + dx * (along + w / 2), z = sz + dz * (along + w / 2);
+        lots.push(dx ? { i: it.i, x, z, w: w * 0.94, d: RD * 0.9, rot: 0 } : { i: it.i, x, z, w: RD * 0.9, d: w * 0.94, rot: 0 });
+      });
       if (!seen.has(d) && d.name !== '·') { seen.add(d); labels.push({ text: d.name, x: x0 + S / 2, z: z0 + S + ST / 2 }); }
     }
     const W = C * (S + ST), H = R * (S + ST);
@@ -631,7 +667,7 @@ const PLANNERS = {
       const m = index.get(dirOf(files[j].p));
       if (m !== undefined && m !== n && !P[m].periphery) adj[n].add(m);
     }
-    const comp = tarjan(adj), nc = Math.max(-1, ...comp) + 1, lvlC = new Array(nc).fill(0);
+    const comp = tarjan(adj), nc = comp.reduce((m, c) => Math.max(m, c), -1) + 1, lvlC = new Array(nc).fill(0);
     const cadj = Array.from({ length: nc }, () => new Set());
     adj.forEach((out, a) => out.forEach(b => { if (comp[a] !== comp[b]) cadj[comp[a]].add(comp[b]); }));
     for (let k = 0; k < nc; k++) for (const t of cadj[k]) lvlC[k] = Math.max(lvlC[k], lvlC[t] + 1);
@@ -838,14 +874,15 @@ const PLANNERS = {
     const center = Math.floor(R / 2) * C + Math.floor(C / 2);
     const lots = [], blocks = [], labels = [], seen = new Set();
     let g = 0;
-    for (let cell = 0; cell < C * R && g <= groups.length; cell++) {
+    // (the main square is always laid out, even when the quads run out before the grid's centre)
+    for (let cell = 0; cell < C * R; cell++) {
       const x0 = (cell % C) * (S + ST), z0 = Math.floor(cell / C) * (S + ST);
       if (cell === center) { // the main square: the library on a paved court
         blocks.push({ poly: rectPoly(x0, z0, x0 + S, z0 + S), type: 'plaza' });
         lots.push({ i: ctx.hub, x: x0 + S / 2, z: z0 + S / 2, w: 2.2, d: 2.2, rot: 0 });
         continue;
       }
-      if (g >= groups.length) break;
+      if (g >= groups.length) continue;
       const { d, items } = groups[g++];
       blocks.push({ poly: rectPoly(x0, z0, x0 + S, z0 + S), type: 'lawn' });
       // ranges along the four sides; corners belong to the north and south ranges. Buildings are never
@@ -856,16 +893,12 @@ const PLANNERS = {
         { x: x0 + IN, z: z0 + S - IN - RD, dx: 1, dz: 0, len: SIDE },          // south
         { x: x0 + IN, z: z0 + IN + RD, dx: 0, dz: 1, len: SIDE - 2 * RD },     // west
       ];
-      let s = 0, along = 0;
-      for (const it of items) {
-        let w = clamp(it.a / RD, 0.5, sides[s].len);
-        if (along + w > sides[s].len + 1e-6 && s < 3) { s++; along = 0; w = clamp(it.a / RD, 0.5, sides[s].len); }
-        w = Math.min(w, Math.max(0.3, sides[s].len - along));
-        const sd = sides[s], c = along + w / 2;
+      const ring = ringWidths(items.map(it => Math.max(0.5, it.a / RD)), sides.map(sd => sd.len));
+      items.forEach((it, n) => {
+        const [s, along, w] = ring[n], sd = sides[s], c = along + w / 2;
         lots.push(sd.dx ? { i: it.i, x: sd.x + c, z: sd.z + RD / 2, w: w * 0.94, d: RD * 0.9, rot: 0 }
           : { i: it.i, x: sd.x + RD / 2, z: sd.z + c, w: RD * 0.9, d: w * 0.94, rot: 0 });
-        along += w;
-      }
+      });
       if (!seen.has(d) && d.name !== '·') { seen.add(d); labels.push({ text: d.name, x: x0 + S / 2, z: z0 + S + ST / 2 }); }
     }
     const W = C * (S + ST), H = R * (S + ST);
@@ -924,7 +957,8 @@ const PLANNERS = {
     const X1 = Math.max(x - BASIN, PW);
     // the town behind the quay: application code, packed into ordinary blocks sized to what's there
     const townA = sum(town.flatMap(g => g.items.map(it => it.a)));
-    const TD = clamp(Math.sqrt(townA / 0.55) * 0.6, 1.2, 12), TW = Math.min(X1, townA / 0.55 / TD);
+    // (sized by its own code, not by the harbour: with no piers at all it would be one pier wide)
+    const TD = clamp(Math.sqrt(townA / 0.55) * 0.6, 1.2, 12), TW = townA / 0.55 / TD;
     const LD = townA ? TD + 1.0 : 1.2;
     if (townA) {
       const root = hierarchy({ children: town.map(g => ({ g, v: sum(g.items.map(it => it.a)) })) }).sum(n => n.v || 0).sort((a, b) => b.value - a.value);
@@ -938,8 +972,9 @@ const PLANNERS = {
     }
     // a concrete apron along the whole waterfront; grass only behind the town, where there is one
     const M = 0.8;
-    land.push(rectPoly(-M, -1.4, X1 + BASIN + 0.5, 0));
-    blocks.push({ poly: rectPoly(-M, -1.4, X1 + BASIN + 0.5, -0.9), type: 'yard' });
+    const QX = Math.max(X1 + BASIN + 0.5, townA ? TW + M : 0); // the quay runs the length of the harbour and the town
+    land.push(rectPoly(-M, -1.4, QX, 0));
+    blocks.push({ poly: rectPoly(-M, -1.4, QX, -0.9), type: 'yard' });
     if (townA) land.push(rectPoly(-M, -LD - M, TW + M, -1.0));
     // breakwater curling round the harbour mouth, lighthouse on its head
     const bx = X1 + BASIN, bz = maxL + 1.6;
@@ -950,7 +985,7 @@ const PLANNERS = {
     lots.push(hubLot);
     return {
       lots, blocks, land, labels, ships, ground: 'water',
-      roads: [{ a: [-M, -0.45], b: [bx + 0.5, -0.45], w: 0.6 }],
+      roads: [{ a: [-M, -0.45], b: [Math.max(bx + 0.5, QX), -0.45], w: 0.6 }],
       camera: { az: 60, el: 30, dist: 0.78 },
       height: (i, rel) => i === ctx.hub ? 4.2 : Math.min(0.4 + 0.35 * Math.pow(rel, 0.4), 1.4),
     };
@@ -995,15 +1030,14 @@ const PLANNERS = {
 // civic landmarks move to where they belong: the city hall faces the camera with the courthouse and
 // clock tower beside it; the port and the airport sit out at the edge. Each swaps lots with an
 // ordinary file of a similar size, so nobody ends up squeezed.
-function placeLandmarks(lots, files, inDeg, frontAz) {
+function placeLandmarks(lots, files, hub, frontAz) {
   const root = r => files.findIndex(f => f.a?.r === r && !f.p.includes('/'));
-  const hub = inDeg.indexOf(Math.max(...inDeg));
   const marks = new Set([hub]);
   const live = [...lots.keys()].filter(i => lots[i] && lots[i].w > 0.01);
   if (live.length < 12) return;
   const area = i => lots[i].w * lots[i].d;
   const cx = live.reduce((s, i) => s + lots[i].x, 0) / live.length, cz = live.reduce((s, i) => s + lots[i].z, 0) / live.length;
-  const ext = Math.max(...live.map(i => Math.hypot(lots[i].x - cx, lots[i].z - cz)));
+  const ext = live.reduce((m, i) => Math.max(m, Math.hypot(lots[i].x - cx, lots[i].z - cz)), 0);
   const dist = (i, [x, z]) => Math.hypot(lots[i].x - x, lots[i].z - z);
   const pick = (i, score) => {
     const cands = live.filter(j => !marks.has(j) && j !== i && area(j) <= area(i) * 2.5 && area(j) >= area(i) * 0.4);
@@ -1038,13 +1072,12 @@ function districtBorn(files, text) {
   return born < Infinity ? born : null;
 }
 
-export function buildLayout(kind, { files, inDeg, SIZE, frontAz }) {
+export function buildLayout(kind, { files, inDeg, hub, SIZE, frontAz }) {
   const N = files.length;
   const v = files.map(f => Math.sqrt(f.loc) + 3);
   const vs = [...v].sort((a, b) => a - b), medV = vs[N >> 1] || 1;
   const area = v.map(x => x / medV);
   const locs = files.map(f => f.loc).sort((a, b) => a - b), medLoc = locs[N >> 1] || 1;
-  const hub = inDeg.indexOf(Math.max(...inDeg));
   const ctx = { files, inDeg, area, hub };
   const ds = districtsOf(files, area);
   const L = PLANNERS[kind](ds, ctx);
@@ -1063,7 +1096,20 @@ export function buildLayout(kind, { files, inDeg, SIZE, frontAz }) {
   const P = ([x, z]) => [(x - mx) * s, (z - mz) * s];
   const lots = new Array(N);
   for (const l of L.lots) lots[l.i] = { x: (l.x - mx) * s, z: (l.z - mz) * s, w: l.w * s, d: l.d * s, rot: l.rot || 0, y: (l.y || 0) * s };
-  placeLandmarks(lots, files, inDeg, frontAz ?? L.camera?.az);
+  // a building's detail (windows, doors) is drawn on its local +x and +z faces, the two the camera sees
+  // when it isn't turned. A turned lot (the wedges of Paris) is the same footprint turned by any quarter
+  // turn with width and depth swapped: take the quarter turn that keeps those faces towards the camera.
+  const camA = (frontAz ?? L.camera?.az ?? 45) * Math.PI / 180, ccx = Math.cos(camA), ccz = Math.sin(camA);
+  for (const l of lots) if (l && l.rot) {
+    let best = 0, bs = -Infinity;
+    for (let k = 0; k < 4; k++) {
+      const r = l.rot + k * Math.PI / 2; // three.js turns +x to (cos r, -sin r) and +z to (sin r, cos r)
+      const sc = Math.min(Math.cos(r) * ccx - Math.sin(r) * ccz, Math.sin(r) * ccx + Math.cos(r) * ccz);
+      if (sc > bs + 1e-9) { bs = sc; best = k; }
+    }
+    if (best) { l.rot += best * Math.PI / 2; if (best % 2) [l.w, l.d] = [l.d, l.w]; }
+  }
+  placeLandmarks(lots, files, hub, frontAz ?? L.camera?.az);
   const districtOf = L.districtOf || (() => null);
   const heights = files.map((f, i) => L.height(i, f.loc / medLoc, districtOf(i)) * s);
 

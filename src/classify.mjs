@@ -65,9 +65,10 @@ export function cityMetrics(city, now = Date.now() / 1000) {
   const avgDepth = mean(F.map(f => f.p.split('/').length - 1));
   // the mountain: directories that hold no files and a single subdirectory are just a staircase
   // (src/main/java/org/acme/…); how much of an average path is climbing, and the longest such climb
+  // (the tree holds every code file, tests included: src/ with main/ and test/ under it is a fork, not a stair)
   const tree = new Map();
   const node = d => { if (!tree.has(d)) tree.set(d, { files: 0, subs: new Set() }); return tree.get(d); };
-  for (const f of F) {
+  for (const f of codeIdx.map(i => all[i])) {
     const segs = f.p.split('/').slice(0, -1);
     let cur = '';
     node('');
@@ -167,14 +168,26 @@ export function cityMetrics(city, now = Date.now() / 1000) {
   // history is judged on code alone: a late package.json bump must not stretch the timeline
   const workIdx = isPort || isCampus || isFarm ? codeIdx : [...codeIdx, ...infraIdx]; // infrastructure is real work for the timeline
   const cfgOnly = workIdx.length < all.length;
-  const start = cfgOnly && workIdx.length ? Math.min(...workIdx.map(i => all[i].born)) : city.start;
-  const end = cfgOnly && workIdx.length ? Math.max(...workIdx.map(i => all[i].last)) : city.end;
-  const commits = cfgOnly ? city.commits.filter(c => { for (let k = 1; k < c.length; k++) if (!NONCODE.has(all[c[k]].lang)) return true; return false; }) : city.commits;
-  const span = Math.max(1, end - start);
+  // the commits that count are the ones that touched that same work, so the count and the timeline agree
+  const isWork = new Uint8Array(all.length);
+  for (const i of workIdx) isWork[i] = 1;
+  const commits = cfgOnly ? city.commits.filter(c => { for (let k = 1; k < c.length; k++) if (isWork[c[k]]) return true; return false; }) : city.commits;
+  const commitCount = commits.length;
+  // no commits at all (an unborn branch): the history is unknown, not 56 years idle
+  const history = commitCount > 0 && city.end > 0;
+  let start = city.start, end = city.end;
+  if (cfgOnly && workIdx.length) {
+    start = Infinity; end = -Infinity;
+    for (const i of workIdx) { if (all[i].born < start) start = all[i].born; if (all[i].last > end) end = all[i].last; }
+  }
+  // the scan reads only the newest commits of a long history: rates are measured over the window it
+  // read, but the city is as old as its first commit
+  const seenFrom = start;
+  if (city.truncated && city.firstCommit) start = Math.min(start, city.firstCommit);
+  const span = Math.max(1, end - start), seen = Math.max(1, end - seenFrom);
   const recentWindow = 90 * 86400;
   const recentCommits = commits.filter(c => c[0] > end - recentWindow).length;
-  const commitCount = commits.length;
-  const avgPerWindow = commits.length / Math.max(1, span / recentWindow);
+  const avgPerWindow = commitCount / Math.max(1, seen / recentWindow);
 
   return {
     files: n,
@@ -203,9 +216,10 @@ export function cityMetrics(city, now = Date.now() / 1000) {
     testShare: sum(codeIdx.filter(i => TEST_RE.test(all[i].p)).map(i => all[i].loc)) / Math.max(1, sum(codeIdx.map(i => all[i].loc))),
     coreFiles: n,
     totalFiles: codeIdx.length,
-    ageYears: span / YEAR,
-    commitsPerWeek: commitCount / Math.max(1, span / (7 * 86400)),
-    idleYears: Math.max(0, (now - end) / YEAR),
+    history,
+    ageYears: history ? span / YEAR : 0,
+    commitsPerWeek: commitCount / Math.max(1, seen / (7 * 86400)),
+    idleYears: history ? Math.max(0, (now - end) / YEAR) : 0,
     staleShare: F.filter(f => end - f.last > 2 * YEAR).length / Math.max(1, n),
     recentBoost: avgPerWindow && commitCount >= 200 && recentCommits >= 30 ? recentCommits / avgPerWindow : 0,
     hardware: (city.extras?.hardwareFiles || 0) > 0,
@@ -217,7 +231,7 @@ export function cityMetrics(city, now = Date.now() / 1000) {
     proseFiles: proseIdx.length,
     proseShare: proseLoc / workLoc,
     proseWords: Math.round(proseLoc * 9), // ~9 words per non-empty line of prose
-    proseLongest: Math.round(Math.max(0, ...proseIdx.map(i => all[i].loc)) * 9 / 100) * 100,
+    proseLongest: Math.round(proseIdx.reduce((m, i) => Math.max(m, all[i].loc), 0) * 9 / 100) * 100,
     locales: locales.size,
     infraKinds,
     usedCore: useCore,
@@ -299,9 +313,9 @@ const ARCHETYPES = {
 };
 
 const STATES = {
-  ruins: m => m.staleShare > 0.35 && m.ageYears > 4 && `ancient ruins: ${pct(m.staleShare)} of files untouched for 2+ years`,
-  ghost: m => m.idleYears > 1.5 && `ghost town: no commits for ${m.idleYears.toFixed(1)} years`,
-  boom: m => m.recentBoost > 2.5 && `boomtown: ${m.recentBoost.toFixed(1)}× the usual commit rate lately`,
+  ruins: m => m.history && m.staleShare > 0.35 && m.ageYears > 4 && `ancient ruins: ${pct(m.staleShare)} of files untouched for 2+ years`,
+  ghost: m => m.history && m.idleYears > 1.5 && `ghost town: no commits for ${m.idleYears.toFixed(1)} years`,
+  boom: m => m.history && m.recentBoost > 2.5 && `boomtown: ${m.recentBoost.toFixed(1)}× the usual commit rate lately`,
   garden: m => m.testShare > 0.6 && `garden city: ${pct(m.testShare)} of the code is tests`,
   maze: m => m.cycleShare > 0.5 && `old medina: ${pct(m.cycleShare)} of files sit in import cycles`,
   berlin: m => !m.monorepo && m.split > 0.97 && 'a divided city: its two biggest districts never import each other',
@@ -366,10 +380,10 @@ function sccOf(adj) {
 }
 // the longest chain of dependencies between components: how many layers deep the design goes
 function longestPath(adj, comp) {
-  const nc = Math.max(-1, ...comp) + 1, cadj = Array.from({ length: nc }, () => new Set());
+  const nc = comp.reduce((m, c) => Math.max(m, c), -1) + 1, cadj = Array.from({ length: nc }, () => new Set());
   adj.forEach((out, a) => out.forEach(b => { if (comp[a] !== comp[b]) cadj[comp[a]].add(comp[b]); }));
   // Tarjan numbers components in reverse topological order: a component only points at lower numbers
   const lvl = new Array(nc).fill(0);
   for (let k = 0; k < nc; k++) for (const t of cadj[k]) lvl[k] = Math.max(lvl[k], lvl[t] + 1);
-  return Math.max(0, ...lvl);
+  return lvl.reduce((m, l) => Math.max(m, l), 0);
 }

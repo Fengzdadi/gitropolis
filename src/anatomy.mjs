@@ -19,8 +19,9 @@ const JS = {
     '|^\\s*(?:export\\s+)?(?:const|let|var)\\s+[\\w$]+\\s*(?::[^=]+)?=\\s*(?:async\\s+)?(?:function\\b|\\([^()]*(?:\\([^()]*\\)[^()]*)*\\)\\s*(?::\\s*[^=]+?)?\\s*=>|[\\w$]+\\s*=>|\\(\\s*$)' +
     // `app.use = function use(fn) {` / `exports.x = async function`
     "|^\\s*[\\w$.]+(?:\\[[^\\]]+\\])?\\s*=\\s*(?:async\\s+)?function\\b" +
-    // class / object methods: `  async foo<T>(a, b): R {`
-    `|^\\s+(?!(?:${KW})\\b)(?:(?:${MODS})\\s+)*\\*?#?[\\w$]+\\s*(?:<[^>]*>)?\\([^)]*\\)?\\s*(?::\\s*[^{;=]+)?\\{\\s*$`),
+    // class / object methods: `  async foo<T>(a, b): R {`, or a destructured first parameter `  foo({`
+    // (two branches that can't both match the same text, so a very long line costs one pass, not n²)
+    `|^\\s+(?!(?:${KW})\\b)(?:(?:${MODS})\\s+)*\\*?#?[\\w$]+\\s*(?:<[^>]*>)?\\((?:[^)]*\\)\\s*(?::[^{;=]*)?|[^)]*)\\{\\s*$`),
 };
 
 const LANG = {
@@ -108,7 +109,8 @@ LANG.c = LANG.cpp = C;
 const TEST_PATH = /(^|\/)(tests?|__tests\w*__|specs?|__mocks__|__fixtures__|fixtures?|e2e|cypress|testdata|playgrounds?)\/|\.(test|spec)\.\w+$|_test\.(go|py|rs|c|cc|cpp|exs?)$|(^|\/)test_[^/]*\.py$|(^|\/)conftest\.py$|[a-z0-9](Test|Tests|Spec)\.(java|kt|cs|swift|scala|php)$|(^|\/)tests?\.(rs|py|[cm]?[jt]s)$/;
 const BUILD_PATH = /(^|\/)(scripts?|\.github|\.circleci|\.gitlab|ci)\/|(^|\/)(build\.rs|setup\.py|noxfile\.py|tasks\.py|fabfile\.py|Rakefile|gulpfile\.\w+|Gruntfile\.\w+|Makefile|Dockerfile[\w.-]*)$/;
 const DOCS_PATH = /(^|\/)(docs?|documentation|examples?|samples?|demos?)\//i;
-const CONFIG_PATH = /\.config\.[cm]?[jt]s$|(^|\/)\.?[\w-]+rc\.[cm]?js$|(^|\/)(settings|conf|config)\.py$/;
+// rc files: dotted (.eslintrc.js, .mocharc.cjs) or a known tool's name; not arc.js or crc.js
+const CONFIG_PATH = /\.config\.[cm]?[jt]s$|(^|\/)(?:\.[\w-]+|babel|eslint|prettier|stylelint|postcss|mocha|nyc|jest|commitlint|lintstaged|release)rc\.[cm]?js$|(^|\/)(settings|conf|config)\.py$/;
 const TYPES_PATH = /\.d\.[cm]?ts$|(^|\/)(types?|typings?|_types)\.(?:[cm]?[jt]sx?|py)$|(^|\/)(types|typings)\/|(^|\/)_?typing\.py$/;
 const INDEX_JS = /(^|\/)index\.[cm]?[jt]sx?$/;
 const MANIFEST = /(^|\/)(package\.json|Cargo\.toml|pyproject\.toml|setup\.cfg|go\.mod|Gemfile|pom\.xml|build\.gradle(\.kts)?|requirements[^/]*\.txt)$/;

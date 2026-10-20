@@ -144,7 +144,7 @@ Streets come from a distance field around the blocks, and cars, buses and boats 
 ## Known limits
 
 - Imports are found with regexes, not a parser, so some are missed.
-- Three.js loads from a CDN, so the viewer needs an internet connection.
+- The viewer's fonts come from Google Fonts; offline, the city still builds (three.js and d3-hierarchy ship in `web/vendor`) and the captions fall back to system fonts.
 - The view is fixed at one isometric angle; rotation is planned.
 
 ## License
