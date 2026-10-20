@@ -17,7 +17,7 @@ export const PIXEL_PALETTE = [
 
 const flatHex = p => typeof p === 'string' ? [p] : Array.isArray(p) ? p.flatMap(flatHex) : Object.values(p).flatMap(flatHex);
 
-export function createPixelPipeline(renderer, scene, camera, { pixel = 3, outline = '#14121c' } = {}) {
+export function createPixelPipeline(renderer, scene, camera, { pixel = 3, outline = '#14121c', pxUniform = null } = {}) {
   const size = new THREE.Vector2();
   const lowRes = new THREE.Vector2();
   const target = new THREE.WebGLRenderTarget(1, 1, {
@@ -84,6 +84,8 @@ export function createPixelPipeline(renderer, scene, camera, { pixel = 3, outlin
     resize,
     render() {
       const u = quad.material.uniforms;
+      // tell surface shaders how big one art pixel is in world units, so their patterns can match it
+      if (pxUniform && camera.isOrthographicCamera) pxUniform.value = (camera.top - camera.bottom) / camera.zoom / lowRes.y;
       u.uNear.value = camera.near; u.uFar.value = camera.far; u.uOrtho.value = camera.isOrthographicCamera ? 1 : 0;
       renderer.setRenderTarget(target);
       renderer.render(scene, camera);

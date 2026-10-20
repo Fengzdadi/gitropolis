@@ -169,6 +169,7 @@ if (layout?.camera) { planCamera(layout.camera); controls.update(); }
 const shared = {
   uTime: { value: 0 },
   uTimeline: { value: 0 },
+  uPx: { value: 1 }, // world size of one art pixel (pixel style)
   uFogColor: { value: FOG },
   uFogDensity: { value: fogDensity },
   uFocus: { value: -1 },
@@ -553,7 +554,7 @@ composer.addPass(new ShaderPass({
 const bloom = new UnrealBloomPass(new THREE.Vector2(viewW(), viewH()), 0.7, 0.45, 0.75);
 composer.addPass(bloom);
 studio?.setupPost(bloom);
-const pix = PIXEL ? createPixelPipeline(renderer, scene, camera, { pixel: PIXEL_SIZE }) : null;
+const pix = PIXEL ? createPixelPipeline(renderer, scene, camera, { pixel: PIXEL_SIZE, pxUniform: shared.uPx }) : null;
 const renderFrame = () => pix ? pix.render() : composer.render();
 composer.addPass(new OutputPass());
 
@@ -696,6 +697,7 @@ addEventListener('keydown', e => { if (e.code === 'Escape') focus(-1); });
 // ------------------------------------------------------------ loop
 function tick(dt) {
   shared.uTime.value += dt;
+  studio?.update?.();
   const decay = Math.exp(-dt * 4.0);
   for (let i = 0; i < N; i++) heat[i] *= decay;
   buildings.geometry.attributes.aHeat.needsUpdate = true;

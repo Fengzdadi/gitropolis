@@ -7,6 +7,7 @@ import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { buildingGeometry } from './buildings.js';
 import { buildingSpecs, buildCityMesh } from './architecture.js';
 import { addGroundDetail } from './surfaces.js';
+import { buildStreets, buildTraffic } from './streets.js';
 
 export const STYLES = {
   maquette: {
@@ -62,19 +63,19 @@ function slab(polys, base, depth) {
   return geos.length ? mergeGeometries(geos) : null;
 }
 
-function buildTerrain(scene, layout, S, plateStep, shared) {
+function buildTerrain(scene, layout, S, plateStep, shared, street) {
   const mat = color => S.flat ? new THREE.MeshBasicMaterial({ color })
     : new THREE.MeshStandardMaterial({ color, roughness: 0.95, flatShading: true });
   const add = (geo, color, surface) => {
     if (!geo) return;
     const m = mat(color);
-    if (S.pixel && surface) addGroundDetail(m, surface, { unit: layout.unit, shared });
+    if (S.pixel && surface) addGroundDetail(m, surface === 'grass-or-street' ? (street ? 'street' : 'grass') : surface, { shared, street });
     const mesh = new THREE.Mesh(geo, m);
     mesh.receiveShadow = mesh.castShadow = !S.flat;
     scene.add(mesh);
   };
   const landTop = layout.groundIsWater ? plateStep * 0.8 : 0;
-  if (layout.groundIsWater) add(slab([...layout.land, ...layout.shore], 0, landTop), S.land, 'grass');
+  if (layout.groundIsWater) add(slab([...layout.land, ...layout.shore], 0, landTop), S.land, 'grass-or-street');
   if (layout.water.length) add(slab(layout.water, 0, plateStep * 0.05), S.water, 'water');
   const colors = { block: S.plate, park: S.park, plaza: S.plaza, lawn: S.lawn };
   for (const type of Object.keys(colors)) {
@@ -178,13 +179,20 @@ export function buildStudio(ctx) {
   const groundColor = !layout ? S.ground : { water: S.water, land: S.land, road: S.road }[layout.ground];
   const groundMat = S.flat ? new THREE.MeshBasicMaterial({ color: groundColor })
     : new THREE.MeshStandardMaterial({ color: groundColor, roughness: layout?.groundIsWater ? 0.35 : 1 });
-  if (S.pixel && layout) addGroundDetail(groundMat, { water: 'water', land: 'grass' }[layout.ground], { unit: layout.unit, shared });
+  // pixel style: streets come from a distance field over the blocks; asphalt only where streets are
+  const streets = S.pixel && layout ? buildStreets({ layout, B, files, inDeg, SIZE, t01 }) : null;
+  const street = streets && { ...streets, asphalt: new THREE.Color(S.road), grass: new THREE.Color(S.land), mark: new THREE.Color('#e0d7b8') };
+  if (S.pixel && layout) addGroundDetail(groundMat, layout.ground === 'water' ? 'water' : 'street', { shared, street });
   const ground = new THREE.Mesh(new THREE.PlaneGeometry(SIZE * 14, SIZE * 14).rotateX(-Math.PI / 2), groundMat);
   ground.receiveShadow = true;
   scene.add(ground);
 
   // ---- city terrain from a planner: land, raised blocks, parks, plazas, bridges, hills
-  if (layout) buildTerrain(scene, layout, S, plateStep, shared);
+  if (layout) buildTerrain(scene, layout, S, plateStep, shared, street);
+  // traffic: lanes round every block, busier where the block's files import and are imported a lot
+  const traffic = streets ? buildTraffic({ streets, unit: layout.unit, shared, palette: ['#c0413b', '#f2c14e', '#e8833a', '#f2efe9', '#2f6188', '#3d6b36', '#14121c', '#86bfd9'] }) : null;
+  if (traffic) scene.add(traffic.mesh);
+  const roadY = layout?.groundIsWater ? plateStep * 0.8 + 0.05 : 0.05;
 
   // ---- district plinths (classic treemap only)
   if (!layout) {
@@ -354,6 +362,7 @@ export function buildStudio(ctx) {
   }
 
   return {
+    update: () => traffic?.update(shared.uTime.value, shared.uTimeline.value, roadY),
     style: S,
     heights: H,
     hub,

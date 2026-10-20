@@ -1,18 +1,25 @@
-// Pixel-scale surface detail painted in the shader, so thousands of buildings cost no extra geometry:
-// brick bond, concrete panel joints and rain streaks, glass reflections and mullions, roof tiles,
-// gravel; water ripples, grass tufts and paving on the ground. Every pattern fades out once its
-// features shrink below about one art pixel, so a distant city stays clean instead of noisy.
+// Pixel-scale surface detail painted in the shader, so thousands of buildings cost no extra geometry.
+// Patterns are pinned to the surfaces (they don't swim when the camera pans) but sized in *art pixels*,
+// the way a sprite artist works: a brick course is ~3 pixels tall whether the building is a shed or a
+// tower, and whether we're zoomed in or out. Sizes snap to powers of two so zooming steps between
+// detail levels instead of shimmering.
 
 const COMMON = /* glsl */`
-  uniform float uUnit, uTime;
+  uniform float uTime, uPx;
   varying vec3 vSurfWP, vSurfN;
   float sHash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
-  // 1 when a pattern's cells are comfortably larger than a pixel, 0 when they'd alias
-  float sFade(vec2 cells) { vec2 w = fwidth(cells); return 1.0 - smoothstep(0.28, 0.6, max(w.x, w.y)); }
-  // 2D facade coordinates on any vertical face, in building units
+  // world size of n art pixels, snapped to a power of two
+  float P(float n) { return exp2(floor(log2(max(uPx * n, 1e-4)) + 0.5)); }
+  // guard for the moments a snapped pattern lands just under a pixel
+  float sFade(vec2 cells) { vec2 w = fwidth(cells); return 1.0 - smoothstep(0.45, 0.9, max(w.x, w.y)); }
+  // 2D world coordinates across any vertical face
   vec2 sFacade(vec3 p, vec3 n) {
     vec3 t = normalize(cross(vec3(0.0, 1.0, 0.0), n + vec3(1e-4, 0.0, 0.0)));
-    return vec2(dot(p, t), p.y) / uUnit;
+    return vec2(dot(p, t), p.y);
+  }
+  vec3 sGrass(vec3 c) {
+    float h = sHash(floor(vSurfWP.xz / P(2.0)));
+    return c * (1.0 + step(0.95, h) * 0.12 - step(h, 0.04) * 0.12); // sparse: a lawn, not static
   }
 `;
 
@@ -24,97 +31,111 @@ const FACADE = /* glsl */`
       vec2 f = sFacade(vSurfWP, sN);
       bool brick = col.r > col.g * 1.15 && col.r > col.b * 1.3;
       if (brick) {
-        // running bond: courses offset by half a brick, light mortar, a little tone per brick
-        vec2 b = f / vec2(0.11, 0.05);
+        // running bond: 3-pixel courses offset by half a brick, 1-pixel light mortar, tone per brick
+        float course = P(3.0);
+        vec2 b = f / vec2(course * 2.3, course);
         b.x += 0.5 * mod(floor(b.y), 2.0);
         vec2 g = fract(b);
         float fade = sFade(b);
-        float mortar = max(step(g.y, 0.2), step(g.x, 0.08));
+        float mortar = max(step(g.y, 0.34), step(g.x, 0.15));
         col *= 1.0 + (sHash(floor(b)) - 0.5) * 0.22 * fade;
         col = mix(col, mix(col, vec3(0.78, 0.74, 0.68), 0.45), mortar * fade);
       } else {
-        // concrete / stone: panel joints and rain streaks running down from the top
-        vec2 p = f / vec2(0.24, 0.16);
+        // concrete / stone: panel joints and rain streaks running down each panel
+        vec2 p = f / vec2(P(14.0), P(9.0));
         vec2 g = fract(p);
         float fade = sFade(p);
-        float joint = max(step(g.x, 0.05), step(g.y, 0.07));
-        float streak = step(0.72, sHash(vec2(floor(f.x / 0.045), 3.0))) * (0.6 + 0.4 * fract(f.y * 3.1));
+        float joint = max(step(g.x, 0.08), step(g.y, 0.12));
+        float streak = step(0.72, sHash(vec2(floor(f.x / P(2.0)), 3.0))) * (0.5 + 0.5 * (1.0 - g.y));
         col = mix(col, col * 0.8, joint * fade);
-        col = mix(col, col * 0.88, streak * fade * 0.8);
+        col = mix(col, col * 0.9, streak * fade);
       }
     }
   } else if (abs(vSurfPart - 3.0) < 0.5) {
-    // glass: a diagonal sky reflection sweeping across, mullion grid, lighter towards the top
+    // glass: a diagonal sky reflection sweeping across, 1-pixel mullion grid
     vec2 f = sFacade(vSurfWP, sN);
-    float d = fract((f.x * 0.7 + f.y) * 0.9);
-    float band = smoothstep(0.0, 0.05, d) * (1.0 - smoothstep(0.16, 0.24, d));
-    vec2 m = f / vec2(0.1, 0.13);
+    float d = fract((f.x * 0.7 + f.y) / P(40.0));
+    float band = step(0.04, d) * (1.0 - step(0.2, d));
+    vec2 m = f / vec2(P(5.0), P(6.0));
     vec2 g = fract(m);
-    float mull = max(step(g.x, 0.1), step(g.y, 0.1));
-    col = mix(col, col * 1.4 + vec3(0.1, 0.12, 0.14), band * 0.55 * sFade(vec2(f.x * 0.9)));
+    float mull = max(step(g.x, 0.2), step(g.y, 0.17));
+    col = mix(col, col * 1.4 + vec3(0.1, 0.12, 0.14), band * 0.55);
     col = mix(col, col * 0.55, mull * sFade(m));
   } else if (abs(vSurfPart - 1.0) < 0.5) {
     if (sN.y < 0.97 && sN.y > 0.15) {
       // pitched roof: rows of overlapping tiles
       vec3 down = normalize(vec3(sN.x, 0.0, sN.z) + vec3(1e-4, 0.0, 0.0));
       vec3 along = normalize(cross(vec3(0.0, 1.0, 0.0), down));
-      vec2 b = vec2(dot(vSurfWP, along), vSurfWP.y) / uUnit / vec2(0.08, 0.045);
+      vec2 b = vec2(dot(vSurfWP, along), vSurfWP.y) / vec2(P(4.0), P(3.0));
       b.x += 0.5 * mod(floor(b.y), 2.0);
       vec2 g = fract(b);
       float fade = sFade(b);
-      col = mix(col, col * 0.72, step(g.y, 0.28) * fade);
-      col = mix(col, col * 0.85, step(g.x, 0.07) * fade);
+      col = mix(col, col * 0.72, step(g.y, 0.34) * fade);
+      col = mix(col, col * 0.85, step(g.x, 0.25) * fade);
     } else if (sN.y >= 0.97) {
       // flat roof: gravel
-      vec2 c = vSurfWP.xz / uUnit / 0.025;
-      col = mix(col, col * 0.84, step(0.82, sHash(floor(c))) * sFade(c));
+      col = mix(col, col * 0.84, step(0.85, sHash(floor(vSurfWP.xz / P(2.0)))));
     }
   }
   diffuseColor.rgb = col;
 `;
 
 const GROUND = {
-  // little light dashes drifting across the water
+  // little light dashes drifting across the water, at two scales
   water: /* glsl */`
-    // two scales: big swells that read from afar, small glints for close-ups
     float wave = 0.0;
     for (int k = 0; k < 2; k++) {
-      vec2 sz = k == 0 ? vec2(3.0, 0.9) : vec2(0.8, 0.25);
-      vec2 c = vSurfWP.xz / uUnit / sz;
+      vec2 sz = k == 0 ? vec2(P(24.0), P(6.0)) : vec2(P(9.0), P(3.0));
+      vec2 c = vSurfWP.xz / sz;
       c.x += uTime * (k == 0 ? 0.15 : 0.5) * (0.5 + sHash(vec2(floor(c.y), 7.0 + float(k))));
       vec2 g = fract(c);
       float w = step(k == 0 ? 0.8 : 0.84, sHash(floor(c) + float(k) * 13.0)) * step(g.y, 0.35) * step(0.15, g.x) * step(g.x, 0.85);
       wave = max(wave, w * sFade(c));
     }
     diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * 1.5 + 0.08, wave);`,
-  // grass tufts: scattered darker and lighter specks
   grass: /* glsl */`
-    vec2 c = vSurfWP.xz / uUnit / 0.03;
-    float h = sHash(floor(c));
-    float fade = sFade(c);
-    diffuseColor.rgb *= 1.0 + (step(0.9, h) * 0.18 - step(h, 0.08) * 0.16) * fade;`,
-  // paving slabs on sidewalks and plazas
+    diffuseColor.rgb = sGrass(diffuseColor.rgb);`,
   paving: /* glsl */`
-    vec2 c = vSurfWP.xz / uUnit / 0.12;
+    vec2 c = vSurfWP.xz / P(8.0);
     vec2 g = fract(c);
-    diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * 0.86, max(step(g.x, 0.06), step(g.y, 0.06)) * sFade(c));`,
+    diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * 0.86, max(step(g.x, 0.12), step(g.y, 0.12)) * sFade(c));`,
+  // the open ground: asphalt only where streets are (near blocks, from a distance field), a dashed
+  // centre line found as the ridge of that field, grass everywhere else
+  street: /* glsl */`
+    vec2 suv = (vSurfWP.xz - uStreetMin) / uStreetSize;
+    vec4 st = texture2D(tStreet, suv);
+    float D = st.r * 255.0;
+    float inside = step(0.0, suv.x) * step(suv.x, 1.0) * step(0.0, suv.y) * step(suv.y, 1.0);
+    vec3 col = sGrass(uGrass);
+    if (inside > 0.5 && D > 0.5 && D <= uMaxHalf) {
+      col = uAsphalt * (1.0 + (sHash(floor(vSurfWP.xz / P(1.5))) - 0.5) * 0.08);
+      // across-street direction (towards the nearest block); the centre line is where D peaks across it
+      float a = st.b * 3.14159265;
+      vec2 n = vec2(cos(a), sin(a));
+      float du = uPx * 0.9 / uStreetSize;
+      float D1 = texture2D(tStreet, suv + n * du).r * 255.0, D2 = texture2D(tStreet, suv - n * du).r * 255.0;
+      float ridge = step(D1, D + 0.02) * step(D2, D + 0.02) * step(1.5, D);
+      vec2 along = vec2(-n.y, n.x);
+      float dash = step(0.55, fract(dot(vSurfWP.xz, along) / P(8.0)));
+      col = mix(col, uMark, ridge * dash);
+    }
+    diffuseColor.rgb = col;`,
 };
 
-// add our varyings to any built-in material; chains with an existing onBeforeCompile
-function inject(material, { unit, shared, withPart, fragment, key }) {
+// add our varyings and uniforms to any built-in material; chains with an existing onBeforeCompile
+function inject(material, { shared, withPart, fragment, key, uniforms = {}, decl = '' }) {
   const prev = material.onBeforeCompile;
   // three.js caches programs by onBeforeCompile's source text, which is the same for every surface kind
   const prevKey = material.customProgramCacheKey.bind(material);
   material.customProgramCacheKey = () => `${prevKey()}|surface:${key}`;
   material.onBeforeCompile = (sh, r) => {
     prev?.call(material, sh, r);
-    sh.uniforms.uUnit = { value: unit };
-    sh.uniforms.uTime = shared.uTime;
+    Object.assign(sh.uniforms, { uTime: shared.uTime, uPx: shared.uPx }, uniforms);
     sh.vertexShader = sh.vertexShader
       .replace('#include <common>', `#include <common>\nvarying vec3 vSurfWP, vSurfN;${withPart ? '\nattribute float part; varying float vSurfPart;' : ''}`)
       .replace('#include <project_vertex>', `vSurfWP = (modelMatrix * vec4(transformed, 1.0)).xyz;\nvSurfN = normalize(mat3(modelMatrix) * objectNormal);${withPart ? '\nvSurfPart = part;' : ''}\n#include <project_vertex>`);
     sh.fragmentShader = sh.fragmentShader
-      .replace('#include <common>', `#include <common>\n${COMMON}${withPart ? '\nvarying float vSurfPart;' : ''}`)
+      .replace('#include <common>', `#include <common>\n${COMMON}${decl}${withPart ? '\nvarying float vSurfPart;' : ''}`)
       .replace('#include <color_fragment>', `#include <color_fragment>\n{${fragment}\n}`);
   };
   material.needsUpdate = true;
@@ -125,6 +146,15 @@ export function addFacadeDetail(material, opts) {
 }
 
 export function addGroundDetail(material, kind, opts) {
-  // dense cities have tiny lots; ground texture shouldn't shrink with them or it fades away entirely
-  if (GROUND[kind]) inject(material, { ...opts, unit: Math.max(opts.unit, 14), withPart: false, fragment: GROUND[kind], key: kind });
+  if (kind === 'street') {
+    const s = opts.street;
+    inject(material, {
+      ...opts, withPart: false, fragment: GROUND.street, key: 'street',
+      decl: '\nuniform sampler2D tStreet; uniform vec2 uStreetMin; uniform float uStreetSize, uMaxHalf; uniform vec3 uAsphalt, uGrass, uMark;',
+      uniforms: {
+        tStreet: { value: s.texture }, uStreetMin: { value: s.min }, uStreetSize: { value: s.size },
+        uMaxHalf: { value: s.maxHalf }, uAsphalt: { value: s.asphalt }, uGrass: { value: s.grass }, uMark: { value: s.mark },
+      },
+    });
+  } else if (GROUND[kind]) inject(material, { ...opts, withPart: false, fragment: GROUND[kind], key: kind });
 }

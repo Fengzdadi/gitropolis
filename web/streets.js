@@ -1,0 +1,214 @@
+// Streets, derived rather than drawn: rasterise every city block, then a vector distance transform
+// tells each patch of ground how far it is from the nearest block and in which direction. That one
+// field gives us, for any city layout, where the streets are (near blocks), where their centre lines
+// run (where the distance peaks) and how wide each street is — so we can paint asphalt only where
+// streets actually are and drive traffic down the right lanes.
+import * as THREE from 'three';
+
+const W = 1536; // field resolution; ~0.8 world units per texel for a 1000-wide city
+
+export function buildStreets({ layout, B, files, inDeg, SIZE, t01 }) {
+  const x0 = -SIZE * 0.6, S = SIZE * 1.2, tex = S / W;
+  const toTex = v => (v - x0) / tex;
+  const label = new Int32Array(W * W).fill(-1);
+  const blocks = layout.blocks;
+
+  // --- rasterise blocks (even-odd fill per texel centre)
+  blocks.forEach((b, id) => {
+    const P = b.poly.map(([x, z]) => [toTex(x), toTex(z)]);
+    let a0 = Infinity, a1 = -Infinity, b0 = Infinity, b1 = -Infinity;
+    for (const [x, z] of P) { a0 = Math.min(a0, x); a1 = Math.max(a1, x); b0 = Math.min(b0, z); b1 = Math.max(b1, z); }
+    for (let j = Math.max(0, Math.floor(b0)); j <= Math.min(W - 1, Math.ceil(b1)); j++) {
+      const zc = j + 0.5;
+      // crossings of this scanline with the polygon's edges
+      const xs = [];
+      for (let k = 0, m = P.length - 1; k < P.length; m = k++) {
+        const [xa, za] = P[k], [xb, zb] = P[m];
+        if ((za > zc) !== (zb > zc)) xs.push(xa + (zc - za) / (zb - za) * (xb - xa));
+      }
+      xs.sort((p, q) => p - q);
+      for (let k = 0; k + 1 < xs.length; k += 2) {
+        for (let i = Math.max(0, Math.ceil(xs[k] - 0.5)); i <= Math.min(W - 1, Math.floor(xs[k + 1] - 0.5)); i++) label[j * W + i] = id;
+      }
+    }
+  });
+
+  // --- vector distance transform (two-pass, 8SSEDT-style): offset from each texel to its nearest block texel
+  const INF = 30000;
+  const vx = new Int16Array(W * W), vz = new Int16Array(W * W);
+  for (let p = 0; p < W * W; p++) if (label[p] < 0) { vx[p] = INF; vz[p] = INF; }
+  const d2 = p => vx[p] * vx[p] + vz[p] * vz[p];
+  const relax = (p, q, ox, oz) => {
+    if (vx[q] === INF) return;
+    const cx = vx[q] + ox, cz = vz[q] + oz;
+    if (cx * cx + cz * cz < d2(p)) { vx[p] = cx; vz[p] = cz; }
+  };
+  for (let j = 0; j < W; j++) {
+    for (let i = 0; i < W; i++) {
+      const p = j * W + i;
+      if (i > 0) relax(p, p - 1, -1, 0);
+      if (j > 0) { relax(p, p - W, 0, -1); if (i > 0) relax(p, p - W - 1, -1, -1); if (i < W - 1) relax(p, p - W + 1, 1, -1); }
+    }
+    for (let i = W - 2; i >= 0; i--) relax(j * W + i, j * W + i + 1, 1, 0);
+  }
+  for (let j = W - 1; j >= 0; j--) {
+    for (let i = W - 1; i >= 0; i--) {
+      const p = j * W + i;
+      if (i < W - 1) relax(p, p + 1, 1, 0);
+      if (j < W - 1) { relax(p, p + W, 0, 1); if (i < W - 1) relax(p, p + W + 1, 1, 1); if (i > 0) relax(p, p + W - 1, -1, 1); }
+    }
+    for (let i = 1; i < W; i++) relax(j * W + i, j * W + i - 1, -1, 0);
+  }
+
+  // --- pack: R = distance in texels, B = across-street direction (to the nearest block) mod π
+  const data = new Uint8Array(W * W * 4);
+  const D = new Float32Array(W * W);
+  for (let p = 0; p < W * W; p++) {
+    const d = vx[p] === INF ? 255 : Math.sqrt(d2(p));
+    D[p] = d;
+    data[p * 4] = Math.min(255, Math.round(d));
+    let a = Math.atan2(vz[p], vx[p]);
+    if (a < 0) a += Math.PI;
+    data[p * 4 + 2] = Math.round((a / Math.PI) * 255) % 256;
+    data[p * 4 + 3] = 255;
+  }
+  const texture = new THREE.DataTexture(data, W, W, THREE.RGBAFormat);
+  texture.magFilter = THREE.LinearFilter;
+  texture.minFilter = THREE.LinearFilter;
+  texture.needsUpdate = true;
+
+  // streets are at most this far from a block (half an LA freeway); farther is open land
+  const maxHalf = Math.min(250, Math.max(3, (layout.unit * 1.2) / tex));
+
+  // --- which block each building stands on, for traffic weights and when the block "opens"
+  const sample = (x, z) => {
+    const i = Math.floor(toTex(x)), j = Math.floor(toTex(z));
+    return i < 0 || j < 0 || i >= W || j >= W ? -1 : j * W + i;
+  };
+  const weight = new Float64Array(blocks.length), born = new Float64Array(blocks.length).fill(1);
+  files.forEach((f, i) => {
+    const p = sample(B[i].x, B[i].z);
+    const id = p < 0 ? -1 : label[p];
+    if (id < 0) return;
+    weight[id] += inDeg[i] + f.imp.length;
+    born[id] = Math.min(born[id], t01(f.born));
+  });
+  const maxW = Math.max(1, ...weight);
+
+  // --- lanes: every block is circled by a lane halfway between its kerb and the street's centre line,
+  // so the two blocks either side of a street give it traffic in both directions
+  const lanes = [];
+  blocks.forEach((b, id) => {
+    if (b.type === 'park') return;
+    const poly = b.poly;
+    let area = 0;
+    for (let k = 0, m = poly.length - 1; k < poly.length; m = k++) area += (poly[m][0] - poly[k][0]) * (poly[m][1] + poly[k][1]);
+    const out = area > 0 ? 1 : -1; // sign that turns an edge normal outward
+    const gaps = [];
+    for (let k = 0; k < poly.length; k++) {
+      const [ax, az] = poly[k], [bx, bz] = poly[(k + 1) % poly.length];
+      const L = Math.hypot(bx - ax, bz - az);
+      if (L < tex * 2) continue;
+      const nx = out * (bz - az) / L, nz = -out * (bx - ax) / L;
+      // walk outward until the distance stops growing: that's the street's centre
+      let best = 0;
+      for (let s = 1; s < maxHalf; s++) {
+        const p = sample((ax + bx) / 2 + nx * s * tex, (az + bz) / 2 + nz * s * tex);
+        if (p < 0 || label[p] >= 0) break;
+        if (D[p] < best - 0.5) break;
+        best = Math.max(best, D[p]);
+      }
+      gaps.push(best);
+    }
+    if (!gaps.length) return;
+    gaps.sort((p, q) => p - q);
+    const half = gaps[Math.floor(gaps.length * 0.3)];
+    if (half < 1.5) return; // alleys too narrow for a car
+    lanes.push({ pts: offset(poly, out, half * tex * 0.5), lane: half * tex * 0.5, weight: 0.15 + 0.85 * Math.sqrt(weight[id] / maxW), born: born[id] });
+  });
+
+  // --- boats: loops out on the water around each island
+  const boats = layout.groundIsWater
+    ? layout.land.map(poly => {
+      let area = 0;
+      for (let k = 0, m = poly.length - 1; k < poly.length; m = k++) area += (poly[m][0] - poly[k][0]) * (poly[m][1] + poly[k][1]);
+      return { pts: offset(poly, area > 0 ? 1 : -1, layout.unit * 0.9), lane: layout.unit * 0.4, weight: 1, born: 0 };
+    })
+    : [];
+
+  return { texture, min: new THREE.Vector2(x0, x0), size: S, texel: tex, maxHalf, lanes, boats };
+}
+
+// push a polygon outward by `d` (mitred corners, clamped so sharp corners don't spike)
+function offset(poly, out, d) {
+  const n = poly.length;
+  return poly.map((p, k) => {
+    const a = poly[(k - 1 + n) % n], b = poly[(k + 1) % n];
+    const e1 = norm([p[0] - a[0], p[1] - a[1]]), e2 = norm([b[0] - p[0], b[1] - p[1]]);
+    const n1 = [out * e1[1], -out * e1[0]], n2 = [out * e2[1], -out * e2[0]];
+    const m = norm([n1[0] + n2[0], n1[1] + n2[1]]);
+    const s = d / Math.max(0.35, m[0] * n1[0] + m[1] * n1[1]);
+    return [p[0] + m[0] * s, p[1] + m[1] * s];
+  });
+}
+function norm([x, z]) { const L = Math.hypot(x, z) || 1; return [x / L, z / L]; }
+
+// cars (and boats) running round their lanes; positions updated on the CPU each frame — a couple of
+// thousand matrices is nothing next to rendering the city
+export function buildTraffic({ streets, unit, shared, palette }) {
+  const routes = [];
+  const prep = (r, kind) => {
+    const pts = r.pts;
+    const cum = [0];
+    for (let k = 0; k < pts.length; k++) {
+      const a = pts[k], b = pts[(k + 1) % pts.length];
+      cum.push(cum[k] + Math.hypot(b[0] - a[0], b[1] - a[1]));
+    }
+    routes.push({ ...r, kind, cum, L: cum[cum.length - 1] });
+  };
+  streets.lanes.forEach(r => prep(r, 'car'));
+  streets.boats.forEach(r => prep(r, 'boat'));
+
+  const vehicles = [];
+  for (const [ri, r] of routes.entries()) {
+    const len = r.kind === 'boat' ? unit * 0.55 : Math.min(r.lane * 1.7, unit * 0.32);
+    const n = r.kind === 'boat' ? Math.min(5, Math.round(r.L / (unit * 7))) : Math.round((r.L / (len * 7)) * r.weight);
+    for (let k = 0; k < n; k++) vehicles.push({ ri, s0: (k / Math.max(1, n)) * r.L + Math.random() * len, speed: unit * (r.kind === 'boat' ? 0.25 : 0.7) * (0.75 + Math.random() * 0.5), len });
+  }
+  // keep the city lively but not jammed
+  const CAP = 1800;
+  if (vehicles.length > CAP) {
+    for (let k = vehicles.length - 1; k > 0; k--) { const j = Math.floor(Math.random() * (k + 1)); [vehicles[k], vehicles[j]] = [vehicles[j], vehicles[k]]; }
+    vehicles.length = CAP;
+  }
+
+  const geo = new THREE.BoxGeometry(1, 1, 1).translate(0, 0.5, 0);
+  const mesh = new THREE.InstancedMesh(geo, new THREE.MeshLambertMaterial({ flatShading: true }), Math.max(1, vehicles.length));
+  const c = new THREE.Color();
+  vehicles.forEach((v, k) => {
+    const boat = routes[v.ri].kind === 'boat';
+    mesh.setColorAt(k, c.set(boat ? '#f2efe9' : palette[k % palette.length]));
+  });
+  mesh.receiveShadow = true;
+  mesh.frustumCulled = false;
+  const m = new THREE.Matrix4(), q = new THREE.Quaternion(), UP = new THREE.Vector3(0, 1, 0), pos = new THREE.Vector3(), scl = new THREE.Vector3();
+
+  function update(time, timeline, baseY) {
+    vehicles.forEach((v, k) => {
+      const r = routes[v.ri];
+      if (timeline < r.born) { mesh.setMatrixAt(k, m.makeScale(0, 0, 0)); return; }
+      const s = ((v.s0 + time * v.speed) % r.L + r.L) % r.L;
+      let lo = 0, hi = r.cum.length - 1;
+      while (hi - lo > 1) { const mid = (lo + hi) >> 1; if (r.cum[mid] <= s) lo = mid; else hi = mid; }
+      const a = r.pts[lo], b = r.pts[(lo + 1) % r.pts.length];
+      const t = (s - r.cum[lo]) / Math.max(1e-6, r.cum[lo + 1] - r.cum[lo]);
+      const boat = r.kind === 'boat';
+      pos.set(a[0] + (b[0] - a[0]) * t, boat ? 0 : baseY, a[1] + (b[1] - a[1]) * t);
+      q.setFromAxisAngle(UP, -Math.atan2(b[1] - a[1], b[0] - a[0]));
+      scl.set(v.len, v.len * (boat ? 0.3 : 0.4), v.len * (boat ? 0.38 : 0.5));
+      mesh.setMatrixAt(k, m.compose(pos, q, scl));
+    });
+    mesh.instanceMatrix.needsUpdate = true;
+  }
+  return { mesh, update, count: vehicles.length };
+}
