@@ -93,6 +93,15 @@ const GROUND = {
       wave = max(wave, w * sFade(c));
     }
     diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * 1.5 + 0.08, wave);`,
+  // ploughed rows: a dark furrow every few art pixels, the crop between them a little patchy
+  cropx: /* glsl */`
+    vec2 c = vSurfWP.xz / vec2(P(3.0), P(2.0));
+    float furrow = step(fract(c.x), 0.34) * sFade(c);
+    diffuseColor.rgb *= (1.0 - furrow * 0.28) * (1.0 + (sHash(floor(c)) - 0.5) * 0.08);`,
+  cropz: /* glsl */`
+    vec2 c = vSurfWP.xz / vec2(P(2.0), P(3.0));
+    float furrow = step(fract(c.y), 0.34) * sFade(c);
+    diffuseColor.rgb *= (1.0 - furrow * 0.28) * (1.0 + (sHash(floor(c)) - 0.5) * 0.08);`,
   grass: /* glsl */`
     diffuseColor.rgb = sGrass(diffuseColor.rgb);`,
   paving: /* glsl */`

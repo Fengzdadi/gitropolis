@@ -22,7 +22,7 @@
 <div id="labels"></div>
 <script type="module">
 import * as THREE from 'three';
-import { buildingGeometry, BASE_FORMS, LANDMARKS, INDUSTRY, CAMPUS, CAPITAL, DESERT, ERAS, ROOFS, STYLES } from './buildings.js';
+import { buildingGeometry, BASE_FORMS, LANDMARKS, INDUSTRY, CAMPUS, CAPITAL, DESERT, FARMSTEAD, ERAS, ROOFS, STYLES } from './buildings.js';
 
 // One scene, one orthographic iso camera, every building laid out on a grid.
 const W = innerWidth, H = innerHeight;
@@ -48,6 +48,7 @@ const sizes = { // representative footprints per form: [w, d, h]
   college: [16, 6, 10], chapel: [14, 6, 18], library: [14, 14, 18],
   pilotis: [18, 5, 10], congress: [20, 12, 22], cathedral: [10, 10, 12],
   supertall: [7, 7, 50], needle: [8, 8, 70],
+  barn: [12, 7, 9], silo: [6, 6, 16], windmill: [6, 6, 18], bales: [8, 8, 1.5],
 };
 const Q = new URLSearchParams(location.search), only = Q.get('only'), show = g => !only || only.split(',').includes(g);
 const group = (g, fn) => { if (show(g)) fn(); };
@@ -115,6 +116,12 @@ group('capital', () => {
 group('desert', () => {
   const it = (form, era, seed, extra = {}) => ({ spec: { form, era, seed, w: sizes[form][0], d: sizes[form][1], h: sizes[form][2], ...extra }, name: `${form} ${seed}` });
   rows.push({ label: 'desert', items: [it('supertall', 'new', 1), it('supertall', 'new', 2), it('supertall', 'new', 3), it('supertall', 'new', 4), it('supertall', 'new', 6), it('needle', 'new', 5)] });
+});
+
+// the farm village, in each era
+group('farm', () => {
+  const it = (form, era, seed, extra = {}) => ({ spec: { form, era, seed, w: sizes[form][0], d: sizes[form][1], h: sizes[form][2], ...extra }, name: `${form} ${era}` });
+  ERAS.forEach((era, r) => rows.push({ label: `farm ${era}`, items: FARMSTEAD.map((f, i) => it(f, era, 101 + r * 4 + i)) }));
 });
 
 // ?f=courthouse,port keeps only those forms; ?s=rust,go keeps only those styles (for close inspection)

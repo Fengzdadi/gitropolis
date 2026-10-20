@@ -22,7 +22,7 @@ function shortLabel(t) {
   return s.length > 22 ? s.slice(0, 21) + '…' : s;
 }
 
-export const CITY_KINDS = ['desert', 'capital', 'mountain', 'university', 'port', 'smalltown', 'manhattan', 'hongkong', 'tokyo', 'la', 'paris', 'venice', 'barcelona'];
+export const CITY_KINDS = ['farm', 'desert', 'capital', 'mountain', 'university', 'port', 'smalltown', 'manhattan', 'hongkong', 'tokyo', 'la', 'paris', 'venice', 'barcelona'];
 
 // ---------------------------------------------------------------- shared helpers
 
@@ -456,6 +456,61 @@ const PLANNERS = {
       lots, blocks, labels, land: [rectPoly(-ST, -ST, W, H)],
       camera: { az: 45, el: 46, dist: 0.85 },
       height: (i, rel) => i === ctx.hub ? 9 : 1.45 + 0.2 * Math.tanh(Math.log(rel)),
+    };
+  },
+
+  // a farm village: every directory is a farm. Its datasets are fields (sized by their data), its
+  // notebooks and scripts stand in the farmyard, model weights are silos beside the barns, fallow
+  // strips fill out the patchwork, and the most-imported file is the windmill on the village green.
+  farm(ds, ctx) {
+    const files = ctx.files;
+    const CROPS = ['#d9b45a', '#93bf62', '#8c6a45', '#e3cf4a', '#61944a', '#c9a96b', '#a7b85a'];
+    const farms = ds.map(d => {
+      const items = d.items.filter(it => it.i !== ctx.hub);
+      const fields = items.filter(it => files[it.i].lang === 'data');
+      const yard = items.filter(it => files[it.i].lang !== 'data');
+      const fa = sum(fields.map(it => it.a * 1.6)), ya = sum(yard.map(it => it.a)) / 0.45;
+      return { d, fields, yard, fa, ya, area: (fa + ya) * 1.35 + 3 };
+    }).filter(f => f.fields.length + f.yard.length);
+    const green = { green: true, area: 9 };
+    const root = hierarchy({ children: [...farms, green] }).sum(n => n.area || 0).sort((a, b) => b.value - a.value);
+    const A = sum(farms.map(f => f.area)) + 9, side = Math.sqrt(A) * 1.1;
+    treemap().tile(treemapSquarify.ratio(1.3)).size([side, side]).paddingInner(0.7)(root);
+    const lots = [], blocks = [], labels = [];
+    let seed = 1;
+    for (const l of root.leaves()) {
+      const f = l.data, x0 = l.x0, z0 = l.y0, x1 = l.x1, z1 = l.y1;
+      if (f.green) { // the village green and its windmill
+        blocks.push({ poly: rectPoly(x0, z0, x1, z1), type: 'lawn' });
+        lots.push({ i: ctx.hub, x: (x0 + x1) / 2, z: (z0 + z1) / 2, w: 1.3, d: 1.3, rot: 0 });
+        continue;
+      }
+      // inside a farm: the yard is one patch of the patchwork, each dataset another, fallow strips the rest
+      const kids = [{ yard: true, v: Math.max(f.ya, 1.5) }, ...f.fields.map(it => ({ it, v: it.a * 1.6 }))];
+      const fallow = Math.max(0, (x1 - x0) * (z1 - z0) - sum(kids.map(k => k.v)));
+      for (let k = 0, n = Math.min(4, Math.ceil(fallow / 6)); k < n; k++) kids.push({ fallow: true, v: fallow / n });
+      const sub = hierarchy({ children: kids }).sum(n => n.v || 0).sort((a, b) => b.value - a.value);
+      treemap().tile(treemapSquarify.ratio(1.6)).size([x1 - x0, z1 - z0]).paddingInner(0.14)(sub);
+      for (const p of sub.leaves()) {
+        const q = p.data, px0 = x0 + p.x0, pz0 = z0 + p.y0, px1 = x0 + p.x1, pz1 = z0 + p.y1;
+        if (q.yard) {
+          blocks.push({ poly: rectPoly(px0, pz0, px1, pz1), type: 'lawn' }); // the farmyard: grass, a few trees
+          lots.push(...packRect(f.yard, px0, pz0, px1, pz1, 0.22));
+        } else {
+          blocks.push({ poly: rectPoly(px0, pz0, px1, pz1), type: 'crop', color: CROPS[Math.floor(hash(seed++) * CROPS.length)], rows: hash(seed++) < 0.5 ? 'x' : 'z' });
+          if (q.it) lots.push({ i: q.it.i, x: (px0 + px1) / 2, z: (pz0 + pz1) / 2, w: (px1 - px0) * 0.6, d: (pz1 - pz0) * 0.6, rot: 0 });
+        }
+      }
+      if (f.d.name !== '·') labels.push({ text: f.d.name, x: (x0 + x1) / 2, z: z1 + 0.35, weight: f.area });
+    }
+    return {
+      lots, blocks, labels, paths: 'dirt', ground: 'land', land: [rectPoly(-1, -1, side + 1, side + 1)],
+      camera: { az: 45, el: 34, dist: 0.9 },
+      height: (i, rel) => {
+        if (i === ctx.hub) return 3.2;
+        const l = files[i].lang;
+        return l === 'data' ? 0.2 : l === 'model' ? 1.8 : l === 'nb' ? Math.min(0.7 + 0.35 * Math.pow(rel, 0.4), 1.4) : Math.min(0.5 + 0.25 * Math.pow(rel, 0.4), 1);
+      },
     };
   },
 
@@ -1034,7 +1089,7 @@ export function buildLayout(kind, { files, inDeg, SIZE, frontAz }) {
     bridges: (L.bridges || []).map(b => ({ a: P(b.a), b: P(b.b), w: b.w * s })),
     roads: (L.roads || []).map(r => ({ a: P(r.a), b: P(r.b), w: r.w * s })),
     hills: (L.hills || []).map(h => ({ x: (h.x - mx) * s, z: (h.z - mz) * s, r: h.r * s, h: h.h * s })),
-    paths: !!L.paths,
+    paths: L.paths || false,
     sand: !!L.sand,
     stairs: (L.stairs || []).map(st => ({ ...st, x: (st.x - mx) * s, z: (st.z - mz) * s, rise: st.rise * s, run: st.run * s, w: st.w * s, top: st.top * s })),
     cables: (L.cables || []).map(c => ({ a: [...P(c.a), c.a[2] * s], b: [...P(c.b), c.b[2] * s] })),

@@ -4,6 +4,8 @@
 const NONCODE = new Set(['cfg', 'doc', 'lock']);
 // infrastructure as code: it makes a port, but never decides the shape of the code city
 const INFRA = new Set(['hcl', 'yaml', 'jsonnet', 'nix', 'tmpl']);
+// notebooks, datasets and model weights: they make a farm, and never shape a code city
+const FARM = new Set(['nb', 'data', 'model']);
 // prose (docs sites, books): it makes a university town, and like infrastructure never shapes a code city
 const PROSE = new Set(['md']);
 const INFRA_NAMES = { tf: 'Terraform', k8s: 'Kubernetes manifests', chart: 'Helm charts', values: 'Helm charts', kustomize: 'Kustomize', jsonnet: 'jsonnet', ansible: 'Ansible', nix: 'Nix', tmpl: 'templates', yaml: 'YAML' };
@@ -25,15 +27,19 @@ export function cityMetrics(city, now = Date.now() / 1000) {
   // the port: how much of the repo is infrastructure, and which kinds lead
   const infraIdx = all.map((f, i) => INFRA.has(f.lang) ? i : -1).filter(i => i >= 0);
   const proseIdx = all.map((f, i) => PROSE.has(f.lang) ? i : -1).filter(i => i >= 0);
-  const plainIdx = all.map((f, i) => NONCODE.has(f.lang) || INFRA.has(f.lang) || PROSE.has(f.lang) ? -1 : i).filter(i => i >= 0);
+  const farmIdx = all.map((f, i) => FARM.has(f.lang) ? i : -1).filter(i => i >= 0);
+  const plainIdx = all.map((f, i) => NONCODE.has(f.lang) || INFRA.has(f.lang) || PROSE.has(f.lang) || FARM.has(f.lang) ? -1 : i).filter(i => i >= 0);
   const infraLoc = sum(infraIdx.map(i => all[i].loc)), codeLoc = sum(plainIdx.map(i => all[i].loc));
-  const proseLoc = sum(proseIdx.map(i => all[i].loc));
-  const workLoc = Math.max(1, infraLoc + codeLoc + proseLoc);
+  const proseLoc = sum(proseIdx.map(i => all[i].loc)), farmLoc = sum(farmIdx.map(i => all[i].loc));
+  const workLoc = Math.max(1, infraLoc + codeLoc + proseLoc + farmLoc);
+  const farmCount = l => farmIdx.filter(i => all[i].lang === l).length;
   // in a port the infrastructure *is* the codebase, in a university the pages are; anywhere else they don't shape the city
   const isPort = infraLoc / workLoc >= 0.5 && infraIdx.length >= 8;
   const isCampus = !isPort && proseLoc / workLoc >= 0.5 && proseIdx.length >= 10;
+  const isFarm = !isPort && !isCampus && farmLoc / workLoc >= 0.4 && farmIdx.length >= 10;
   const codeIdx = isPort ? [...plainIdx, ...infraIdx].sort((a, b) => a - b)
-    : isCampus ? [...plainIdx, ...proseIdx].sort((a, b) => a - b) : plainIdx;
+    : isCampus ? [...plainIdx, ...proseIdx].sort((a, b) => a - b)
+    : isFarm ? [...plainIdx, ...farmIdx].sort((a, b) => a - b) : plainIdx;
   const locales = new Set(proseIdx.filter(i => all[i].a?.k === 'i18n').map(i => all[i].p.split('/').find(s => /^([a-z]+\.)?[a-z]{2}([_-][a-zA-Z]{2,4})?$/i.test(s)) || 'i18n'));
   const kindLoc = {};
   for (const i of infraIdx) { const k = INFRA_NAMES[all[i].a?.k] || 'YAML'; kindLoc[k] = (kindLoc[k] || 0) + all[i].loc; }
@@ -159,7 +165,7 @@ export function cityMetrics(city, now = Date.now() / 1000) {
   }
 
   // history is judged on code alone: a late package.json bump must not stretch the timeline
-  const workIdx = isPort || isCampus ? codeIdx : [...codeIdx, ...infraIdx]; // infrastructure is real work for the timeline
+  const workIdx = isPort || isCampus || isFarm ? codeIdx : [...codeIdx, ...infraIdx]; // infrastructure is real work for the timeline
   const cfgOnly = workIdx.length < all.length;
   const start = cfgOnly && workIdx.length ? Math.min(...workIdx.map(i => all[i].born)) : city.start;
   const end = cfgOnly && workIdx.length ? Math.max(...workIdx.map(i => all[i].last)) : city.end;
@@ -205,6 +211,9 @@ export function cityMetrics(city, now = Date.now() / 1000) {
     hardware: (city.extras?.hardwareFiles || 0) > 0,
     infraFiles: infraIdx.length,
     infraShare: infraLoc / Math.max(1, infraLoc + codeLoc),
+    farmFiles: farmIdx.length,
+    farmShare: farmLoc / workLoc,
+    notebooks: farmCount('nb'), datasets: farmCount('data'), models: farmCount('model'),
     proseFiles: proseIdx.length,
     proseShare: proseLoc / workLoc,
     proseWords: Math.round(proseLoc * 9), // ~9 words per non-empty line of prose
@@ -217,6 +226,10 @@ export function cityMetrics(city, now = Date.now() / 1000) {
 
 // Each archetype: a list of [score 0..1, reason] terms; the city's score is their mean.
 const ARCHETYPES = {
+  farm: m => [
+    [ramp(m.farmShare, 0.3, 0.6), `${pct(m.farmShare)} of it is notebooks and data, not code`],
+    [ramp(m.farmFiles, 10, 60), [m.notebooks && `${m.notebooks} notebooks`, m.datasets && `${m.datasets} datasets`, m.models && `${m.models} models`].filter(Boolean).join(', ') + ' on the land'],
+  ],
   desert: m => [
     [1 - ramp(m.ageYears, 1.5, 3), `only ${Math.max(1, Math.round(m.ageYears * 12))} months old`],
     [ramp(m.commitsPerWeek, 15, 80), `${Math.round(m.commitsPerWeek)} commits a week: towers going up faster than the roads`],
@@ -295,7 +308,7 @@ const STATES = {
 };
 
 export const CITY_NAMES = {
-  desert: 'Desert Boomtown', capital: 'Planned Capital', mountain: 'Mountain City', university: 'University Town', port: 'Port City', smalltown: 'Small Town', manhattan: 'Manhattan', hongkong: 'Hong Kong', tokyo: 'Tokyo',
+  farm: 'Farm Village', desert: 'Desert Boomtown', capital: 'Planned Capital', mountain: 'Mountain City', university: 'University Town', port: 'Port City', smalltown: 'Small Town', manhattan: 'Manhattan', hongkong: 'Hong Kong', tokyo: 'Tokyo',
   la: 'Los Angeles', paris: 'Paris', venice: 'Venice', barcelona: 'Barcelona',
 };
 
@@ -309,6 +322,7 @@ export function classify(city) {
   const port = scored.find(s => s.id === 'port');
   const best = m.infraShare >= 0.5 && m.infraFiles >= 8 ? port
     : m.proseShare >= 0.5 && m.proseFiles >= 10 ? scored.find(s => s.id === 'university')
+    : m.farmShare >= 0.4 && m.farmFiles >= 10 ? scored.find(s => s.id === 'farm')
     // a big city out of nothing in under two years is a boomtown, whatever its streets look like
     : m.ageYears < 2 && m.commitsPerWeek >= 15 && m.files >= 150 ? scored.find(s => s.id === 'desert')
     : m.files < 15 ? scored.find(s => s.id === 'smalltown') : scored[0];

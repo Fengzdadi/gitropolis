@@ -20,6 +20,12 @@ const LANGS = {
   md: 'md', mdx: 'md', markdown: 'md', rst: 'md', adoc: 'md',
 };
 export const PROSE = new Set(['md']);
+// a farm: notebooks are the farmhouses, datasets the fields, model weights the silos
+export const FARM = new Set(['nb', 'data', 'model']);
+const FARM_MIN = 0.25;
+const DATA_EXT = /\.(csv|tsv|xlsx?|parquet|feather|arrow|jsonl|ndjson|dta|sav)$/i;
+const MODEL_EXT = /\.(pt|pth|ckpt|onnx|safetensors|h5|hdf5|pkl|pickle|joblib|npy|npz|bin|gguf)$/i;
+const BINARY_FARM = /\.(xlsx?|parquet|feather|arrow|dta|sav|pt|pth|ckpt|onnx|safetensors|h5|hdf5|pkl|pickle|joblib|npy|npz|bin|gguf)$/i;
 // a docs site or a book: its pages are the city (a university town). Ordinary repos' docs/ folders
 // stay out, so their cities don't change.
 const PROSE_MIN = 0.4;
@@ -64,13 +70,29 @@ export async function scanRepo(repo, { maxCommits = 20000 } = {}) {
   for (const p of listed) {
     const ext = p.slice(p.lastIndexOf('.') + 1).toLowerCase();
     const base = p.slice(p.lastIndexOf('/') + 1);
-    const lang = LOCKFILE.test(p) ? 'lock' : CFG_FILE.test(p) ? 'cfg' : docRole(base) ? 'doc' : LANGS[ext];
+    const lang = LOCKFILE.test(p) ? 'lock' : CFG_FILE.test(p) ? 'cfg' : docRole(base) ? 'doc'
+      : ext === 'ipynb' ? 'nb' : DATA_EXT.test(p) ? 'data' : MODEL_EXT.test(p) && !/(^|\/)(node_modules|tests?)\//.test(p) ? 'model' : LANGS[ext];
     if (!lang || SKIP_DIR.test(p) || SKIP_FILE.test(p)) continue;
     let text, loc = 0;
     try {
       const full = path.join(root, p);
       const size = statSync(full).size;
-      if (size > MAX_BYTES) {
+      if (lang === 'data' || lang === 'model') {
+        // a dataset's or a model's size is what matters, not its text: about a line per 60 bytes of
+        // table, per 2 KB of weights (a field and a silo should be big, not the whole map)
+        if (BINARY_FARM.test(p) || size > MAX_BYTES) { loc = Math.max(10, Math.min(lang === 'model' ? 3000 : 20000, Math.round(size / (lang === 'model' ? 2000 : 60)))); text = ''; }
+        else text = readFileSync(full, 'utf8');
+      } else if (lang === 'nb') {
+        // a notebook's lines are its cells' source; outputs (often megabytes of images) don't count
+        if (size > 30 * MAX_BYTES) continue;
+        try {
+          const nb = JSON.parse(readFileSync(full, 'utf8'));
+          const cells = nb.cells || nb.worksheets?.[0]?.cells || [];
+          const src = c => [].concat(c.source ?? c.input ?? []).join('');
+          text = cells.filter(c => c.cell_type === 'code').map(src).join('\n');
+          loc = cells.map(src).join('\n').split('\n').filter(l => l.trim()).length;
+        } catch { continue; }
+      } else if (size > MAX_BYTES) {
         // a huge lockfile is still a landmark: estimate its lines instead of reading it
         if (lang !== 'lock') continue;
         loc = Math.round(size / 40); text = '';
@@ -83,7 +105,8 @@ export async function scanRepo(repo, { maxCommits = 20000 } = {}) {
     else if (LINKED.has(lang) && text.includes('.')) for (const m of text.matchAll(STR_REF)) refs.add(stemOf(m[1]));
     if (!loc) for (const line of text.split('\n')) if (line.trim()) loc++;
     if (!loc) continue;
-    const a = INFRA.has(lang) ? { c: 0, f: 0, lf: 0, x: 0, r: 'infra', k: infraKind(p, text, lang) }
+    const a = FARM.has(lang) ? { c: 0, f: 0, lf: 0, x: 0, r: { nb: 'notebook', data: 'field', model: 'silo' }[lang], k: p.slice(p.lastIndexOf('.') + 1).toLowerCase() }
+      : INFRA.has(lang) ? { c: 0, f: 0, lf: 0, x: 0, r: 'infra', k: infraKind(p, text, lang) }
       : PROSE.has(lang) ? { c: (text.match(/^#{1,3} /gm) || []).length, f: 0, lf: 0, x: 0, r: 'page', k: pageKind(p) }
       : fileAnatomy(p, text, lang);
     files.push({ p, lang, loc, a, text, imp: new Set(), churn: 0, born: 0, last: 0 });
@@ -95,6 +118,14 @@ export async function scanRepo(repo, { maxCommits = 20000 } = {}) {
     }
     if (infraN < 8 || infraLoc / Math.max(1, infraLoc + codeLoc) < INFRA_MIN) {
       for (let k = files.length - 1; k >= 0; k--) if (INFRA.has(files[k].lang)) files.splice(k, 1);
+    }
+    // a farm keeps its notebooks, datasets and models when together they're a real share of the repo
+    let farmLoc = 0, farmN = 0;
+    for (const f of files) if (FARM.has(f.lang) && !INFRA_FIXTURE.test(f.p)) { farmLoc += f.loc; farmN++; }
+    const plainLoc = codeLoc - files.filter(f => FARM.has(f.lang) && !INFRA_FIXTURE.test(f.p)).reduce((s2, f) => s2 + f.loc, 0);
+    if (farmN < 8 || farmLoc / Math.max(1, farmLoc + Math.max(0, plainLoc) + infraLoc) < FARM_MIN) {
+      for (let k = files.length - 1; k >= 0; k--) if (FARM.has(files[k].lang)) files.splice(k, 1);
+      codeLoc = Math.max(0, plainLoc);
     }
     let proseLoc = 0, proseN = 0;
     for (const f of files) if (PROSE.has(f.lang) && !INFRA_FIXTURE.test(f.p.replace(/(^|\/)docs?\//, '$1'))) { proseLoc += f.loc; proseN++; }
@@ -325,7 +356,7 @@ function resolveImports(root, files, index, listed) {
           if (stripped !== base && index.has(stripped + ext)) { addEdge(f, stripped + ext); break; }
         }
       }
-    } else if (f.lang === 'py') {
+    } else if (f.lang === 'py' || f.lang === 'nb') {
       for (const m of text.matchAll(PY_RE)) {
         if (m[1] !== undefined) {
           let mod = m[1];

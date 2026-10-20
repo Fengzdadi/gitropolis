@@ -55,6 +55,7 @@ const MIX = {
   mountain: { conifer: 3, round: 2, blossom: 1 },
   capital: { round: 3, palm: 1 },
   desert: { palm: 1 },
+  farm: { round: 2, autumn: 2, conifer: 1 },
 };
 
 function pickSpecies(kind, seed) {

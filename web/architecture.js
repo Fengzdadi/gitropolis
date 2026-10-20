@@ -5,7 +5,7 @@ import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { addFacadeDetail } from './surfaces.js';
 
 const PERIPHERY = /(^|\/)(tests?|__tests__|specs?|e2e|fixtures?|samples?|examples?|docs?|playgrounds?|templates?|benchmarks?)(\/|$)/;
-const ROOF_BY_CITY = { port: 'flat', paris: 'mansard', smalltown: 'gable', la: 'flat', venice: 'hip', barcelona: 'flat' };
+const ROOF_BY_CITY = { farm: 'gable', port: 'flat', paris: 'mansard', smalltown: 'gable', la: 'flat', venice: 'hip', barcelona: 'flat' };
 // each language builds in its own vernacular
 // kinds of infrastructure as code → port industry (Terraform is decided by size: plant or factory)
 // kinds of page → campus buildings
@@ -35,6 +35,8 @@ export function buildingSpecs({ files, B, inDeg, unit, kind, t01 }) {
   const maxIn = Math.max(...inDeg);
   const crowdLoc = N > 6000 ? locs[Math.floor(N * 0.8)] : 0;
   const entry = outDeg.indexOf(Math.max(...outDeg));
+  const nbLocs = files.filter(f => f.a?.r === 'notebook').map(f => f.loc).sort((a, b) => a - b);
+  const barnLoc = nbLocs.length ? nbLocs[Math.floor(nbLocs.length * 0.85)] : Infinity; // only the biggest notebooks are barns
   // the city's own vernacular (for manifests, docs and other non-code buildings): its biggest language
   const byLang = {};
   for (const f of files) if (CODE.has(f.lang)) byLang[f.lang] = (byLang[f.lang] || 0) + f.loc;
@@ -89,6 +91,10 @@ export function buildingSpecs({ files, B, inDeg, unit, kind, t01 }) {
       // infrastructure is the port's industry: what a file describes decides what stands on the quay
       // prose is the university's fabric: chapters are colleges, contents pages are chapels
       // (a huge campus, like a 40,000-page wiki, keeps colleges for its longer pages: the rest are row houses)
+      // the farm: notebooks are farmhouses (the big ones barns), datasets bales in their field, models silos
+      case 'notebook': form = f.loc >= barnLoc ? 'barn' : 'house'; break;
+      case 'field': form = 'bales'; break;
+      case 'silo': form = 'silo'; break;
       case 'page': form = f.loc < medLoc * 0.3 || f.loc < crowdLoc ? 'house' : PAGE_FORM[pageKind] || 'college'; break;
       case 'infra': form = INFRA_FORM[a.k] || 'containers';
         if (a.k === 'tf') form = f.loc > medLoc * 2 ? 'plant' : 'shed';
@@ -101,13 +107,16 @@ export function buildingSpecs({ files, B, inDeg, unit, kind, t01 }) {
         else form = 'slab';
     }
     // the city's landmark is always a tower, whatever kind of file it is
-    const hub = inDeg[i] === maxIn && maxIn > 0;
+    // (a farm always has its windmill: with no imports at all, the green holds the first file)
+    const hub = (inDeg[i] === maxIn && maxIn > 0) || (kind === 'farm' && maxIn === 0 && i === 0);
     const status = new Set(f.s || []);
     if (status.has('giant') && role === 'source') form = 'mega';
-    else if (hub) form = town ? 'clocktower' : kind === 'port' ? 'lighthouse' : kind === 'university' ? 'library' : kind === 'capital' ? 'congress' : kind === 'desert' ? 'needle' : (a.c || 0) >= 2 ? 'setback' : 'tower';
+    else if (hub) form = town ? 'clocktower' : kind === 'port' ? 'lighthouse' : kind === 'university' ? 'library' : kind === 'capital' ? 'congress' : kind === 'desert' ? 'needle' : kind === 'farm' ? 'windmill' : (a.c || 0) >= 2 ? 'setback' : 'tower';
     else if (kind === 'capital' && i === entry) form = 'cathedral'; // the file that imports the most: where the plan is read from
     else if (status.has('dead')) form = 'ruin';
     else if (sites.has(i)) form = 'site';
+    // on a farm, scripts are workshops in the yard
+    if (kind === 'farm' && ['slab', 'tower', 'setback', 'podium', 'hall', 'frame', 'mega'].includes(form)) form = 'shed';
     // the boomtown's strip: anything that tall is a supertall
     if (kind === 'desert' && !hub && b.h > unit * 2.8 && ['slab', 'tower', 'setback', 'podium', 'hall', 'frame', 'mega', 'house', 'shed'].includes(form)) form = 'supertall';
     if (kind === 'capital' && ['slab', 'tower', 'setback', 'podium', 'house', 'hall', 'frame', 'mega'].includes(form)) form = 'pilotis';
@@ -119,6 +128,7 @@ export function buildingSpecs({ files, B, inDeg, unit, kind, t01 }) {
     if (form === 'chapel') h = Math.max(b.h, unit * 1.7);
     if (form === 'library') h = Math.max(b.h, unit * 2.4);
     if (form === 'needle') h = Math.max(b.h, unit * 8);
+    if (form === 'windmill') h = Math.max(b.h, unit * 2.2);
     if (form === 'cathedral') h = Math.max(b.h * 0.8, unit * 1.3);
     if (form === 'ruin') h *= 0.6;
     if (form === 'site') h *= 0.35;

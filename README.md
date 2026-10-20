@@ -62,6 +62,10 @@ gitropolis reads the shape of your code and picks a plan to match it. A big mono
 <td><img src="docs/media/desert-openai-agents.png" alt="openai-agents-python as a desert boomtown"><br><b>Desert boomtown</b>: openai-agents-python. A big city out of nothing in under two years. The biggest files are supertalls along the coast highway, the newest ones are still cranes, and the tests live in villas on a palm island.</td>
 <td><img src="docs/media/desert-flask.png" alt="flask drawn as a desert boomtown"><br><b>Desert boomtown</b>: flask <sup>*</sup>, drawn small enough to see every piece. The needle is the most-depended-on file, with twisting, sail and crowned towers, empty plots of sand, and the palm with its crescent.</td>
 </tr>
+<tr>
+<td><img src="docs/media/farm-pdsh.png" alt="Python Data Science Handbook as a farm village"><br><b>Farm village</b>: Python Data Science Handbook. Notebooks and data, not code. Notebooks are farmhouses (the biggest are barns), datasets are crop fields sized by their data, and a windmill stands on the village green.</td>
+<td><img src="docs/media/farm-538-data.png" alt="close-up of FiveThirtyEight's data repo as a farm village"><br><b>Farm village</b>: FiveThirtyEight's data, close up. 635 datasets make a patchwork of fields, each a different crop with its furrows running one way or the other, and hay bales on it.</td>
+</tr>
 </table>
 
 <sub><sup>*</sup> These were forced with `--city`; left to itself, gitropolis plans these repos as Paris and Manhattan. Any repo can be drawn as any city.</sub>
@@ -88,6 +92,7 @@ Some repos also get a condition on top of their plan. A repo with no recent comm
 | The tallest spire | the most-imported file |
 | City hall · courthouse · clock tower | README · LICENSE · CHANGELOG |
 | Port · power plant · airport | lockfile · package manifest · deploy config |
+| Field · farmhouse · barn · silo · windmill | a dataset · a notebook · a big notebook · model weights · the most-imported file |
 | Supertall · needle · crane · palm villa | one of the biggest files · the most-depended-on file · a file born in the last stretch · a test or doc |
 | Axis · superblock · congress · cathedral | a layer of the design · a package · the most-depended-on file · the file that imports the most |
 | Terrace · stairway | a package (subpackages are higher terraces) · the empty directories a path climbs through |
@@ -113,7 +118,7 @@ Filming runs in headless Chrome, so it looks the same on every machine. It needs
 
 | Option | Default | |
 |---|---|---|
-| `--city <plan>` | `auto` | `desert` `capital` `mountain` `university` `port` `smalltown` `manhattan` `hongkong` `tokyo` `la` `paris` `venice` `barcelona` |
+| `--city <plan>` | `auto` | `farm` `desert` `capital` `mountain` `university` `port` `smalltown` `manhattan` `hongkong` `tokyo` `la` `paris` `venice` `barcelona` |
 | `--style <look>` | `pixel` | `maquette` `plan` `nocturne` are smooth-shaded alternatives |
 | `--pixel <n>` | `2` | size of one art pixel, in screen pixels |
 | `--zoom <n>` | `1` | close-up factor; `3` frames the city centre |
@@ -129,7 +134,7 @@ Filming runs in headless Chrome, so it looks the same on every machine. It needs
 
 ## How it works
 
-1. **Scan.** `git ls-files`, a regex import pass for JS/TS, Python, Go, Rust, Java, Kotlin and C/C++ (including workspace packages), and a pass over `git log --numstat` that follows renames. Infrastructure as code is read too, when a repo has enough of it: Terraform module sources, jsonnet imports, Kustomize resources, Helm values and Ansible roles all count as links. So does prose in a docs site or a book: Markdown links between pages.
+1. **Scan.** `git ls-files`, a regex import pass for JS/TS, Python, Go, Rust, Java, Kotlin and C/C++ (including workspace packages), and a pass over `git log --numstat` that follows renames. Infrastructure as code is read too, when a repo has enough of it: Terraform module sources, jsonnet imports, Kustomize resources, Helm values and Ansible roles all count as links. So does prose in a docs site or a book: Markdown links between pages. Notebooks are read cell by cell (their imports count too), and datasets and model weights by their size.
 2. **Plan.** gitropolis measures the code: file sizes, directory depth, import density, how much the packages depend on each other, and the project's age. It scores each city archetype on these numbers and lays out the winner's streets, blocks, water and landmarks.
 3. **Build.** Every file gets a procedural building. Thousands of them merge into one mesh, so even an 8,600-file repo like svelte keeps a full frame rate.
 4. **Draw.** The lit scene renders at a fraction of screen resolution and is quantised to a fixed palette with ordered dithering. Silhouettes get ink outlines from the depth buffer, and the result is scaled up with hard pixels. Brick courses, roof tiles, glass and water are painted in art pixels, so they stay crisp at every zoom.

@@ -42,7 +42,8 @@ export const INDUSTRY = ['containers', 'tanks', 'warehouse', 'lighthouse']; // t
 export const CAMPUS = ['college', 'chapel', 'library']; // the university town
 export const CAPITAL = ['pilotis', 'congress', 'cathedral']; // the planned capital
 export const DESERT = ['supertall', 'needle']; // the desert boomtown
-export const FORMS = [...BASE_FORMS, ...LANDMARKS, ...INDUSTRY, ...CAMPUS, ...CAPITAL, ...DESERT];
+export const FARMSTEAD = ['barn', 'silo', 'windmill', 'bales']; // the farm village
+export const FORMS = [...BASE_FORMS, ...LANDMARKS, ...INDUSTRY, ...CAMPUS, ...CAPITAL, ...DESERT, ...FARMSTEAD];
 export const STYLES = ['rust', 'c', 'cpp', 'go', 'python', 'js', 'ts', 'java', 'ruby', 'php', 'shell', 'default'];
 export const ERAS = ['old', 'mid', 'new'];
 export const ROOFS = ['flat', 'gable', 'hip', 'mansard', 'spire', 'dome'];
@@ -1751,6 +1752,94 @@ function buildNeedle(M, S) {
   return null;
 }
 
+// ------------------------------------------------------------ the farm village
+// barn: red boards under a gambrel roof, white trim, big doors on the gable end, a hay loft door
+function buildBarn(M, S) {
+  const { w, d, h, u } = S;
+  const alongX = w >= d, L = alongX ? w : d, W = alongX ? d : w;
+  const red = rgb(S.P.brick[S.era === 'new' ? 2 : 0]), white = S.white, roofC = S.era === 'old' ? rgb(S.P.roof[1]) : S.slate;
+  const wallH = h * 0.45, k1 = h * 0.78; // eaves, knee of the gambrel
+  M.swap = !alongX;
+  M.box(-L / 2, L / 2, 0, wallH, -W / 2, W / 2, [WALL, red], null, ['top']);
+  // gambrel: steep lower slopes, shallow upper ones (built as two gables' worth of quads)
+  const e = u * 0.04, wk = W * 0.32;
+  for (const sz of [-1, 1]) {
+    M.quad([-L / 2 - e, wallH, sz * (W / 2 + e)], [L / 2 + e, wallH, sz * (W / 2 + e)], [L / 2 + e, k1, sz * wk], [-L / 2 - e, k1, sz * wk], ROOF, roofC, [0, wallH, 0]);
+    M.quad([-L / 2 - e, k1, sz * wk], [L / 2 + e, k1, sz * wk], [L / 2 + e, h, 0], [-L / 2 - e, h, 0], ROOF, roofC, [0, wallH, 0]);
+  }
+  for (const sx of [-1, 1]) { // the gable ends, filled in
+    const x = sx * L / 2;
+    M.quad([x, wallH, -W / 2], [x, wallH, W / 2], [x, k1, wk], [x, k1, -wk], WALL, red, [0, wallH, 0]);
+    M.quad([x, k1, -wk], [x, k1, wk], [x, h, 0], [x, h, 0], WALL, red, [0, wallH, 0]);
+    M.tri([x, k1, -wk], [x, k1, wk], [x, h, 0], WALL, red, [0, k1, 0]);
+  }
+  const o = Math.max(u * 0.01, 0.003), dw = W * 0.5;
+  // doors on the end the camera sees, with the white X brace, and the loft door above
+  M.quad([L / 2 + o, 0, -dw / 2], [L / 2 + o, 0, dw / 2], [L / 2 + o, wallH * 0.8, dw / 2], [L / 2 + o, wallH * 0.8, -dw / 2], TRIM, white, [0, wallH * 0.4, 0]);
+  M.quad([L / 2 + o * 2, wallH * 0.06, -dw / 2 + dw * 0.08], [L / 2 + o * 2, wallH * 0.06, dw / 2 - dw * 0.08], [L / 2 + o * 2, wallH * 0.74, dw / 2 - dw * 0.08], [L / 2 + o * 2, wallH * 0.74, -dw / 2 + dw * 0.08], TRIM, red, [0, wallH * 0.4, 0]);
+  M.quad([L / 2 + o, k1 * 0.95, -W * 0.1], [L / 2 + o, k1 * 0.95, W * 0.1], [L / 2 + o, k1 * 0.95 + (h - k1) * 0.5, W * 0.1], [L / 2 + o, k1 * 0.95 + (h - k1) * 0.5, -W * 0.1], TRIM, S.dark, [0, wallH * 0.4, 0]);
+  M.box(-L / 2, L / 2, wallH * 0.98, wallH, W / 2, W / 2 + o, [TRIM, white], null, ['nz', 'top']); // eave trim
+  M.swap = false;
+  return null;
+}
+
+// silo: a tall corrugated cylinder with a domed cap, a ladder, often a shorter twin beside it
+function buildSilo(M, S) {
+  const { w, d, h, u } = S, rng = S.rng;
+  const R = Math.min(w, d) * 0.3, steel = S.era === 'old' ? rgb(S.P.concrete[0]) : S.alu, cap = S.era === 'old' ? rgb(S.P.roof[3]) : S.steel;
+  const one = (x, z, r, H) => {
+    M.loft(x, z, [[0, r, r], [H, r, r]], 10, [WALL, steel]);
+    for (let k = 1; k < 4; k++) M.loft(x, z, [[H * k / 4, r * 1.03, r * 1.03], [H * k / 4 + H * 0.015, r * 1.03, r * 1.03]], 10, [TRIM, S.trim]);
+    M.loft(x, z, [[H, r * 1.04, r * 1.04], [H + r * 0.45, r * 0.6, r * 0.6], [H + r * 0.7, 0, 0]], 10, [ROOF, cap]);
+    M.box(x + r * 0.95, x + r * 1.05, 0, H, z - r * 0.1, z + r * 0.1, [TRIM, S.dark], null, ['top']); // ladder
+  };
+  one(-w * 0.15, -d * 0.1, R, h * 0.85);
+  if (rng() < 0.6) one(w * 0.28, d * 0.22, R * 0.75, h * 0.6);
+  return null;
+}
+
+// windmill: a white tapered tower, a cap, and four latticed sails
+function buildWindmill(M, S) {
+  const { w, d, h, u } = S;
+  const R = Math.min(w, d) * 0.32, white = S.white, cap = rgb(S.P.roof[1]), sail = rgb(S.P.accent[2]);
+  const top = h * 0.62;
+  M.loft(0, 0, [[0, R, R], [top, R * 0.62, R * 0.62]], 8, [WALL, white], { rot: Math.PI / 8 });
+  M.loft(0, 0, [[top, R * 0.7, R * 0.7], [top + R * 0.5, R * 0.4, R * 0.4], [top + R * 0.75, 0, 0]], 8, [ROOF, cap], { rot: Math.PI / 8 });
+  put(M, rectG(0, 0, R * 1.6, R * 1.6), 0, -R * 0.15, R * 0.15, 0, h * 0.12, Math.max(u * 0.01, 0.003), TRIM, S.dark); // door
+  const hub = [R * 0.35, top + R * 0.25, R * 0.75], L = (h - top) * 1.15, t = Math.max(u * 0.02, R * 0.07);
+  for (let k = 0; k < 4; k++) {
+    const a = Math.PI / 4 + k * Math.PI / 2, dx = Math.cos(a), dy = Math.sin(a);
+    const tip = [hub[0] + dx * L * 0.7, hub[1] + dy * L, hub[2] + dx * L * 0.25];
+    M.strut(hub, tip, t, TRIM, cap, true);
+    const off = [-dy * L * 0.12 * 0.7, dx * L * 0.12, -dy * L * 0.12 * 0.25]; // the sail cloth beside the stock
+    const p0 = hub.map((v, i) => v + (tip[i] - v) * 0.25), p1 = tip;
+    M.quad(p0, p1, p1.map((v, i) => v + off[i]), p0.map((v, i) => v + off[i]), ACC, sail, null);
+    M.quad(p0.map((v, i) => v + off[i]), p1.map((v, i) => v + off[i]), p1, p0, ACC, sail, null);
+  }
+  return null;
+}
+
+// hay bales: a few round bales lying in the field (a dataset's own marker)
+function buildBales(M, S) {
+  const { w, d, h, u } = S, rng = S.rng;
+  const r = Math.min(u * 0.18, h * 0.5), hay = rgb(S.P.accent[0]), n = 2 + Math.floor(rng() * 4);
+  for (let k = 0; k < n; k++) {
+    const x = (rng() - 0.5) * w * 0.7, z = (rng() - 0.5) * d * 0.7;
+    // lying on its side: a short cylinder along x (lofted upright, then laid down by swapping y/x)
+    const ring = [];
+    for (let i = 0; i < 8; i++) { const a = i / 8 * TAU; ring.push([Math.cos(a) * r, r + Math.sin(a) * r]); }
+    for (let i = 0; i < 8; i++) {
+      const [y0z, y0] = ring[i], [y1z, y1] = ring[(i + 1) % 8];
+      M.quad([x - r * 0.6, y0, z + y0z], [x + r * 0.6, y0, z + y0z], [x + r * 0.6, y1, z + y1z], [x - r * 0.6, y1, z + y1z], ROOF, hay, [x, r, z]);
+    }
+    for (const sx of [-1, 1]) for (let i = 0; i < 8; i++) {
+      const [az, ay] = ring[i], [bz, by] = ring[(i + 1) % 8];
+      M.tri([x + sx * r * 0.6, r, z], [x + sx * r * 0.6, ay, z + az], [x + sx * r * 0.6, by, z + bz], WALL, hay, [x, r, z]);
+    }
+  }
+  return null;
+}
+
 // a container ship moored in a basin: not a file, just the harbour's life. Bow towards +x.
 export function shipGeometry({ len, beam, seed = 1 }) {
   const M = new Builder(), rng = mulberry32(seed * 2654435761 + 7);
@@ -1789,7 +1878,8 @@ const BUILDERS = { slab: buildSlab, tower: buildTower, setback: buildSetback, po
   containers: buildContainers, tanks: buildTanks, warehouse: buildWarehouse, lighthouse: buildLighthouse,
   college: buildCollege, chapel: buildChapel, library: buildLibrary,
   pilotis: buildPilotis, congress: buildCongress, cathedral: buildCathedral,
-  supertall: buildSupertall, needle: buildNeedle };
+  supertall: buildSupertall, needle: buildNeedle,
+  barn: buildBarn, silo: buildSilo, windmill: buildWindmill, bales: buildBales };
 
 const FLAT = { old: 'flat', mid: 'flat', new: 'flat' };
 const DEFAULT_ROOF = {
@@ -1807,6 +1897,7 @@ const DEFAULT_ROOF = {
   college: FLAT, chapel: FLAT, library: FLAT,
   pilotis: FLAT, congress: FLAT, cathedral: FLAT,
   supertall: FLAT, needle: FLAT,
+  barn: FLAT, silo: FLAT, windmill: FLAT, bales: FLAT,
 };
 // landmarks that ignore the era: a ruin is always weathered, a building site is always raw
 const FORCE_ERA = { ruin: 'old', site: 'mid' };

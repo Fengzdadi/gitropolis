@@ -22,7 +22,7 @@ if (args.includes('--help') || args.includes('-h')) {
   gitropolis [repo]                     open the city in your browser (repo defaults to .)
 
   --style pixel|maquette|plan|nocturne  look (default pixel)
-  --city auto|desert|capital|mountain|university|port|smalltown|manhattan|hongkong|tokyo|la|paris|venice|barcelona
+  --city auto|farm|desert|capital|mountain|university|port|smalltown|manhattan|hongkong|tokyo|la|paris|venice|barcelona
                                         city plan (default: picked from the code)
   --pixel <n>  --zoom <n>               art-pixel size (default 2), close-up factor
   --still <file.png> [--shot hero|aerial|street|plan] [--no-hud]
@@ -51,7 +51,7 @@ const headed = bool('--headed');
 const style = flag('--style', 'pixel');
 const pxOpt = flag('--pixel'); // pixel style: size of one art pixel (default 2)
 const zoomOpt = flag('--zoom'); // close-up factor (pixel style)
-const cityOpt = flag('--city', 'auto'); // auto | classic | desert | capital | mountain | university | port | smalltown | manhattan | hongkong | tokyo | la | paris | venice | barcelona
+const cityOpt = flag('--city', 'auto'); // auto | classic | farm | desert | capital | mountain | university | port | smalltown | manhattan | hongkong | tokyo | la | paris | venice | barcelona
 const still = flag('--still');
 const shot = flag('--shot', 'hero');
 const noHud = bool('--no-hud');
