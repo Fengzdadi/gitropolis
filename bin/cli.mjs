@@ -36,10 +36,11 @@ const cityOpt = flag('--city', 'auto'); // auto | classic | smalltown | manhatta
 const still = flag('--still');
 const shot = flag('--shot', 'hero');
 const noHud = bool('--no-hud');
-const fixedCam = bool('--static'); // films: hold the establishing shot instead of pushing in
+const fixedCam = bool('--static');
+const benchMode = bool('--bench'); // measure setup and frame cost in headless Chrome // films: hold the establishing shot instead of pushing in
 const noOpen = bool('--no-open');
 const repo = args[0] || process.cwd();
-const recording = !!(video || gif || still);
+const recording = !!(video || gif || still || benchMode);
 
 const WEB = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'web');
 const TYPES = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.json': 'application/json' };
@@ -75,7 +76,7 @@ if (recording) {
   const tmp = await mkdtemp(path.join(os.tmpdir(), 'gitropolis-'));
   // frames land in a near-lossless master first; the size-capped outputs are encoded from it
   const mp4 = path.join(tmp, 'master.mp4');
-  const ff = still ? null : spawn('ffmpeg', ['-y', '-loglevel', 'error', '-f', 'image2pipe', '-framerate', String(fps), '-c:v', 'mjpeg', '-i', '-',
+  const ff = still || benchMode ? null : spawn('ffmpeg', ['-y', '-loglevel', 'error', '-f', 'image2pipe', '-framerate', String(fps), '-c:v', 'mjpeg', '-i', '-',
     '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '12', '-pix_fmt', 'yuv420p', mp4],
     { stdio: ['pipe', 'inherit', 'inherit'] });
   const ffDone = ff && new Promise(r => ff.on('close', r));
@@ -97,6 +98,18 @@ const server = createServer(async (req, res) => {
   }
   if (rec && req.method === 'POST') {
     const body = await readBody(req);
+    if (url === '/bench') {
+      const r = JSON.parse(body);
+      console.log(`\n  bench — ${r.files} files, ${r.style}/${r.city}, ${r.size}`);
+      for (const [k, v] of Object.entries(r.setupMs)) console.log(`    setup  ${k.padEnd(28)} ${String(v).padStart(6)} ms`);
+      console.log(`    frame  avg ${r.frameMs.avg} ms  p95 ${r.frameMs.p95} ms   (cpu tick avg ${r.cpuTickMs.avg} ms)`);
+      console.log(`    ${r.triangles.toLocaleString()} triangles, ${r.drawCalls} draw calls, ${r.vehicles} vehicles`);
+      console.log(`    city mesh ${r.cityMeshMB} MB of vertex data, JS heap ${r.jsHeapMB} MB`);
+      console.log(`    heap at load ${r.heapAtLoadMB} MB; retained per step: ${Object.entries(r.heapGrowthMB).map(([k, v]) => `${k} ${v}`).join(', ')}`);
+      res.writeHead(204).end();
+      rec.browser?.kill();
+      process.exit(0);
+    }
     if (url === '/frame' && still) {
       await writeFile(path.resolve(still), body);
     } else if (url === '/frame') {
@@ -133,7 +146,7 @@ server.listen(port, () => {
     return;
   }
   const recUrl = `${link}/?record=1&w=${w}&h=${h}&fps=${fps}&dur=${duration}&style=${style}&city=${cityOpt}${pxOpt ? `&px=${pxOpt}` : ''}${zoomOpt ? `&zoom=${zoomOpt}` : ''}` +
-    (still ? `&still=1&shot=${shot}${noHud ? '&hud=0' : ''}` : '') + (fixedCam ? '&static=1' : '');
+    (still ? `&still=1&shot=${shot}${noHud ? '&hud=0' : ''}` : '') + (fixedCam ? '&static=1' : '') + (benchMode ? '&bench=1' : '');
   console.log(still ? `  photographing ${style} / ${shot} at ${w}x${h} …` : `  filming ${duration}s at ${w}x${h}@${fps}fps …`);
   // a browser that never sends a frame (GPU trouble, blocked CDN) shouldn't hang the CLI forever
   setTimeout(() => {
@@ -141,11 +154,11 @@ server.listen(port, () => {
     console.error('\n  gitropolis: the browser never sent a frame — try --headed to watch what happens');
     rec.browser?.kill();
     process.exit(1);
-  }, 90_000).unref();
+  }, benchMode ? 300_000 : 90_000).unref();
   const chrome = findChrome();
   if (chrome && !headed) {
     rec.browser = spawn(chrome, ['--headless=new', `--window-size=${w},${h}`, '--hide-scrollbars', '--mute-audio',
-      '--enable-gpu', '--use-angle=default', '--enable-unsafe-swiftshader', '--no-first-run', '--no-default-browser-check',
+      '--enable-gpu', '--use-angle=default', '--enable-unsafe-swiftshader', '--no-first-run', '--no-default-browser-check', ...(benchMode ? ['--js-flags=--expose-gc'] : []),
       `--user-data-dir=${path.join(rec.tmp, 'chrome')}`, recUrl], { stdio: 'ignore' });
   } else {
     console.log(`  open ${cyan(recUrl)} and keep the tab in front until it finishes`);

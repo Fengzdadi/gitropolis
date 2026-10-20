@@ -102,6 +102,24 @@ export function buildCityMesh({ buildingGeometry, specs, B, files, t01, shared, 
     geos.push(g);
   });
   const geo = mergeGeometries(geos);
+  // the per-building pieces would otherwise live as long as any closure from this scope (syncState below)
+  for (const g of geos) g.dispose();
+  geos.length = 0;
+  // a big repo is ~1M triangles: store colour and normals as bytes (palette art doesn't need floats),
+  // and let the GPU keep the only copy once uploaded (picking uses the proxy boxes, not this mesh)
+  const pack = (name, Type, scale) => {
+    const a = geo.attributes[name], out = new Type(a.array.length);
+    for (let k = 0; k < out.length; k++) out[k] = Math.round(a.array[k] * scale);
+    geo.setAttribute(name, new THREE.BufferAttribute(out, a.itemSize, true));
+  };
+  pack('color', Uint8Array, 255);
+  pack('normal', Int8Array, 127);
+  geo.setAttribute('part', new THREE.BufferAttribute(Uint8Array.from(geo.attributes.part.array), 1, false));
+  const bytes = Object.values(geo.attributes).reduce((n, a) => n + a.array.byteLength, 0);
+  // three.js still needs the bounds (for sorting) after the arrays are gone, so compute them first
+  geo.computeBoundingBox();
+  geo.computeBoundingSphere();
+  for (const a of Object.values(geo.attributes)) a.onUpload(function () { this.array = null; });
   const grow = `
     float b0 = aMeta.z * 0.97; float grow = smoothstep(b0, b0 + 0.03, uTimeline);
     transformed.y = aMeta.y + (transformed.y - aMeta.y) * grow;
@@ -137,6 +155,7 @@ export function buildCityMesh({ buildingGeometry, specs, B, files, t01, shared, 
     for (let i = 0; i < files.length; i++) { stateData[i * 4] = Math.min(255, heat[i] * 255) | 0; stateData[i * 4 + 1] = focus[i] * 255; }
     stateTex.needsUpdate = true;
   };
+  mesh.userData.bytes = bytes;
   mesh.customDepthMaterial = depth;
   mesh.castShadow = mesh.receiveShadow = castShadow;
   mesh.frustumCulled = false;

@@ -9,6 +9,7 @@ import { hierarchy, treemap, treemapSquarify } from 'd3-hierarchy';
 import { buildStudio } from './studio.js';
 import { buildLayout, CITY_KINDS } from './layouts.js';
 import { createPixelPipeline } from './pixel.js';
+import { PERF, HEAP, timed } from './perf.js';
 
 const params = new URLSearchParams(location.search);
 // neon (original) | maquette | plan | nocturne
@@ -19,6 +20,8 @@ const PIXEL = STYLE === 'pixel';
 const PIXEL_SIZE = Math.max(1, Math.round(+params.get('px') || 2));
 const ZOOM = +params.get('zoom') || 1;
 const data = await fetch(params.get('data') || 'city.json').then(r => r.json());
+globalThis.gc?.();
+const BASE_HEAP = performance.memory ? performance.memory.usedJSHeapSize / 1e6 : 0; // after loading + parsing city.json
 const files = data.files;
 const N = files.length;
 const span = Math.max(1, data.end - data.start);
@@ -99,7 +102,7 @@ for (const l of leaves) {
 // city planners (lit styles only): ?city=auto picks the repo's own archetype, ?city=classic keeps the treemap
 const CITY = params.get('city') || 'auto';
 const cityKind = NEON || CITY === 'classic' ? null : CITY === 'auto' ? data.identity?.city : CITY;
-const layout = cityKind && CITY_KINDS.includes(cityKind) ? buildLayout(cityKind, { files, inDeg, SIZE, frontAz: PIXEL ? 45 : undefined }) : null;
+const layout = cityKind && CITY_KINDS.includes(cityKind) ? timed('layout', () => buildLayout(cityKind, { files, inDeg, SIZE, frontAz: PIXEL ? 45 : undefined })) : null;
 if (layout) {
   unit = layout.unit;
   plateStep = unit * 0.06;
@@ -116,7 +119,7 @@ const REC = params.get('record') ? {
   w: +params.get('w') || 1920, h: +params.get('h') || 1080,
   fps: +params.get('fps') || 30, dur: +params.get('dur') || 20,
   still: !!params.get('still'), shot: params.get('shot') || 'hero', hud: params.get('hud') !== '0',
-  fixed: !!params.get('static'), // camera holds the establishing shot (GIFs compress far better)
+  fixed: !!params.get('static'), bench: !!params.get('bench'), // camera holds the establishing shot (GIFs compress far better)
 } : null;
 const viewW = () => REC ? REC.w : innerWidth;
 const viewH = () => REC ? REC.h : innerHeight;
@@ -289,8 +292,8 @@ if (NEON) {
 // ---- buildings (one instanced mesh, one draw call)
 const heat = new Float32Array(N);
 const focusAttr = new Float32Array(N).fill(1);
-const studio = NEON ? null : buildStudio({ name: STYLE, scene, renderer, B, files, districts, unit, SIZE, plateStep, cx, cz,
-  shared, heat, focusAttr, inDeg, t01, layout });
+const studio = NEON ? null : timed('studio (all)', () => buildStudio({ name: STYLE, scene, renderer, B, files, districts, unit, SIZE, plateStep, cx, cz,
+  shared, heat, focusAttr, inDeg, t01, layout }));
 if (studio) {
   document.body.classList.add('studio', `style-${STYLE}`);
   if (studio.style.uiFont) document.body.style.setProperty('--ui-font', studio.style.uiFont);
@@ -733,6 +736,40 @@ if (!REC) {
   record().catch(err => report('/log', String(err?.stack || err)));
 }
 
+// ------------------------------------------------------------ benchmark (--bench)
+// steady-state cost of a frame: CPU (traffic, per-building state) and GPU (forced to finish each frame)
+async function bench() {
+  PERF['setup since navigation'] = performance.now();
+  setTimeline(1);
+  const gl = renderer.getContext(), px = new Uint8Array(4);
+  for (let i = 0; i < 10; i++) { tick(1 / 30); renderFrame(); }
+  gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px);
+  renderer.info.autoReset = false;
+  const frame = [], cpu = [];
+  for (let i = 0; i < 120; i++) {
+    renderer.info.reset();
+    const t0 = performance.now();
+    tick(1 / 30);
+    const t1 = performance.now();
+    renderFrame();
+    gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px);
+    frame.push(performance.now() - t0); cpu.push(t1 - t0);
+  }
+  window.gc?.(); // only exposed in --bench runs, so the heap figure is what's actually retained
+  const stat = a => { const b = [...a].sort((x, y) => x - y); return { avg: +(a.reduce((s, x) => s + x, 0) / a.length).toFixed(2), p95: +b[Math.floor(b.length * 0.95)].toFixed(2) }; };
+  await report('/bench', JSON.stringify({
+    files: N, style: STYLE, city: layout?.kind, size: `${REC.w}x${REC.h}`,
+    setupMs: Object.fromEntries(Object.entries(PERF).map(([k, v]) => [k, Math.round(v)])),
+    frameMs: stat(frame), cpuTickMs: stat(cpu),
+    triangles: renderer.info.render.triangles, drawCalls: renderer.info.render.calls,
+    vehicles: studio?.traffic?.count ?? 0,
+    heapGrowthMB: Object.fromEntries(Object.entries(HEAP).map(([k, v]) => [k, +v.toFixed(1)])),
+    heapAtLoadMB: +(BASE_HEAP).toFixed(0),
+    cityMeshMB: +((studio?.meshBytes || 0) / 1e6).toFixed(1),
+    jsHeapMB: performance.memory ? +(performance.memory.usedJSHeapSize / 1e6).toFixed(0) : null,
+  }));
+}
+
 // ------------------------------------------------------------ cinematic recorder
 function report(url, body) { return fetch(url, { method: 'POST', body }); }
 
@@ -887,6 +924,7 @@ async function record() {
   }
 
   if (studio) await Promise.all([document.fonts.load(`400 64px ${studio.style.font}`), document.fonts.load(`400 16px ${studio.style.uiFont || 'Inter'}`)]);
+  if (REC.bench) return bench();
   if (REC.still) {
     setTimeline(1);
     heat.fill(0);

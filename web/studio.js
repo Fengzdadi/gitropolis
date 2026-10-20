@@ -8,6 +8,7 @@ import { buildingGeometry } from './buildings.js';
 import { buildingSpecs, buildCityMesh } from './architecture.js';
 import { addGroundDetail } from './surfaces.js';
 import { buildStreets, buildTraffic } from './streets.js';
+import { timed } from './perf.js';
 
 export const STYLES = {
   maquette: {
@@ -180,20 +181,23 @@ export function buildStudio(ctx) {
   const groundMat = S.flat ? new THREE.MeshBasicMaterial({ color: groundColor })
     : new THREE.MeshStandardMaterial({ color: groundColor, roughness: layout?.groundIsWater ? 0.35 : 1 });
   // pixel style: streets come from a distance field over the blocks; asphalt only where streets are
-  const streets = S.pixel && layout ? buildStreets({ layout, B, files, inDeg, SIZE, t01 }) : null;
-  const street = streets && { ...streets, asphalt: new THREE.Color(S.road), grass: new THREE.Color(S.land), mark: new THREE.Color('#e0d7b8') };
+  const streets = S.pixel && layout ? timed('streets (distance field)', () => buildStreets({ layout, B, files, inDeg, SIZE, t01 })) : null;
+  // only what the street shader needs: copying the whole object would keep the routing closures (and the big field arrays they hold) alive
+  const street = streets && { texture: streets.texture, min: streets.min, size: streets.size, maxHalf: streets.maxHalf, asphalt: new THREE.Color(S.road), grass: new THREE.Color(S.land), mark: new THREE.Color('#e0d7b8') };
   if (S.pixel && layout) addGroundDetail(groundMat, layout.ground === 'water' ? 'water' : 'street', { shared, street });
   const ground = new THREE.Mesh(new THREE.PlaneGeometry(SIZE * 14, SIZE * 14).rotateX(-Math.PI / 2), groundMat);
   ground.receiveShadow = true;
   scene.add(ground);
 
   // ---- city terrain from a planner: land, raised blocks, parks, plazas, bridges, hills
-  if (layout) buildTerrain(scene, layout, S, plateStep, shared, street);
+  if (layout) timed('terrain', () => buildTerrain(scene, layout, S, plateStep, shared, street));
   // traffic: lanes round every block, busier where the block's files import and are imported a lot
   // Venice has no cars, only boats
   if (streets && layout.kind === 'venice') { streets.lanes = []; streets.boats = [...streets.boats, ...streets.boats.map(b => ({ ...b, pts: [...b.pts].reverse() }))]; }
-  const traffic = streets ? buildTraffic({ streets, unit: layout.unit }) : null;
+  const traffic = streets ? timed('traffic', () => buildTraffic({ streets, unit: layout.unit })) : null;
   if (traffic) scene.add(traffic.mesh);
+  // the field's lookup tables were only needed to plan routes; the GPU keeps its own copy of the texture
+  if (streets) { streets.drivable = streets.navigable = null; streets.lanes = streets.boats = null; streets.texture.onUpdate = () => { streets.texture.image.data = null; }; }
   const roadY = layout?.groundIsWater ? plateStep * 0.8 + 0.05 : 0.05;
 
   // ---- district plinths (classic treemap only)
@@ -308,8 +312,8 @@ export function buildStudio(ctx) {
   // pixel style: real architecture per file; the box mesh stays as an invisible picking proxy
   let cityMesh = null;
   if (S.pixel && layout) {
-    const specs = buildingSpecs({ files, B, inDeg, unit, kind: layout.kind, t01 });
-    cityMesh = buildCityMesh({ buildingGeometry, specs, B, files, t01, shared, unit, heat, focus: focusAttr });
+    const specs = timed('building specs', () => buildingSpecs({ files, B, inDeg, unit, kind: layout.kind, t01 }));
+    cityMesh = timed('building geometry + merge', () => buildCityMesh({ buildingGeometry, specs, B, files, t01, shared, unit, heat, focus: focusAttr }));
     scene.add(cityMesh);
     mesh.material.visible = false;
     mesh.castShadow = false;
@@ -368,6 +372,7 @@ export function buildStudio(ctx) {
   return {
     update: () => { traffic?.update(shared.uTime.value, shared.uTimeline.value, roadY); cityMesh?.userData.syncState(); },
     traffic,
+    get meshBytes() { return cityMesh?.userData.bytes || 0; },
     style: S,
     heights: H,
     hub,

@@ -6,10 +6,12 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 
-const W = 1536; // field resolution; ~0.8 world units per texel for a 1000-wide city
 
 export function buildStreets({ layout, B, files, inDeg, SIZE, t01 }) {
-  const x0 = -SIZE * 0.6, S = SIZE * 1.2, tex = S / W;
+  // resolution follows the city's grain: dense cities have narrow alleys that need finer texels
+  const x0 = -SIZE * 0.6, S = SIZE * 1.2;
+  const W = Math.min(2560, Math.max(1024, Math.ceil(S / (layout.unit * 0.06))));
+  const tex = S / W;
   const toTex = v => (v - x0) / tex;
   const label = new Int32Array(W * W).fill(-1);
   const blocks = layout.blocks;
@@ -261,6 +263,18 @@ export function buildTraffic({ streets, unit }) {
     for (let k = vehicles.length - 1; k > 0; k--) { const j = Math.floor(Math.random() * (k + 1)); [vehicles[k], vehicles[j]] = [vehicles[j], vehicles[k]]; }
     vehicles.length = CAP;
   }
+  // dense cities have thousands of routes; keep only the ones somebody drives, packed into typed arrays
+  const used = [...new Set(vehicles.map(v => v.ri))];
+  const remap = new Map(used.map((ri, k) => [ri, k]));
+  const kept = used.map(ri => {
+    const r = routes[ri], n = r.pts.length;
+    const xy = new Float32Array(n * 2), cum = new Float32Array(r.cum), ok = new Uint8Array(n);
+    r.pts.forEach(([x, z], k) => { xy[k * 2] = x; xy[k * 2 + 1] = z; ok[k] = r.ok[k] ? 1 : 0; });
+    return { kind: r.kind, born: r.born, L: r.L, n, xy, cum, ok };
+  });
+  for (const v of vehicles) v.ri = remap.get(v.ri);
+  routes.length = 0;
+  routes.push(...kept);
 
   // one instanced mesh per vehicle type
   const group = new THREE.Group();
@@ -287,11 +301,12 @@ export function buildTraffic({ streets, unit }) {
         const s = ((v.s0 + time * v.speed) % r.L + r.L) % r.L;
         let lo = 0, hi = r.cum.length - 1;
         while (hi - lo > 1) { const mid = (lo + hi) >> 1; if (r.cum[mid] <= s) lo = mid; else hi = mid; }
-        if (!r.ok[lo] || !r.ok[(lo + 1) % r.ok.length]) { mesh.setMatrixAt(k, hidden); return; }
-        const a = r.pts[lo], b = r.pts[(lo + 1) % r.pts.length];
+        const nx = (lo + 1) % r.n;
+        if (!r.ok[lo] || !r.ok[nx]) { mesh.setMatrixAt(k, hidden); return; }
+        const ax = r.xy[lo * 2], az = r.xy[lo * 2 + 1], bx = r.xy[nx * 2], bz = r.xy[nx * 2 + 1];
         const t = (s - r.cum[lo]) / Math.max(1e-6, r.cum[lo + 1] - r.cum[lo]);
-        pos.set(a[0] + (b[0] - a[0]) * t, v.type === 'boat' ? 0 : baseY, a[1] + (b[1] - a[1]) * t);
-        q.setFromAxisAngle(UP, -Math.atan2(b[1] - a[1], b[0] - a[0]));
+        pos.set(ax + (bx - ax) * t, v.type === 'boat' ? 0 : baseY, az + (bz - az) * t);
+        q.setFromAxisAngle(UP, -Math.atan2(bz - az, bx - ax));
         mesh.setMatrixAt(k, m.compose(pos, q, scl.set(v.len, v.len, v.wid)));
       });
       mesh.instanceMatrix.needsUpdate = true;
