@@ -683,7 +683,9 @@ const PLANNERS = {
 
     const lots = [], blocks = [], labels = [], water = [];
     const E = 2.2, G = 0.8; // half-width of the esplanade, gap between superblocks
+    const taken = []; // every superblock (and the head) so far, as [x0, z0, x1, z1]
     const superblock = (p, x0, z0) => {
+      taken.push([x0, z0, x0 + p.side, z0 + p.side]);
       blocks.push({ poly: rectPoly(x0, z0, x0 + p.side, z0 + p.side), type: 'lawn' });
       lots.push(...packRect(p.items, x0 + 0.2, z0 + 0.2, x0 + p.side - 0.2, z0 + p.side - 0.2, 0.14));
       labels.push({ text: p.name.split('/').pop(), x: x0 + p.side / 2, z: z0 + p.side + 0.35, weight: p.area });
@@ -691,6 +693,7 @@ const PLANNERS = {
     // the head: the congress on its plaza, the lake behind
     const PL = 6;
     blocks.push({ poly: rectPoly(0, -E - 2, PL, E + 2), type: 'plaza' });
+    taken.push([0, -E - 2, PL, E + 2]);
     lots.push({ i: ctx.hub, x: PL * 0.5, z: 0, w: 3.6, d: 2.6, rot: 0 });
     const lake = [];
     // wrapped round the head of the axis, just clear of the plaza
@@ -698,10 +701,41 @@ const PLANNERS = {
     for (let k = 0; k <= 36; k++) { const a = -1.75 + 3.5 * k / 36; lake.push([PL / 2 + Math.cos(a) * r0, Math.sin(a) * r0 * 1.1]); }
     for (let k = 36; k >= 0; k--) { const a = -1.75 + 3.5 * k / 36; lake.push([PL / 2 + Math.cos(a) * r1, Math.sin(a) * r1 * 1.1]); }
     water.push(lake);
+    taken.push([PL / 2 + Math.cos(1.75) * r1, -r1 * 1.1, PL / 2 + r1, r1 * 1.1]);
+    // the wings: an arc bowed towards the head, half each side of the axis. Laid out first round a
+    // crossing at x = 0, then slid down the axis until the arc clears everything nearer the head
+    const wings = () => {
+      // each wing sweeps out to at most SWEEP radians; when a row is full the next row starts a block
+      // further out, so a huge layer makes thicker wings rather than a ring
+      const SWEEP = 1.25, total = sum(wing.map(p => p.side + G));
+      const RA = clamp(total / 2 / SWEEP, 10, 40), maxS = Math.max(...wing.map(p => p.side));
+      const slot = [{ row: 0, th: (E + 1.2) / RA }, { row: 0, th: (E + 1.2) / RA }];
+      const mine = [[], []], at = [];
+      const clash = (q, list) => list.some(o => q[0] < o[2] + G && o[0] < q[2] + G && q[1] < o[3] + G && o[1] < q[3] + G);
+      wing.forEach((p, n) => {
+        const sl = slot[n % 2], side = n % 2 ? 1 : -1, h = p.side / 2;
+        for (;;) {
+          const r = RA + sl.row * (maxS + G), a = sl.th + h / r;
+          if (a + h / r > SWEEP) { sl.row++; sl.th = (E + 1.2) / (RA + sl.row * (maxS + G)); continue; }
+          const px = RA - Math.cos(a) * r, pz = side * Math.sin(a) * r;
+          const q = [px - h, pz - h, px + h, pz + h];
+          // (squares round a curve can touch corners where the arc runs diagonal: slide on until clear)
+          if (clash(q, mine[n % 2])) { sl.th += 0.15 / r; continue; }
+          mine[n % 2].push(q); at.push([p, q]);
+          sl.th = a + (h + G) / r;
+          break;
+        }
+      });
+      // as far up the axis as the arc can sit without reaching a superblock, the plaza or the lake
+      let cx = x - 3;
+      for (const [, q] of at) for (const o of taken) if (q[1] < o[3] + G && o[1] < q[3] + G) cx = Math.min(cx, o[0] - G - q[2]);
+      for (const [p, q] of at) superblock(p, cx + q[0], q[1]);
+      x = Math.min(x - 6, cx + Math.min(...at.map(([, q]) => q[0])) - 1.6);
+    };
     // down the axis: each layer's packages in two rows either side of the esplanade
-    let x = -G, wingX = null;
+    let x = -G;
     levels.forEach((ps, l) => {
-      if (l === wl) { wingX = x - 3; x -= 6; return; } // the wings cross here
+      if (l === wl) { wings(); return; } // the wings cross here
       // each side of the esplanade gets columns of superblocks stacked outward, so a big layer is
       // a deep sector rather than a very long row
       const sides = [[], []];
@@ -719,24 +753,7 @@ const PLANNERS = {
       });
       x -= Math.max(...len, 0) + 1.6;
     });
-    // the wings: an arc bowed towards the head, half each side of the axis
-    if (wing.length) {
-      if (wingX === null) { wingX = x - 3; x -= 6; }
-      // each wing sweeps out to at most SWEEP radians; when a row is full the next row starts a block
-      // further out, so a huge layer makes thicker wings rather than a ring
-      const SWEEP = 1.25, total = sum(wing.map(p => p.side + G));
-      const RA = clamp(total / 2 / SWEEP, 10, 40), maxS = Math.max(...wing.map(p => p.side));
-      const cxA = wingX + RA;
-      const slot = [{ row: 0, th: (E + 1.2) / RA }, { row: 0, th: (E + 1.2) / RA }];
-      wing.forEach((p, n) => {
-        const sl = slot[n % 2], side = n % 2 ? 1 : -1;
-        let r = RA + sl.row * (maxS + G), a = sl.th + (p.side / 2) / r;
-        if (a + p.side / 2 / r > SWEEP) { sl.row++; r = RA + sl.row * (maxS + G); sl.th = (E + 1.2) / r; a = sl.th + (p.side / 2) / r; }
-        const px = cxA - Math.cos(a) * r, pz = side * Math.sin(a) * r;
-        superblock(p, px - p.side / 2, pz - p.side / 2);
-        sl.th = a + (p.side / 2 + G) / r;
-      });
-    }
+    if (wing.length && wl < 0) wings();
     // the esplanade: a long lawn from the plaza to the last layer
     blocks.push({ poly: rectPoly(x, -E + 0.4, -G * 0.5, E - 0.4), type: 'lawn' });
     return {
