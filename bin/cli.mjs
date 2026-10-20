@@ -144,6 +144,10 @@ async function handle(req, res) {
     const origin = req.headers.origin;
     if (!rec || (origin && !LOCAL_HOST.test(origin.replace(/^https?:\/\//, '')))) { res.writeHead(403); return res.end(); }
     const body = await readBody(req);
+    if (url === '/meta') {
+      try { rec.meta = JSON.parse(body); } catch {}
+      return res.writeHead(204).end();
+    }
     if (url === '/fail') {
       console.error(`\n  gitropolis: the page failed to build the city:\n    ${String(body).split('\n').slice(0, 6).join('\n    ')}`);
       res.writeHead(204).end();
@@ -284,12 +288,12 @@ async function encodeGif(src, dst) {
   // pixel art: shrink by exactly the art-pixel size with nearest-neighbour (one GIF pixel per art pixel),
   // keep the palette as it is and don't dither again; flat colours make it compress very well
   if (style === 'pixel') {
-    const px = Math.max(1, Math.round(+pxOpt || 2));
+    const px = Math.max(1, Math.round(rec.meta?.px || +pxOpt || 2)); // the art-pixel size the page used
     for (const div of [1, 2]) {
       for (const gfps of [15, 12, 10, 8]) {
         await run('ffmpeg', ['-y', '-loglevel', 'error', '-i', src, '-vf',
           `fps=${gfps},scale=iw/${px * div}:ih/${px * div}:flags=neighbor,split[a][b];[a]palettegen=max_colors=128:stats_mode=full[p];[b][p]paletteuse=dither=none`, dst]);
-        if ((await stat(dst)).size <= maxMB * 1e6) return `${Math.round(w / px / div)}px @ ${gfps}fps, 1 GIF pixel = ${div} art pixel${div > 1 ? 's' : ''}`;
+        if ((await stat(dst)).size <= maxMB * 1e6) return `${Math.round(w / px / div)}px @ ${gfps}fps, 1 GIF pixel = ${div} art pixel${div > 1 ? 's' : ''}${px === 1 ? ' (fine pixels for a dense city)' : ''}`;
       }
     }
     return 'over the size cap — try a shorter --duration';

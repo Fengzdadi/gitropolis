@@ -27,7 +27,7 @@ const STYLE = params.get('style') || 'pixel';
 const NEON = STYLE === 'neon';
 const PIXEL = STYLE === 'pixel';
 // art-pixel size in screen pixels, and how far to zoom in (close-ups frame the city's landmark)
-const PIXEL_SIZE = Math.max(1, Math.round(+params.get('px') || 2));
+const PIXEL_SIZE = Math.max(1, Math.round((+params.get('px') || 2) * 4) / 4); // in quarter steps: 1, 1.25, 1.5, … 2
 const ZOOM = +params.get('zoom') || 1;
 // Where the city comes from: the CLI serves city.json; the hosted site (gitropolis.dev/owner/repo)
 // asks its API; ?data= may point at another city file, but only on this server, never another site.
@@ -647,7 +647,18 @@ composer.addPass(new ShaderPass({
 const bloom = new UnrealBloomPass(new THREE.Vector2(viewW(), viewH()), 0.7, 0.45, 0.75);
 composer.addPass(bloom);
 studio?.setupPost(bloom);
-const pix = PIXEL ? createPixelPipeline(renderer, scene, camera, { pixel: PIXEL_SIZE, pxUniform: shared.uPx }) : null;
+// How big an art pixel is. A small city keeps fat 2-pixel art; a dense one (thousands of buildings)
+// gets finer pixels, so each building still has ~22 art pixels across in the overview instead of
+// dissolving into confetti. Always a whole number of device pixels, so pixels stay even. (?px= wins.)
+function autoPixel() {
+  if (params.has('px') || !FIT) return PIXEL_SIZE;
+  const pr = renderer.getPixelRatio();
+  const lotPx1 = unit * FIT.zoom * viewH() / (2 * ISO_H); // art pixels per lot at size 1
+  const p = Math.min(2, Math.max(1, lotPx1 / 22));
+  return Math.max(1, Math.floor(p * pr + 1e-6) / pr);
+}
+const ART_PX = PIXEL ? autoPixel() : PIXEL_SIZE;
+const pix = PIXEL ? createPixelPipeline(renderer, scene, camera, { pixel: ART_PX, pxUniform: shared.uPx }) : null;
 const renderFrame = () => pix ? pix.render() : composer.render();
 composer.addPass(new OutputPass());
 
@@ -874,6 +885,8 @@ async function bench() {
 function report(url, body) { return fetch(url, { method: 'POST', body }); }
 
 async function record() {
+  // the CLI shrinks pixel-art GIFs by exactly the art-pixel size, so tell it which one was used
+  if (PIXEL) await report('/meta', JSON.stringify({ px: ART_PX }));
   document.body.classList.add('recording');
   controls.enabled = false;
   // the web fonts are optional: offline their stylesheet may never arrive, and while it's pending
@@ -1076,4 +1089,4 @@ async function record() {
 }
 
 // poke at the city from the console with ?debug
-if (params.has('debug')) window.__city = { data, root, B, unit, camera, controls, setTimeline, focus, shared, bloom, scene, renderer, studio };
+if (params.has('debug')) window.__city = { px: PIXEL ? ART_PX : null, data, root, B, unit, camera, controls, setTimeline, focus, shared, bloom, scene, renderer, studio };
