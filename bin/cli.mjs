@@ -53,6 +53,11 @@ const city = await scanRepo(repo);
 const json = JSON.stringify(city);
 const s = city.stats;
 console.log(`done in ${city.scanMs}ms\n  ${s.files} buildings · ${s.loc.toLocaleString()} LOC · ${s.edges} roads · ${s.commits} commits`);
+const id = city.identity;
+console.log(`\n  this repo is ${pink(id.name)}${id.reasons.length ? ' — ' + id.reasons.join('; ') : ''}`);
+for (const st of id.states) console.log(`  + ${st.reason}`);
+if (id.chip) console.log(`  (psst: hardware sources found — try --style chip)`);
+console.log('');
 
 if (out) {
   await writeFile(out, json);

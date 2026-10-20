@@ -4,6 +4,7 @@ import { execFileSync, spawn } from 'node:child_process';
 import { readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
 import readline from 'node:readline';
+import { classify } from './classify.mjs';
 
 const LANGS = {
   js: 'js', jsx: 'js', mjs: 'js', cjs: 'js', ts: 'ts', tsx: 'ts', mts: 'ts', cts: 'ts',
@@ -12,7 +13,7 @@ const LANGS = {
   swift: 'swift', scala: 'scala', lua: 'lua', zig: 'zig', ex: 'ex', exs: 'ex',
   css: 'css', scss: 'css', less: 'css', html: 'html', sh: 'sh',
 };
-const SKIP_DIR = /(^|\/)(node_modules|vendor|third_party|dist|build|out|\.next|target|__pycache__|\.git)\//;
+const SKIP_DIR = /(^|\/)(node_modules|vendor|third_party|deps|dist|build|out|\.next|target|__pycache__|\.git)\//;
 const SKIP_FILE = /(\.min\.(js|css)|\.bundle\.js|\.d\.ts)$/;
 const MAX_BYTES = 1_000_000;
 
@@ -28,6 +29,7 @@ export async function scanRepo(repo, { maxCommits = 20000 } = {}) {
 
   const files = [];
   const index = new Map(); // path -> idx
+  const hardwareFiles = listed.filter(p => /\.(v|sv|svh|vhd|vhdl)$/i.test(p)).length;
   for (const p of listed) {
     const ext = p.slice(p.lastIndexOf('.') + 1).toLowerCase();
     const lang = LANGS[ext];
@@ -45,7 +47,7 @@ export async function scanRepo(repo, { maxCommits = 20000 } = {}) {
     files.push({ p, lang, loc, text, imp: new Set(), churn: 0, born: 0, last: 0 });
   }
 
-  resolveImports(root, files, index);
+  resolveImports(root, files, index, listed);
 
   // ---- git history: one pass over `git log --numstat`, oldest first, following renames
   // so a file moved into src/ keeps the birthday of its original path.
@@ -90,7 +92,7 @@ export async function scanRepo(repo, { maxCommits = 20000 } = {}) {
   for (const f of files) { if (!f.born) f.born = f.last = start; }
 
   const edges = files.reduce((n, f) => n + f.imp.size, 0);
-  return {
+  const city = {
     name: path.basename(root),
     scannedAt: Math.floor(Date.now() / 1000),
     scanMs: Date.now() - t0,
@@ -99,7 +101,10 @@ export async function scanRepo(repo, { maxCommits = 20000 } = {}) {
     files: files.map(f => ({ p: f.p, lang: f.lang, loc: f.loc, imp: [...f.imp], churn: f.churn, born: f.born, last: f.last })),
     // compact: [time, fileIdx, fileIdx, ...]; skip giant sweeping commits (formatting, renames)
     commits: touched.filter(c => c.f.length < 200).map(c => [c.t, ...c.f]),
+    extras: { hardwareFiles },
   };
+  city.identity = classify(city);
+  return city;
 }
 
 // numstat rename forms: "a.py => b.py" and "src/{old => new}/x.py" (either side of the braces may be empty)
@@ -122,7 +127,29 @@ const C_RE = /#include\s*"([^"]+)"/g;
 const JS_EXT = ['', '.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs', '.vue', '.svelte',
   '/index.ts', '/index.tsx', '/index.js', '/index.jsx', '/index.mjs'];
 
-function resolveImports(root, files, index) {
+// workspace packages, so `import '@scope/pkg'` and `use my_crate::x` link across a monorepo
+function workspacePackages(root, listed) {
+  const js = new Map(), rust = new Map();
+  for (const p of listed) {
+    if (SKIP_DIR.test(p)) continue;
+    const base = path.posix.basename(p);
+    if (base !== 'package.json' && base !== 'Cargo.toml') continue;
+    let text;
+    try { text = readFileSync(path.join(root, p), 'utf8'); } catch { continue; }
+    const dir = path.posix.dirname(p) === '.' ? '' : path.posix.dirname(p) + '/';
+    if (base === 'package.json') {
+      try { const name = JSON.parse(text).name; if (name) js.set(name, dir); } catch { }
+    } else {
+      const m = /\[package\][^[]*?\bname\s*=\s*"([^"]+)"/.exec(text);
+      if (m) rust.set(m[1].replace(/-/g, '_'), dir);
+    }
+  }
+  return { js, rust };
+}
+
+function resolveImports(root, files, index, listed) {
+  const ws = workspacePackages(root, listed);
+  const jsNames = [...ws.js.keys()].sort((a, b) => b.length - a.length);
   const addEdge = (f, target) => {
     const j = index.get(target);
     if (j !== undefined && files[j] !== f) f.imp.add(j);
@@ -155,7 +182,16 @@ function resolveImports(root, files, index) {
     if (f.lang === 'js' || f.lang === 'ts') {
       for (const m of text.matchAll(JS_RE)) {
         const spec = m[1] || m[2] || m[3];
-        if (!spec || !spec.startsWith('.')) continue;
+        if (!spec) continue;
+        if (!spec.startsWith('.')) {
+          // bare import of a sibling workspace package: pkg → its src/index, pkg/sub → src/sub or sub
+          const name = jsNames.find(n => spec === n || spec.startsWith(n + '/'));
+          if (name === undefined) continue;
+          const dir = ws.js.get(name), sub = spec.slice(name.length + 1);
+          const bases = sub ? [dir + 'src/' + sub, dir + sub] : [dir + 'src/index', dir + 'index', dir + 'src/main', dir + 'lib/index'];
+          outer: for (const b of bases) for (const ext of JS_EXT) if (index.has(b + ext)) { addEdge(f, b + ext); break outer; }
+          continue;
+        }
         const base = path.posix.normalize(path.posix.join(dir, spec));
         const stripped = base.replace(/\.(js|mjs|cjs|jsx)$/, ''); // TS "import './x.js'" -> x.ts
         for (const ext of JS_EXT) {
@@ -205,6 +241,18 @@ function resolveImports(root, files, index) {
       }
     } else if (f.lang === 'rs') {
       const crateRoot = f.p.includes('src/') ? f.p.slice(0, f.p.lastIndexOf('src/') + 4) : '';
+      for (const m of text.matchAll(/\b(?:use|extern\s+crate)\s+(\w+)((?:::\w+)*)/g)) {
+        const dir = ws.rust.get(m[1]);
+        if (dir === undefined || m[1] === 'crate') continue;
+        const segs = (m[2] || '').split('::').filter(Boolean);
+        let hit = false;
+        for (let k = segs.length; k > 0 && !hit; k--) {
+          const b = dir + 'src/' + segs.slice(0, k).join('/');
+          if (index.has(b + '.rs')) { addEdge(f, b + '.rs'); hit = true; }
+          else if (index.has(b + '/mod.rs')) { addEdge(f, b + '/mod.rs'); hit = true; }
+        }
+        if (!hit) addEdge(f, dir + 'src/lib.rs');
+      }
       for (const m of text.matchAll(RS_RE)) {
         if (m[1]) {
           const own = /(^|\/)(mod|lib|main)\.rs$/.test(f.p) ? dir : f.p.replace(/\.rs$/, '');
