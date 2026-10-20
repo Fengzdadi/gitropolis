@@ -29,7 +29,8 @@ const fps = +flag('--fps', 30);
 const [w, h] = flag('--size', '1920x1080').split('x').map(Number);
 const maxMB = +flag('--max-mb', 9.5); // GitHub README uploads cap at 10 MB
 const headed = bool('--headed');
-const style = flag('--style', 'neon');
+const style = flag('--style', 'maquette');
+const cityOpt = flag('--city', 'auto'); // auto | classic | smalltown | manhattan | hongkong | tokyo | la | paris | venice | barcelona
 const still = flag('--still');
 const shot = flag('--shot', 'hero');
 const noHud = bool('--no-hud');
@@ -123,14 +124,21 @@ const server = createServer(async (req, res) => {
 server.listen(port, () => {
   const link = `http://localhost:${port}`;
   if (!rec) {
-    const view = style === 'neon' ? link : `${link}/?style=${style}`;
+    const view = `${link}/?style=${style}&city=${cityOpt}`;
     console.log(`  city open at ${cyan(view)}`);
     if (!noOpen) openBrowser(view);
     return;
   }
-  const recUrl = `${link}/?record=1&w=${w}&h=${h}&fps=${fps}&dur=${duration}&style=${style}` +
+  const recUrl = `${link}/?record=1&w=${w}&h=${h}&fps=${fps}&dur=${duration}&style=${style}&city=${cityOpt}` +
     (still ? `&still=1&shot=${shot}${noHud ? '&hud=0' : ''}` : '');
   console.log(still ? `  photographing ${style} / ${shot} at ${w}x${h} …` : `  filming ${duration}s at ${w}x${h}@${fps}fps …`);
+  // a browser that never sends a frame (GPU trouble, blocked CDN) shouldn't hang the CLI forever
+  setTimeout(() => {
+    if (rec.got) return;
+    console.error('\n  gitropolis: the browser never sent a frame — try --headed to watch what happens');
+    rec.browser?.kill();
+    process.exit(1);
+  }, 90_000).unref();
   const chrome = findChrome();
   if (chrome && !headed) {
     rec.browser = spawn(chrome, ['--headless=new', `--window-size=${w},${h}`, '--hide-scrollbars', '--mute-audio',

@@ -1,0 +1,445 @@
+// City planners. Each archetype turns the same files into a different urban form:
+// where blocks go, what shape they are, where water and parks are, how tall things get.
+// Planners work in "lot units" (a median file ≈ a 1×1 lot); the result is normalised to fit SIZE.
+import { hierarchy, treemap, treemapSquarify, pack } from 'd3-hierarchy';
+
+const GROUP_RE = /^(packages|apps|libs|crates|modules|plugins|services|projects)\/[^/]+/;
+const hash = n => { const s = Math.sin(n * 12.9898 + 78.233) * 43758.5453; return s - Math.floor(s); };
+const sum = xs => xs.reduce((s, x) => s + x, 0);
+const clamp = (x, a, b) => Math.max(a, Math.min(b, x));
+const rectPoly = (x0, z0, x1, z1) => [[x0, z0], [x1, z0], [x1, z1], [x0, z1]];
+const circlePoly = (cx, cz, r, n = 40) => Array.from({ length: n }, (_, k) => {
+  const t = (k / n) * Math.PI * 2;
+  return [cx + Math.cos(t) * r, cz + Math.sin(t) * r];
+});
+
+export const CITY_KINDS = ['smalltown', 'manhattan', 'hongkong', 'tokyo', 'la', 'paris', 'venice', 'barcelona'];
+
+// ---------------------------------------------------------------- shared helpers
+
+// districts: monorepo packages or top-level directories; root files share one district
+function districtsOf(files, area) {
+  const map = new Map();
+  files.forEach((f, i) => {
+    const m = GROUP_RE.exec(f.p);
+    const key = m ? m[0] : (f.p.includes('/') ? f.p.split('/')[0] : '·');
+    const rest = key === '·' ? f.p : f.p.slice(key.length + 1);
+    const dir = rest.includes('/') ? rest.slice(0, rest.lastIndexOf('/')) : '';
+    if (!map.has(key)) map.set(key, { name: key, items: [] });
+    map.get(key).items.push({ i, a: area[i], dir, sub: dir.split('/')[0] });
+  });
+  const ds = [...map.values()];
+  for (const d of ds) {
+    d.items.sort((a, b) => a.dir < b.dir ? -1 : a.dir > b.dir ? 1 : b.a - a.a);
+    d.area = sum(d.items.map(it => it.a));
+  }
+  return ds.sort((a, b) => b.area - a.area);
+}
+
+// biggest district in the middle of the sequence, smaller ones fanning out on both sides
+function middleOut(ds) {
+  const out = [];
+  ds.forEach((d, k) => (k % 2 ? out.push(d) : out.unshift(d)));
+  return out;
+}
+
+// squarified lots inside a rect; an invisible filler keeps lots at their true size in half-empty blocks
+function packRect(items, x0, z0, x1, z1, pad = 0.08) {
+  const W = x1 - x0, D = z1 - z0;
+  const used = sum(items.map(it => it.a));
+  const kids = items.map(it => ({ it, v: it.a }));
+  const free = W * D * 0.92 - used;
+  if (free > 0) kids.push({ filler: true, v: free });
+  const root = hierarchy({ children: kids }).sum(d => d.v || 0).sort((a, b) => b.value - a.value);
+  treemap().tile(treemapSquarify.ratio(1)).size([W, D]).paddingInner(pad).paddingOuter(pad * 0.5)(root);
+  return root.leaves().filter(l => !l.data.filler).map(l => ({
+    i: l.data.it.i, x: x0 + (l.x0 + l.x1) / 2, z: z0 + (l.y0 + l.y1) / 2,
+    w: Math.max(0.05, l.x1 - l.x0), d: Math.max(0.05, l.y1 - l.y0), rot: 0,
+  }));
+}
+
+// fill blocks in order with a district's items, block by block, by capacity
+function chunk(items, cap) {
+  const out = [];
+  let cur = [], used = 0;
+  for (const it of items) {
+    if (cur.length && used + it.a > cap) { out.push(cur); cur = []; used = 0; }
+    cur.push(it); used += it.a;
+  }
+  if (cur.length) out.push(cur);
+  return out;
+}
+
+function annularSector(r0, r1, t0, t1) {
+  const steps = Math.max(2, Math.ceil(Math.abs(t1 - t0) / 0.06));
+  const pts = [];
+  for (let k = 0; k <= steps; k++) { const t = t0 + (t1 - t0) * k / steps; pts.push([Math.cos(t) * r1, Math.sin(t) * r1]); }
+  for (let k = steps; k >= 0; k--) { const t = t0 + (t1 - t0) * k / steps; pts.push([Math.cos(t) * r0, Math.sin(t) * r0]); }
+  return pts;
+}
+
+// ---------------------------------------------------------------- planners
+// each returns { lots[i] = {x,z,w,d,rot}, blocks: [{poly,type}], land: [poly], groundIsWater,
+//               bridges: [{a,b,w}], hills: [{x,z,r,h}], labels: [{text,x,z}], height: (i, rel) => lot units }
+
+const PLANNERS = {
+  // a long gridded island: wide avenues N–S, narrow streets E–W, a park in the middle
+  manhattan(ds, ctx) {
+    const BW = 4.2, BD = 1.7, AV = 0.6, ST = 0.3;
+    const chunks = [];
+    for (const d of middleOut(ds)) for (const items of chunk(d.items, BW * BD * 0.85)) chunks.push({ d, items });
+    const K = chunks.length;
+    const C = clamp(Math.round(Math.sqrt(K / 2.4)), 1, 7);
+    let R = Math.ceil(K / C);
+    const park = C >= 3 && R >= 7 ? { c0: C >= 5 ? 1 : Math.floor(C / 2), c1: C >= 5 ? C - 2 : Math.floor(C / 2), r0: Math.round(R * 0.58), r1: Math.round(R * 0.58) + Math.max(2, Math.round(R * 0.16)) - 1 } : null;
+    const inPark = (c, r) => park && c >= park.c0 && c <= park.c1 && r >= park.r0 && r <= park.r1;
+    const cellX = c => c * (BW + AV), cellZ = r => -r * (BD + ST);
+    const lots = [], blocks = [], labels = [], seen = new Set();
+    let k = 0;
+    for (let r = 0; k < K; r++) {
+      for (let cc = 0; cc < C && k < K; cc++) {
+        const c = r % 2 ? C - 1 - cc : cc; // serpentine keeps districts contiguous
+        if (inPark(c, r)) continue;
+        const { d, items } = chunks[k++];
+        const x0 = cellX(c), z0 = cellZ(r) - BD;
+        blocks.push({ poly: rectPoly(x0, z0, x0 + BW, z0 + BD), type: 'block' });
+        lots.push(...packRect(items, x0, z0, x0 + BW, z0 + BD, 0.07));
+        if (!seen.has(d) && d.name !== '·') { seen.add(d); labels.push({ text: d.name, x: x0 + BW / 2, z: z0 + BD + ST * 0.5 }); }
+      }
+      R = r + 1;
+    }
+    if (park) blocks.push({ poly: rectPoly(cellX(park.c0), cellZ(park.r1) - BD, cellX(park.c1) + BW, cellZ(park.r0)), type: 'park' });
+    const X1 = cellX(C - 1) + BW, Z0 = cellZ(R - 1) - BD, M = AV * 1.2;
+    // the island, with Manhattan's tapered southern tip
+    const land = [[[-M, Z0 - M], [X1 + M, Z0 - M], [X1 + M, M], [X1 * 0.6, M + 2.2], [X1 * 0.3, M + 2.6], [-M, M + 0.8]]];
+    return {
+      lots, blocks, land, labels, groundIsWater: true,
+      height: (i, rel) => Math.min(0.6 + 1.6 * Math.pow(rel, 0.55), 11) * (i === ctx.hub ? 1.2 : 1),
+    };
+  },
+
+  // dense wards cut into many small irregular blocks; station towers at the busiest junctions
+  tokyo(ds, ctx) {
+    const total = sum(ds.map(d => d.area));
+    const W = Math.sqrt(total / 0.55);
+    const wards = hierarchy({ children: ds.map(d => ({ d, v: d.area })) }).sum(x => x.v || 0).sort((a, b) => b.value - a.value);
+    treemap().tile(treemapSquarify.ratio(1)).size([W, W]).paddingInner(0.8).paddingOuter(0.4)(wards);
+    const lots = [], blocks = [], labels = [];
+    let seed = 1;
+    const split = (x0, z0, x1, z1, target, out) => {
+      const w = x1 - x0, h = z1 - z0;
+      if (w * h <= target * 1.6 || Math.min(w, h) < 1.3) { out.push([x0, z0, x1, z1]); return; }
+      const t = 0.36 + 0.28 * hash(seed++), g = 0.16;
+      if (w >= h) { const m = x0 + w * t; split(x0, z0, m - g / 2, z1, target, out); split(m + g / 2, z0, x1, z1, target, out); }
+      else { const m = z0 + h * t; split(x0, z0, x1, m - g / 2, target, out); split(x0, m + g / 2, x1, z1, target, out); }
+    };
+    for (const leaf of wards.leaves()) {
+      const d = leaf.data.d;
+      const cells = [];
+      split(leaf.x0, leaf.y0, leaf.x1, leaf.y1, 4.5, cells);
+      const capTotal = sum(cells.map(([a, b, c, e]) => (c - a) * (e - b)));
+      let idx = 0;
+      for (const [x0, z0, x1, z1] of cells) {
+        const cap = (x1 - x0) * (z1 - z0) * (d.area / capTotal);
+        const take = [];
+        let used = 0;
+        while (idx < d.items.length && (used + d.items[idx].a <= cap || !take.length)) { used += d.items[idx].a; take.push(d.items[idx++]); }
+        blocks.push({ poly: rectPoly(x0, z0, x1, z1), type: 'block' });
+        if (take.length) lots.push(...packRect(take, x0, z0, x1, z1, 0.06));
+      }
+      if (idx < d.items.length) { const [x0, z0, x1, z1] = cells[cells.length - 1]; lots.push(...packRect(d.items.slice(idx), x0, z0, x1, z1, 0.04)); }
+      if (d.name !== '·') labels.push({ text: d.name, x: (leaf.x0 + leaf.x1) / 2, z: leaf.y1 + 0.4 });
+    }
+    // the busiest junctions become station towers
+    const ranked = [...ctx.inDeg.keys()].sort((a, b) => ctx.inDeg[b] - ctx.inDeg[a]);
+    const stations = new Set(ranked.slice(0, Math.max(1, Math.round(ranked.length * 0.015))).filter(i => ctx.inDeg[i] > 0));
+    return {
+      lots, blocks, labels, land: [rectPoly(-0.6, -0.6, W + 0.6, W + 0.6)],
+      height: (i, rel) => Math.min(0.32 + 0.95 * Math.sqrt(rel), 5) * (stations.has(i) ? 2.6 : 1),
+    };
+  },
+
+  // low-rise neighbourhoods far apart, separated by freeways; one downtown cluster
+  la(ds, ctx) {
+    const hubD = ds.find(d => d.items.some(it => it.i === ctx.hub)) || ds[0];
+    const total = sum(ds.map(d => d.area));
+    const W = Math.sqrt(total / 0.32);
+    const root = hierarchy({ children: ds.map(d => ({ d, v: d.area * (d === hubD ? 0.45 : 1) })) }).sum(x => x.v || 0).sort((a, b) => b.value - a.value);
+    treemap().tile(treemapSquarify.ratio(1)).size([W, W]).paddingInner(3.2).paddingOuter(1.2)(root);
+    const lots = [], blocks = [], labels = [];
+    for (const leaf of root.leaves()) {
+      const d = leaf.data.d, downtown = d === hubD;
+      // tiny neighbourhoods can be squeezed to nothing by the freeway padding
+      const x0 = leaf.x0, z0 = leaf.y0, w = Math.max(1.2, leaf.x1 - leaf.x0), h = Math.max(1.2, leaf.y1 - leaf.y0);
+      blocks.push({ poly: rectPoly(x0, z0, x0 + w, z0 + h), type: downtown ? 'block' : 'lawn' });
+      // a regular grid of house lots; shrink cells until everyone fits
+      // spread the houses evenly over the whole neighbourhood
+      let cs = Math.sqrt((w * h) / d.items.length), cols, rows;
+      do { cols = Math.max(1, Math.floor(w / cs)); rows = Math.max(1, Math.floor(h / cs)); if (cols * rows >= d.items.length) break; cs *= 0.95; } while (cs > 0.2);
+      d.items.forEach((it, k) => {
+        const c = k % cols, r = Math.floor(k / cols);
+        const side = Math.min(cs * (downtown ? 0.82 : 0.68), Math.sqrt(it.a) * (downtown ? 0.9 : 0.8));
+        const j = hash(it.i);
+        lots.push({ i: it.i, x: x0 + (c + 0.5) * (w / cols), z: z0 + (r + 0.5) * (h / rows), w: side * (1 + 0.3 * j), d: side, rot: 0 });
+      });
+      if (d.name !== '·') labels.push({ text: downtown ? `${d.name} (downtown)` : d.name, x: (leaf.x0 + leaf.x1) / 2, z: leaf.y1 + 0.8 });
+    }
+    return {
+      lots, blocks, labels, land: [rectPoly(-1, -1, W + 1, W + 1)],
+      height: (i, rel, d) => d === hubD ? Math.min(0.6 + 2.2 * Math.pow(rel, 0.6), 12) : Math.min(0.22 + 0.3 * Math.pow(rel, 0.4), 1.1),
+      districtOf: i => ds.find(d => d.items.some(it => it.i === i)),
+    };
+  },
+
+  // the core file is a monument on a round plaza; districts are wedges between radial avenues
+  paris(ds, ctx) {
+    const hubA = ctx.area[ctx.hub];
+    const rest = ds.map(d => ({ ...d, items: d.items.filter(it => it.i !== ctx.hub) })).filter(d => d.items.length);
+    for (const d of rest) d.area = sum(d.items.map(it => it.a));
+    const total = sum(rest.map(d => d.area));
+    const r0 = Math.max(2.4, Math.sqrt(hubA) * 1.6);
+    const BAND = 0.95, STREET = 0.2, BLVD = 0.6, AVE = 0.6;
+    const lots = [{ i: ctx.hub, x: 0, z: 0, w: Math.sqrt(hubA) * 0.75, d: Math.sqrt(hubA) * 0.75, rot: Math.PI / 4 }];
+    const blocks = [{ poly: circlePoly(0, 0, r0 - 0.5, 48), type: 'plaza' }], labels = [];
+    // every wedge gets at least a sliver wide enough to build on near the plaza
+    const MIN = Math.min(0.35, (Math.PI * 2) / rest.length * 0.5);
+    const raw = rest.map(d => (d.area / total) * Math.PI * 2);
+    const short = sum(raw.map(x => Math.max(0, MIN - x)));
+    const big = sum(raw.filter(x => x > MIN));
+    const spans = raw.map(x => x <= MIN ? MIN : x - short * (x / big));
+    let t = -Math.PI / 2;
+    for (const [di, d] of rest.entries()) {
+      const span = spans[di];
+      const t0 = t, t1 = t + span;
+      t = t1;
+      let r = r0 + 0.5, band = 0, k = 0;
+      while (k < d.items.length && band < 400) {
+        const rin = r, rout = r + BAND, rm = r + BAND / 2;
+        const ga = (AVE / 2) / rm; // keeps radial avenues a constant width
+        const a0 = t0 + ga, a1 = t1 - ga, avail = (a1 - a0) * rm;
+        let cur = 0;
+        const start = k;
+        while (k < d.items.length && avail > 0.4) {
+          const it = d.items[k];
+          const w = Math.min(it.a / BAND, avail);
+          if (cur + w > avail && cur > 0) break;
+          const th = a0 + (cur + w / 2) / rm;
+          lots.push({ i: it.i, x: Math.cos(th) * rm, z: Math.sin(th) * rm, w: w * 0.92, d: BAND * 0.86, rot: -(th + Math.PI / 2) });
+          cur += w; k++;
+        }
+        if (k > start) blocks.push({ poly: annularSector(rin, rout, a0, a0 + cur / rm), type: 'block' });
+        band++;
+        r = rout + (band % 4 === 0 ? BLVD : STREET);
+      }
+      const tm = (t0 + t1) / 2, rl = r + 0.8;
+      if (d.name !== '·') labels.push({ text: d.name, x: Math.cos(tm) * rl, z: Math.sin(tm) * rl });
+    }
+    return {
+      lots, blocks, labels,
+      height: (i, rel) => i === ctx.hub ? 5.5 : 0.95 + 0.18 * Math.tanh(Math.log(rel)),
+    };
+  },
+
+  // every district an island; canals between; bridges where islands import each other
+  venice(ds, ctx) {
+    const FILL = 0.5;
+    const root = hierarchy({ children: ds.map(d => ({ d, v: d.area / FILL })) }).sum(x => x.v || 0).sort((a, b) => b.value - a.value);
+    const S = Math.sqrt(sum(ds.map(d => d.area)) / FILL) * 1.4;
+    pack().size([S, S]).padding(1.2)(root);
+    // scale so each island has room for its buildings
+    let k = 1;
+    for (const l of root.leaves()) k = Math.max(k, Math.sqrt(l.data.d.area / FILL / (Math.PI * l.r * l.r)));
+    const lots = [], blocks = [], land = [], labels = [], isle = new Map();
+    for (const l of root.leaves()) {
+      const d = l.data.d, cx = l.x * k, cz = l.y * k, R = l.r * k;
+      isle.set(d, { cx, cz, R });
+      land.push(circlePoly(cx, cz, R, 48));
+      const ROW = 0.9, GAP = 0.16, M = 0.35;
+      let z = cz - R + M + ROW / 2, idx = 0, row = 0;
+      while (idx < d.items.length && z < cz + R) {
+        const dz = Math.max(Math.abs(z - ROW / 2 - cz), Math.abs(z + ROW / 2 - cz));
+        const half = Math.sqrt(Math.max(0, (R - M) ** 2 - dz * dz));
+        let x = cx - half;
+        const start = idx;
+        while (idx < d.items.length && half > 0.3) {
+          const it = d.items[idx], w = Math.min(it.a / ROW, half * 2);
+          if (x + w > cx + half && x > cx - half) break;
+          lots.push({ i: it.i, x: x + w / 2, z, w: w * 0.9, d: ROW * 0.88, rot: 0 });
+          x += w; idx++;
+        }
+        if (idx > start) blocks.push({ poly: rectPoly(cx - half, z - ROW / 2, x, z + ROW / 2), type: 'block' });
+        row++;
+        z += ROW + (row % 3 === 0 ? 0.45 : GAP);
+      }
+      // anything left over crowds onto the island's last row
+      for (; idx < d.items.length; idx++) lots.push({ i: d.items[idx].i, x: cx, z: cz, w: 0.3, d: 0.3, rot: 0 });
+      if (d.name !== '·') labels.push({ text: d.name, x: cx, z: cz + R + 0.9 });
+    }
+    // bridges between islands that import each other
+    const dOf = new Map();
+    for (const d of ds) for (const it of d.items) dOf.set(it.i, d);
+    const pairs = new Map();
+    ctx.files.forEach((f, i) => f.imp.forEach(j => {
+      const a = dOf.get(i), b = dOf.get(j);
+      if (a && b && a !== b) { const key = a.name < b.name ? `${a.name}|${b.name}` : `${b.name}|${a.name}`; pairs.set(key, (pairs.get(key) || { a, b, n: 0 })); pairs.get(key).n++; }
+    }));
+    const bridges = [...pairs.values()].sort((p, q) => q.n - p.n).slice(0, 40).map(({ a, b, n }) => {
+      const A = isle.get(a), Bq = isle.get(b);
+      const dx = Bq.cx - A.cx, dz = Bq.cz - A.cz, L = Math.hypot(dx, dz) || 1;
+      return { a: [A.cx + dx / L * (A.R - 0.4), A.cz + dz / L * (A.R - 0.4)], b: [Bq.cx - dx / L * (Bq.R - 0.4), Bq.cz - dz / L * (Bq.R - 0.4)], w: clamp(0.18 + Math.log1p(n) * 0.08, 0.2, 0.6) };
+    });
+    // the core file is a campanile
+    const hubLot = lots.find(l => l.i === ctx.hub);
+    if (hubLot) { hubLot.w = hubLot.d = 0.45; }
+    return {
+      lots, blocks, land, labels, bridges, groundIsWater: true,
+      height: (i, rel) => i === ctx.hub ? 6.5 : Math.min(0.42 + 0.45 * Math.pow(rel, 0.4), 1.8),
+    };
+  },
+
+  // a thin, very dense waterfront strip between the harbour and the mountains
+  hongkong(ds, ctx) {
+    const total = sum(ds.map(d => d.area)) / 0.85;
+    const W = Math.sqrt(total * 3.2), D = total / W;
+    const root = hierarchy({ children: ds.map(d => ({ d, v: d.area })) }).sum(x => x.v || 0).sort((a, b) => b.value - a.value);
+    treemap().tile(treemapSquarify.ratio(1)).size([W, D]).paddingInner(0.35).paddingOuter(0.2)(root);
+    const lots = [], blocks = [], labels = [];
+    for (const l of root.leaves()) {
+      const d = l.data.d;
+      blocks.push({ poly: rectPoly(l.x0, l.y0, l.x1, l.y1), type: 'block' });
+      lots.push(...packRect(d.items, l.x0, l.y0, l.x1, l.y1, 0.05));
+      if (d.name !== '·') labels.push({ text: d.name, x: (l.x0 + l.x1) / 2, z: l.y1 + 0.5 });
+    }
+    const hills = [];
+    const n = Math.max(3, Math.ceil(W / 5));
+    for (let k = 0; k < n; k++) hills.push({ x: (k + 0.5) * W / n + (hash(k) - 0.5) * 3, z: -4 - hash(k + 9) * 5, r: 4 + hash(k + 3) * 4, h: 5 + hash(k + 5) * 7 });
+    return {
+      lots, blocks, labels, hills, groundIsWater: true, land: [rectPoly(-1, -13, W + 1, D + 0.6)],
+      height: (i, rel) => Math.min(1.1 + 2.0 * Math.sqrt(rel), 14),
+    };
+  },
+
+  // identical chamfered blocks; buildings ring each block around a courtyard; one cathedral
+  barcelona(ds, ctx) {
+    const S = 4.4, ST = 1.0, RD = 1.1, CH = 0.9;
+    const SIDE = S - 2 * CH * 0.75;
+    const cap = SIDE * 4 * RD * 0.95;
+    // one directory per block where possible: Cerdà would approve
+    const groups = [];
+    for (const d of ds) {
+      const byDir = new Map();
+      for (const it of d.items) if (it.i !== ctx.hub) { const key = d.name + '/' + it.dir; if (!byDir.has(key)) byDir.set(key, []); byDir.get(key).push(it); }
+      for (const items of byDir.values()) for (const c of chunk(items, cap)) groups.push({ d, items: c });
+    }
+    const K = groups.length + 1;
+    const C = Math.ceil(Math.sqrt(K)), R = Math.ceil(K / C);
+    const center = Math.floor(R / 2) * C + Math.floor(C / 2);
+    const lots = [], blocks = [], labels = [], seen = new Set();
+    const oct = (x0, z0) => [[x0 + CH, z0], [x0 + S - CH, z0], [x0 + S, z0 + CH], [x0 + S, z0 + S - CH], [x0 + S - CH, z0 + S], [x0 + CH, z0 + S], [x0, z0 + S - CH], [x0, z0 + CH]];
+    let g = 0;
+    for (let cell = 0; cell < C * R && g <= groups.length; cell++) {
+      const x0 = (cell % C) * (S + ST), z0 = Math.floor(cell / C) * (S + ST);
+      if (cell === center) {
+        blocks.push({ poly: oct(x0, z0), type: 'plaza' });
+        lots.push({ i: ctx.hub, x: x0 + S / 2, z: z0 + S / 2, w: 1.7, d: 1.7, rot: 0 });
+        continue;
+      }
+      if (g >= groups.length) break;
+      const { d, items } = groups[g++];
+      blocks.push({ poly: oct(x0, z0), type: 'block' });
+      // walk the four sides clockwise, laying buildings along the street front
+      const sides = [[x0 + CH * 0.75, z0 + RD / 2, 1, 0, 0], [x0 + S - RD / 2, z0 + CH * 0.75, 0, 1, -Math.PI / 2],
+        [x0 + S - CH * 0.75, z0 + S - RD / 2, -1, 0, Math.PI], [x0 + RD / 2, z0 + S - CH * 0.75, 0, -1, Math.PI / 2]];
+      let s = 0, along = 0;
+      for (const it of items) {
+        let w = Math.min(it.a / RD, SIDE);
+        if (along + w > SIDE && s < 3) { s++; along = 0; }
+        w = Math.min(w, Math.max(0.2, SIDE - along));
+        const [sx, sz, dx, dz, rot] = sides[s];
+        lots.push({ i: it.i, x: sx + dx * (along + w / 2), z: sz + dz * (along + w / 2), w: w * 0.94, d: RD * 0.9, rot });
+        along += w;
+      }
+      if (!seen.has(d) && d.name !== '·') { seen.add(d); labels.push({ text: d.name, x: x0 + S / 2, z: z0 + S + ST / 2 }); }
+    }
+    const W = C * (S + ST), H = R * (S + ST);
+    return {
+      lots, blocks, labels, land: [rectPoly(-ST, -ST, W, H)],
+      height: (i, rel) => i === ctx.hub ? 9 : 1.45 + 0.2 * Math.tanh(Math.log(rel)),
+    };
+  },
+
+  // one main street, houses on both sides, a church on the square
+  smalltown(ds, ctx) {
+    const items = ds.flatMap(d => d.items).filter(it => it.i !== ctx.hub);
+    const per = Math.max(6, Math.ceil(Math.sqrt(items.length * 2.5)));
+    const lots = [], blocks = [], labels = [];
+    const hubA = ctx.area[ctx.hub] || 1;
+    lots.push({ i: ctx.hub, x: 0, z: -2.4, w: 1.4, d: 2.2, rot: 0 });
+    blocks.push({ poly: rectPoly(-2.2, -4, 2.2, -1.1), type: 'plaza' });
+    const rows = Math.ceil(items.length / per);
+    for (let r = 0; r < rows; r++) {
+      const zRow = (r % 2 ? 1.6 : -1.6) + (r >= 2 ? (r % 2 ? 1 : -1) * Math.floor(r / 2) * 4.2 : 0);
+      const row = items.slice(r * per, (r + 1) * per);
+      const zc = zRow + (zRow < 0 ? -0.5 : 0.5);
+      const xStart = -Math.max(row.length, 6) * 0.75;
+      let x = xStart, segStart = x;
+      for (const it of row) {
+        if (r === 0 && x < 2.4 && x + 2.2 > -2.4) { // keep the church square open
+          if (x > segStart) blocks.push({ poly: rectPoly(segStart - 0.3, zc - 0.7, x - 0.15, zc + 0.7), type: 'block' });
+          x = segStart = 2.6;
+        }
+        const w = clamp(Math.sqrt(it.a) * 1.1, 0.7, 2.2);
+        lots.push({ i: it.i, x: x + w / 2, z: zc, w, d: 1.0, rot: 0 });
+        x += w + 0.45;
+      }
+      blocks.push({ poly: rectPoly(segStart - 0.3, zc - 0.7, x - 0.15, zc + 0.7), type: 'block' });
+    }
+    const span = Math.max(4, ...lots.map(l => Math.abs(l.x) + l.w / 2)) + 1.2;
+    return {
+      lots, blocks, labels, roads: [{ a: [-span, 0], b: [span, 0], w: 1.3 }],
+      height: (i, rel) => i === ctx.hub ? 2.4 : Math.min(0.35 + 0.25 * Math.pow(rel, 0.4), 0.9),
+    };
+  },
+};
+
+// ---------------------------------------------------------------- entry point
+export function buildLayout(kind, { files, inDeg, SIZE }) {
+  const N = files.length;
+  const v = files.map(f => Math.sqrt(f.loc) + 3);
+  const vs = [...v].sort((a, b) => a - b), medV = vs[N >> 1] || 1;
+  const area = v.map(x => x / medV);
+  const locs = files.map(f => f.loc).sort((a, b) => a - b), medLoc = locs[N >> 1] || 1;
+  const hub = inDeg.indexOf(Math.max(...inDeg));
+  const ctx = { files, inDeg, area, hub };
+  const ds = districtsOf(files, area);
+  const L = PLANNERS[kind](ds, ctx);
+
+  // normalise into a SIZE-wide square centred on the origin
+  const pts = [];
+  for (const l of L.lots) if (l) { const r = Math.hypot(l.w, l.d) / 2; pts.push([l.x - r, l.z - r], [l.x + r, l.z + r]); }
+  for (const b of L.blocks) pts.push(...b.poly);
+  if (L.groundIsWater) for (const p of L.land || []) pts.push(...p);
+  let x0 = Infinity, x1 = -Infinity, z0 = Infinity, z1 = -Infinity;
+  for (const [x, z] of pts) { if (!Number.isFinite(x) || !Number.isFinite(z)) continue; x0 = Math.min(x0, x); x1 = Math.max(x1, x); z0 = Math.min(z0, z); z1 = Math.max(z1, z); }
+  const s = (SIZE * 0.92) / Math.max(x1 - x0, z1 - z0, 1e-6);
+  const mx = (x0 + x1) / 2, mz = (z0 + z1) / 2;
+  const P = ([x, z]) => [(x - mx) * s, (z - mz) * s];
+  const lots = new Array(N);
+  for (const l of L.lots) lots[l.i] = { x: (l.x - mx) * s, z: (l.z - mz) * s, w: l.w * s, d: l.d * s, rot: l.rot || 0 };
+  const districtOf = L.districtOf || (() => null);
+  const heights = files.map((f, i) => L.height(i, f.loc / medLoc, districtOf(i)) * s);
+  return {
+    kind,
+    unit: s,
+    lots,
+    heights,
+    hub,
+    blocks: L.blocks.map(b => ({ ...b, poly: b.poly.map(P) })),
+    land: (L.land || []).map(p => p.map(P)),
+    groundIsWater: !!L.groundIsWater,
+    bridges: (L.bridges || []).map(b => ({ a: P(b.a), b: P(b.b), w: b.w * s })),
+    roads: (L.roads || []).map(r => ({ a: P(r.a), b: P(r.b), w: r.w * s })),
+    hills: (L.hills || []).map(h => ({ x: (h.x - mx) * s, z: (h.z - mz) * s, r: h.r * s, h: h.h * s })),
+    labels: L.labels.map(l => ({ text: l.text, x: (l.x - mx) * s, z: (l.z - mz) * s })),
+  };
+}

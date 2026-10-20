@@ -7,6 +7,7 @@ import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
 import { hierarchy, treemap, treemapSquarify } from 'd3-hierarchy';
 import { buildStudio } from './studio.js';
+import { buildLayout, CITY_KINDS } from './layouts.js';
 
 const params = new URLSearchParams(location.search);
 // neon (original) | maquette | plan | nocturne
@@ -57,10 +58,10 @@ treemap()
 
 const leaves = root.leaves().filter(l => l.data.i !== undefined);
 const lotSides = leaves.map(l => Math.min(l.x1 - l.x0, l.y1 - l.y0)).sort((a, b) => a - b);
-const unit = lotSides[Math.floor(lotSides.length / 2)] || est;
+let unit = lotSides[Math.floor(lotSides.length / 2)] || est;
 const locs = files.map(f => f.loc).sort((a, b) => a - b);
 const medianLoc = locs[Math.floor(locs.length / 2)] || 1;
-const plateStep = unit * 0.05;
+let plateStep = unit * 0.05;
 const cx = SIZE / 2, cz = SIZE / 2;
 
 const HUES = [0.53, 0.86, 0.74, 0.11, 0.38, 0.95, 0.6, 0.47, 0.03, 0.68];
@@ -88,6 +89,20 @@ for (const l of leaves) {
   b.h = Math.min(unit * (0.5 + 1.3 * Math.pow(rel, 0.6)), unit * 9);
   b.hue = l.hue;
   b.born = t01(f.born);
+}
+
+// city planners (lit styles only): ?city=auto picks the repo's own archetype, ?city=classic keeps the treemap
+const CITY = params.get('city') || 'auto';
+const cityKind = NEON || CITY === 'classic' ? null : CITY === 'auto' ? data.identity?.city : CITY;
+const layout = cityKind && CITY_KINDS.includes(cityKind) ? buildLayout(cityKind, { files, inDeg, SIZE }) : null;
+if (layout) {
+  unit = layout.unit;
+  plateStep = unit * 0.06;
+  const base = (layout.groundIsWater ? plateStep * 0.8 : 0) + plateStep;
+  files.forEach((f, i) => {
+    const l = layout.lots[i] || { x: 0, z: 0, w: 0.001, d: 0.001, rot: 0 };
+    Object.assign(B[i], { x: l.x, z: l.z, w: l.w * 0.88, d: l.d * 0.88, rot: l.rot, y: base, h: Math.max(layout.heights[i], unit * 0.1) });
+  });
 }
 
 // ------------------------------------------------------------ renderer
@@ -239,7 +254,7 @@ if (NEON) {
 const heat = new Float32Array(N);
 const focusAttr = new Float32Array(N).fill(1);
 const studio = NEON ? null : buildStudio({ name: STYLE, scene, renderer, B, files, districts, unit, SIZE, plateStep, cx, cz,
-  shared, heat, focusAttr, inDeg, t01 });
+  shared, heat, focusAttr, inDeg, t01, layout });
 if (studio) {
   document.body.classList.add('studio', `style-${STYLE}`);
   document.body.style.setProperty('--ink', studio.style.ink);
@@ -575,14 +590,19 @@ function moveTimeline(v) {
 }
 
 // ------------------------------------------------------------ labels for top-level districts
-const labelEls = (root.children || []).filter(c => c.children).slice(0, 24).map(n => {
+const labelSource = layout
+  ? layout.labels.slice(0, 24).map(l => ({ data: { name: l.text }, born: 0, hue: 0, at: [l.x, l.z] }))
+  : (root.children || []).filter(c => c.children).slice(0, 24);
+const labelEls = labelSource.map(n => {
   const el = document.createElement('div');
   el.className = 'label';
   el.textContent = n.data.name;
   const c = new THREE.Color().setHSL(n.hue, 1, 0.65);
   el.style.color = studio ? studio.style.ink : `#${c.getHexString()}`;
   $('#labels').append(el);
-  return { el, n, p: new THREE.Vector3((n.x0 + n.x1) / 2 - cx, plateStep, n.y1 - cz + est * 0.15) };
+  const p = n.at ? new THREE.Vector3(n.at[0], plateStep * 2, n.at[1])
+    : new THREE.Vector3((n.x0 + n.x1) / 2 - cx, plateStep, n.y1 - cz + est * 0.15);
+  return { el, n, p };
 });
 const tmp = new THREE.Vector3();
 function updateLabels() {
@@ -723,6 +743,16 @@ async function record() {
     g.fillText(data.name, pad, pad + 60 * S);
     g.fillStyle = ST.inkSoft; g.font = `400 ${Math.round(17 * S)}px Inter, sans-serif`;
     g.fillText(`${year(data.start)}–${year(data.end)}   ·   ${N.toLocaleString()} files   ·   ${data.stats.loc.toLocaleString()} lines`, pad, pad + 98 * S);
+    if (layout && data.identity) {
+      const id = data.identity;
+      const name = { smalltown: 'a small town', manhattan: 'Manhattan', hongkong: 'Hong Kong', tokyo: 'Tokyo', la: 'Los Angeles', paris: 'Paris', venice: 'Venice', barcelona: 'Barcelona' }[layout.kind];
+      g.fillStyle = ST.ink; g.font = `italic 400 ${Math.round(30 * S)}px ${ST.font}`;
+      g.fillText(`built like ${name}`, pad, pad + 146 * S);
+      if (layout.kind === id.city && id.reasons.length) {
+        g.fillStyle = ST.inkSoft; g.font = `400 ${Math.round(15 * S)}px Inter, sans-serif`;
+        id.reasons.slice(0, 2).forEach((r, k) => g.fillText(r, pad, pad + (178 + k * 22) * S));
+      }
+    }
     g.textAlign = 'center'; g.textBaseline = 'middle';
     g.font = `${ST.labelCase === 'upper' ? 500 : 400} ${Math.round((ST.labelCase === 'upper' ? 13 : 19) * S)}px ${ST.labelCase === 'upper' ? 'Inter, sans-serif' : ST.font}`;
     g.letterSpacing = ST.labelCase === 'upper' ? `${Math.round(3 * S)}px` : '0px';
@@ -746,7 +776,9 @@ async function record() {
       camera.lookAt(0, 0, 0);
       return;
     }
-    const [az, el, d] = ({ hero: [35, N > 1000 ? 27 : 20, N > 1000 ? 0.95 : 1.0], aerial: [40, 42, 1.15], street: [60, 7, 0.5] }[name] || [35, 13, 0.8])
+    // a small town is long and thin: come in closer so it doesn't shrink to a speck
+    const near = layout?.kind === 'smalltown' ? 0.7 : 1;
+    const [az, el, d] = ({ hero: [35, N > 1000 ? 27 : 20, (N > 1000 ? 0.95 : 1.0) * near], aerial: [40, 42, 1.15 * near], street: [60, 7, 0.5] }[name] || [35, 13, 0.8])
       .map((x, k) => k < 2 ? THREE.MathUtils.degToRad(x) : x);
     camera.position.set(Math.cos(el) * Math.cos(az), Math.sin(el), Math.cos(el) * Math.sin(az))
       .multiplyScalar(SIZE * camK * 1.55 * d).add(target);
