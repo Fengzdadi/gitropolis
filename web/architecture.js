@@ -39,8 +39,20 @@ export function buildingSpecs({ files, B, inDeg, unit, kind, t01 }) {
   const sites = new Set([...files.keys()].filter(i => (files[i].s || []).includes('new') && (files[i].a?.r || 'source') === 'source')
     .sort((a, b) => files[b].born - files[a].born).slice(0, Math.max(2, Math.round(N * 0.01))));
   // districts ranked by size get palette slots in order, so the biggest ones get the most distinct colours
+  // when one top-level directory holds most of the code (a lone src/ or source/), its subdirectories
+  // are the real neighbourhoods: paint by those instead, so single-directory repos aren't one colour
+  const topCount = new Map();
+  for (const f of files) topCount.set(districtKey(f.p), (topCount.get(districtKey(f.p)) || 0) + 1);
+  const [domKey, domN] = [...topCount].sort((a, b) => b[1] - a[1])[0] || ['', 0];
+  const refine = domN / Math.max(1, files.length) > 0.7;
+  const paintKey = p => {
+    const k = districtKey(p);
+    if (!refine || k !== domKey) return k;
+    const rest = k === '·' ? p : p.slice(k.length + 1);
+    return rest.includes('/') ? `${k}/${rest.split('/')[0]}` : k;
+  };
   const dSize = new Map();
-  for (const f of files) dSize.set(districtKey(f.p), (dSize.get(districtKey(f.p)) || 0) + f.loc);
+  for (const f of files) dSize.set(paintKey(f.p), (dSize.get(paintKey(f.p)) || 0) + f.loc);
   const dSlot = new Map([...dSize].sort((a, b) => b[1] - a[1]).map(([k], n) => [k, n]));
   const town = kind === 'smalltown';
   const deploys = [...files.keys()].filter(i => files[i].a?.r === 'deploy').sort((a, b) => files[b].loc - files[a].loc);
@@ -93,7 +105,7 @@ export function buildingSpecs({ files, B, inDeg, unit, kind, t01 }) {
       tiers: Math.min(4, Math.max(2, a.c || 3)),
       roof: form === 'house' ? (ROOF_BY_CITY[kind] === 'mansard' ? 'mansard' : town && (i * 2654435761 >>> 0) % 3 === 0 ? 'hip' : 'gable') : ROOF_BY_CITY[kind],
       tint: (() => {
-        const slot = dSlot.get(districtKey(f.p)) || 0;
+        const slot = dSlot.get(paintKey(f.p)) || 0;
         // in a small town, alternate between two wall colours within a district so a street isn't uniform
         return town
           ? { roof: ROOF_PAINT[slot % 8], roofMix: 0.85, wall: WALL_PAINT[(slot + (i % 3 === 0 ? 3 : 0)) % 8], wallMix: 0.7 }
