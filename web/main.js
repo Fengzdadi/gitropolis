@@ -116,6 +116,7 @@ const REC = params.get('record') ? {
   w: +params.get('w') || 1920, h: +params.get('h') || 1080,
   fps: +params.get('fps') || 30, dur: +params.get('dur') || 20,
   still: !!params.get('still'), shot: params.get('shot') || 'hero', hud: params.get('hud') !== '0',
+  fixed: !!params.get('static'), // camera holds the establishing shot (GIFs compress far better)
 } : null;
 const viewW = () => REC ? REC.w : innerWidth;
 const viewH = () => REC ? REC.h : innerHeight;
@@ -150,6 +151,15 @@ controls.maxDistance = SIZE * 2.5;
 controls.autoRotate = true;
 controls.autoRotateSpeed = 0.35;
 controls.addEventListener('start', () => { controls.autoRotate = false; });
+// pixel art stays isometric: drag pans, scroll zooms, no orbiting
+if (PIXEL) {
+  controls.autoRotate = false;
+  controls.enableRotate = false;
+  controls.screenSpacePanning = true;
+  controls.mouseButtons = { LEFT: THREE.MOUSE.PAN, MIDDLE: THREE.MOUSE.DOLLY, RIGHT: THREE.MOUSE.PAN };
+  controls.touches = { ONE: THREE.TOUCH.PAN, TWO: THREE.TOUCH.DOLLY_PAN };
+  controls.minZoom = 0.5; controls.maxZoom = 12;
+}
 
 // each planned city has its own establishing shot: azimuth, elevation, distance (× SIZE) and a target
 function planCamera({ az, el, dist, target }) {
@@ -170,6 +180,7 @@ const shared = {
   uTime: { value: 0 },
   uTimeline: { value: 0 },
   uPx: { value: 1 }, // world size of one art pixel (pixel style)
+  uWave: { value: 0 }, // water ripple clock; held still in static films, where moving water would bloat GIFs
   uFogColor: { value: FOG },
   uFogDensity: { value: fogDensity },
   uFocus: { value: -1 },
@@ -282,6 +293,7 @@ const studio = NEON ? null : buildStudio({ name: STYLE, scene, renderer, B, file
   shared, heat, focusAttr, inDeg, t01, layout });
 if (studio) {
   document.body.classList.add('studio', `style-${STYLE}`);
+  if (studio.style.uiFont) document.body.style.setProperty('--ui-font', studio.style.uiFont);
   document.body.style.setProperty('--ink', studio.style.ink);
   document.body.style.setProperty('--ink-soft', studio.style.inkSoft);
   document.body.style.setProperty('--paper', studio.style.background);
@@ -697,6 +709,7 @@ addEventListener('keydown', e => { if (e.code === 'Escape') focus(-1); });
 // ------------------------------------------------------------ loop
 function tick(dt) {
   shared.uTime.value += dt;
+  if (!REC?.fixed) shared.uWave.value += dt;
   studio?.update?.();
   const decay = Math.exp(-dt * 4.0);
   for (let i = 0; i < N; i++) heat[i] *= decay;
@@ -738,7 +751,19 @@ async function record() {
   const smooth = (a, b, u) => { const t = Math.min(1, Math.max(0, (u - a) / (b - a))); return t * t * (3 - 2 * t); };
   const pivot = new THREE.Vector3();
 
+  // pixel art keeps its isometric angle: the film is a slow push-in and drift from the whole city
+  // to its landmark, done with the orthographic zoom
+  const baseCam = layout?.camera || { az: 45, el: 30, dist: 1, target: [0, 0] };
+  function shotPixel(u) {
+    const push = REC.fixed ? 0 : smooth(0.35, 1, u);
+    const tx = THREE.MathUtils.lerp(baseCam.target[0], hubPos.x, push), tz = THREE.MathUtils.lerp(baseCam.target[1], hubPos.z, push);
+    planCamera({ ...baseCam, target: [tx, tz] });
+    camera.zoom = (0.82 / baseCam.dist) * (1 + 2.0 * push * push);
+    camera.updateProjectionMatrix();
+  }
+
   function shot(u) {
+    if (PIXEL) return shotPixel(u);
     const e = ease(u);
     pivot.set(0, 0, 0).lerp(hubPos, smooth(0.5, 1, u));
     const theta = theta0 + 1.7 * e;
@@ -793,6 +818,14 @@ async function record() {
       g.fillText(txt, (v.x * 0.5 + 0.5) * REC.w, (-v.y * 0.5 + 0.5) * REC.h);
     }
     g.letterSpacing = '0px';
+    if (!REC.still) {
+      // films: the date and commit count tick along in the top-right corner
+      g.textAlign = 'right'; g.textBaseline = 'alphabetic';
+      g.fillStyle = ST.ink; g.font = `400 ${Math.round(60 * S)}px ${ST.font}`;
+      g.fillText(fmtDate(data.start + shared.uTimeline.value * span), REC.w - pad, pad + 56 * S);
+      g.fillStyle = ST.inkSoft; g.font = `400 ${Math.round(17 * S)}px ${ST.uiFont || 'Inter, sans-serif'}`;
+      g.fillText(`commit ${ci.toLocaleString()} / ${commits.length.toLocaleString()}`, REC.w - pad, pad + 90 * S);
+    }
     g.textAlign = 'right'; g.textBaseline = 'alphabetic'; g.font = `400 ${Math.round(14 * S)}px ${ST.uiFont || 'Inter, sans-serif'}`;
     g.fillText('gitropolis', REC.w - pad * 0.7, REC.h - pad * 0.6);
   }
@@ -879,7 +912,7 @@ async function record() {
   for (let i = 0; i < total; i++) {
     const u = i / (total - 1);
     moveTimeline(Math.min(1, Math.max(0, (u - 0.03) / 0.67)));
-    if (u > 0.86 && shared.uFocus.value !== hub) focus(hub);
+    if (!REC.fixed && u > 0.86 && shared.uFocus.value !== hub) focus(hub);
     tick(dt);
     shot(u);
     renderFrame();

@@ -51,6 +51,10 @@
   body.studio #tip { background: var(--paper); border: 1px solid var(--ink-soft); backdrop-filter: none; }
   body.studio #tip b { color: var(--ink); }
   body.studio #legend { display: none; }
+  /* pixel style: pixel type everywhere */
+  body.style-pixel, body.style-pixel #hud h1, body.style-pixel #date .d, body.style-pixel .label, body.style-pixel #tip { font-family: var(--ui-font); }
+  body.style-pixel #hud h1 { font-size: 34px; }
+  body.style-pixel .label { font-size: 13px; }
   body.recording > :not(canvas):not(#rec) { display: none !important; }
   body.recording canvas { width: 100vw !important; height: auto !important; }
   #rec { position: fixed; top: 12px; left: 12px; color: #ff4fd8; font-size: 14px; letter-spacing: .1em; }

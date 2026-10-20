@@ -36,6 +36,7 @@ const cityOpt = flag('--city', 'auto'); // auto | classic | smalltown | manhatta
 const still = flag('--still');
 const shot = flag('--shot', 'hero');
 const noHud = bool('--no-hud');
+const fixedCam = bool('--static'); // films: hold the establishing shot instead of pushing in
 const noOpen = bool('--no-open');
 const repo = args[0] || process.cwd();
 const recording = !!(video || gif || still);
@@ -132,7 +133,7 @@ server.listen(port, () => {
     return;
   }
   const recUrl = `${link}/?record=1&w=${w}&h=${h}&fps=${fps}&dur=${duration}&style=${style}&city=${cityOpt}${pxOpt ? `&px=${pxOpt}` : ''}${zoomOpt ? `&zoom=${zoomOpt}` : ''}` +
-    (still ? `&still=1&shot=${shot}${noHud ? '&hud=0' : ''}` : '');
+    (still ? `&still=1&shot=${shot}${noHud ? '&hud=0' : ''}` : '') + (fixedCam ? '&static=1' : '');
   console.log(still ? `  photographing ${style} / ${shot} at ${w}x${h} …` : `  filming ${duration}s at ${w}x${h}@${fps}fps …`);
   // a browser that never sends a frame (GPU trouble, blocked CDN) shouldn't hang the CLI forever
   setTimeout(() => {
@@ -190,6 +191,19 @@ async function encodeVideo(src, dst, tmp) {
 }
 // GIFs can't be bitrate-targeted: shrink width / fps until it fits
 async function encodeGif(src, dst) {
+  // pixel art: shrink by exactly the art-pixel size with nearest-neighbour (one GIF pixel per art pixel),
+  // keep the palette as it is and don't dither again; flat colours make it compress very well
+  if (style === 'pixel') {
+    const px = Math.max(1, Math.round(+pxOpt || 2));
+    for (const div of [1, 2]) {
+      for (const gfps of [15, 12, 10, 8]) {
+        await run('ffmpeg', ['-y', '-loglevel', 'error', '-i', src, '-vf',
+          `fps=${gfps},scale=iw/${px * div}:ih/${px * div}:flags=neighbor,split[a][b];[a]palettegen=max_colors=128:stats_mode=full[p];[b][p]paletteuse=dither=none`, dst]);
+        if ((await stat(dst)).size <= maxMB * 1e6) return `${Math.round(w / px / div)}px @ ${gfps}fps, 1 GIF pixel = ${div} art pixel${div > 1 ? 's' : ''}`;
+      }
+    }
+    return 'over the size cap — try a shorter --duration';
+  }
   const tries = [[800, 15], [720, 12], [640, 12], [560, 10], [480, 10], [400, 8]];
   for (const [gw, gfps] of tries) {
     await run('ffmpeg', ['-y', '-loglevel', 'error', '-i', src, '-vf',

@@ -5,7 +5,7 @@
 // detail levels instead of shimmering.
 
 const COMMON = /* glsl */`
-  uniform float uTime, uPx;
+  uniform float uTime, uWave, uPx;
   varying vec3 vSurfWP, vSurfN;
   float sHash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
   // world size of n art pixels, snapped to a power of two
@@ -87,7 +87,7 @@ const GROUND = {
     for (int k = 0; k < 2; k++) {
       vec2 sz = k == 0 ? vec2(P(24.0), P(6.0)) : vec2(P(9.0), P(3.0));
       vec2 c = vSurfWP.xz / sz;
-      c.x += uTime * (k == 0 ? 0.15 : 0.5) * (0.5 + sHash(vec2(floor(c.y), 7.0 + float(k))));
+      c.x += uWave * (k == 0 ? 0.15 : 0.5) * (0.5 + sHash(vec2(floor(c.y), 7.0 + float(k))));
       vec2 g = fract(c);
       float w = step(k == 0 ? 0.8 : 0.84, sHash(floor(c) + float(k) * 13.0)) * step(g.y, 0.35) * step(0.15, g.x) * step(g.x, 0.85);
       wave = max(wave, w * sFade(c));
@@ -130,7 +130,7 @@ function inject(material, { shared, withPart, fragment, key, uniforms = {}, decl
   material.customProgramCacheKey = () => `${prevKey()}|surface:${key}`;
   material.onBeforeCompile = (sh, r) => {
     prev?.call(material, sh, r);
-    Object.assign(sh.uniforms, { uTime: shared.uTime, uPx: shared.uPx }, uniforms);
+    Object.assign(sh.uniforms, { uTime: shared.uTime, uWave: shared.uWave, uPx: shared.uPx }, uniforms);
     sh.vertexShader = sh.vertexShader
       .replace('#include <common>', `#include <common>\nvarying vec3 vSurfWP, vSurfN;${withPart ? '\nattribute float part; varying float vSurfPart;' : ''}`)
       .replace('#include <project_vertex>', `vSurfWP = (modelMatrix * vec4(transformed, 1.0)).xyz;\nvSurfN = normalize(mat3(modelMatrix) * objectNormal);${withPart ? '\nvSurfPart = part;' : ''}\n#include <project_vertex>`);

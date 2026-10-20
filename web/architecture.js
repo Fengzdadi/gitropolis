@@ -86,7 +86,7 @@ export function buildingSpecs({ files, B, inDeg, unit, kind, t01 }) {
 
 // one merged mesh for the whole city; per-vertex building id, base height and birth time
 // let a shader grow every building from the ground when the timeline reaches it
-export function buildCityMesh({ buildingGeometry, specs, B, files, t01, shared, unit, castShadow = true }) {
+export function buildCityMesh({ buildingGeometry, specs, B, files, t01, shared, unit, heat, focus, castShadow = true }) {
   const geos = [];
   specs.forEach((spec, i) => {
     if (B[i].w < 0.01) return;
@@ -106,12 +106,23 @@ export function buildCityMesh({ buildingGeometry, specs, B, files, t01, shared, 
     float b0 = aMeta.z * 0.97; float grow = smoothstep(b0, b0 + 0.03, uTimeline);
     transformed.y = aMeta.y + (transformed.y - aMeta.y) * grow;
     transformed *= step(0.001, grow);`;
+  // per-building live state (commit flash, focus) in a small texture the shader looks up by building id
+  const SW = 1024, SH = Math.max(1, Math.ceil(files.length / SW));
+  const stateData = new Uint8Array(SW * SH * 4);
+  const stateTex = new THREE.DataTexture(stateData, SW, SH, THREE.RGBAFormat);
+  stateTex.needsUpdate = true;
   const mat = new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true });
   mat.onBeforeCompile = sh => {
-    sh.uniforms.uTimeline = shared.uTimeline;
+    Object.assign(sh.uniforms, { uTimeline: shared.uTimeline, uFocus: shared.uFocus, tState: { value: stateTex } });
     sh.vertexShader = sh.vertexShader
-      .replace('#include <common>', '#include <common>\nattribute vec3 aMeta; uniform float uTimeline;')
-      .replace('#include <begin_vertex>', `#include <begin_vertex>\n${grow}`);
+      .replace('#include <common>', `#include <common>\nattribute vec3 aMeta; uniform float uTimeline; uniform sampler2D tState; varying vec2 vState;`)
+      .replace('#include <begin_vertex>', `#include <begin_vertex>\n${grow}\nvState = texture2D(tState, vec2((mod(aMeta.x, ${SW}.0) + 0.5) / ${SW}.0, (floor(aMeta.x / ${SW}.0) + 0.5) / ${SH}.0)).rg;`);
+    sh.fragmentShader = sh.fragmentShader
+      .replace('#include <common>', '#include <common>\nvarying vec2 vState; uniform float uFocus;')
+      .replace('#include <color_fragment>', `#include <color_fragment>
+        // a building touched by a commit flashes warm; when one is focused, the rest of the city recedes
+        diffuseColor.rgb = mix(diffuseColor.rgb, vec3(1.0, 0.9, 0.6), vState.r * 0.75);
+        if (uFocus >= 0.0) diffuseColor.rgb *= mix(0.55, 1.0, vState.g);`);
   };
   addFacadeDetail(mat, { unit, shared });
   const depth = new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking });
@@ -122,6 +133,10 @@ export function buildCityMesh({ buildingGeometry, specs, B, files, t01, shared, 
       .replace('#include <begin_vertex>', `#include <begin_vertex>\n${grow}`);
   };
   const mesh = new THREE.Mesh(geo, mat);
+  mesh.userData.syncState = () => {
+    for (let i = 0; i < files.length; i++) { stateData[i * 4] = Math.min(255, heat[i] * 255) | 0; stateData[i * 4 + 1] = focus[i] * 255; }
+    stateTex.needsUpdate = true;
+  };
   mesh.customDepthMaterial = depth;
   mesh.castShadow = mesh.receiveShadow = castShadow;
   mesh.frustumCulled = false;

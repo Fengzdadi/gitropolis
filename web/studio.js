@@ -306,9 +306,11 @@ export function buildStudio(ctx) {
   mesh.frustumCulled = false;
   scene.add(mesh);
   // pixel style: real architecture per file; the box mesh stays as an invisible picking proxy
+  let cityMesh = null;
   if (S.pixel && layout) {
     const specs = buildingSpecs({ files, B, inDeg, unit, kind: layout.kind, t01 });
-    scene.add(buildCityMesh({ buildingGeometry, specs, B, files, t01, shared, unit }));
+    cityMesh = buildCityMesh({ buildingGeometry, specs, B, files, t01, shared, unit, heat, focus: focusAttr });
+    scene.add(cityMesh);
     mesh.material.visible = false;
     mesh.castShadow = false;
   }
@@ -364,7 +366,7 @@ export function buildStudio(ctx) {
   }
 
   return {
-    update: () => traffic?.update(shared.uTime.value, shared.uTimeline.value, roadY),
+    update: () => { traffic?.update(shared.uTime.value, shared.uTimeline.value, roadY); cityMesh?.userData.syncState(); },
     traffic,
     style: S,
     heights: H,
