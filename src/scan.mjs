@@ -174,6 +174,12 @@ export async function scanRepo(repo, { maxCommits = 20000 } = {}) {
   const start = touched.length ? touched[0].t : 0;
   const end = touched.length ? touched[touched.length - 1].t : 0;
   for (const f of files) { if (!f.born) f.born = f.last = start; }
+  // --max-count keeps only the newest commits: when it bit, remember when the repo really began
+  const truncated = commits.length >= maxCommits;
+  let firstCommit = 0;
+  if (truncated) try {
+    for (const t of git(root, ['log', '--max-parents=0', '--format=%ct', 'HEAD']).split('\n')) if (+t && (!firstCommit || +t < firstCommit)) firstCommit = +t;
+  } catch { }
 
   const status = fileStatus(files, start, end, tails, refs);
   const edges = files.reduce((n, f) => n + f.imp.size, 0);
@@ -181,7 +187,7 @@ export async function scanRepo(repo, { maxCommits = 20000 } = {}) {
     name: path.basename(root),
     scannedAt: Math.floor(Date.now() / 1000),
     scanMs: Date.now() - t0,
-    start, end,
+    start, end, ...(truncated && { truncated, firstCommit }),
     stats: { files: files.length, loc: files.reduce((n, f) => n + f.loc, 0), edges, commits: touched.length },
     files: files.map(f => ({ p: f.p, lang: f.lang, loc: f.loc, imp: [...f.imp], a: f.a, churn: f.churn, born: f.born, last: f.last, ...(status.get(f) && { s: status.get(f) }) })),
     // compact: [time, fileIdx, fileIdx, ...]; skip giant sweeping commits (formatting, renames)
