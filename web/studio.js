@@ -190,7 +190,9 @@ export function buildStudio(ctx) {
   // ---- city terrain from a planner: land, raised blocks, parks, plazas, bridges, hills
   if (layout) buildTerrain(scene, layout, S, plateStep, shared, street);
   // traffic: lanes round every block, busier where the block's files import and are imported a lot
-  const traffic = streets ? buildTraffic({ streets, unit: layout.unit, shared, palette: ['#c0413b', '#f2c14e', '#e8833a', '#f2efe9', '#2f6188', '#3d6b36', '#14121c', '#86bfd9'] }) : null;
+  // Venice has no cars, only boats
+  if (streets && layout.kind === 'venice') { streets.lanes = []; streets.boats = [...streets.boats, ...streets.boats.map(b => ({ ...b, pts: [...b.pts].reverse() }))]; }
+  const traffic = streets ? buildTraffic({ streets, unit: layout.unit }) : null;
   if (traffic) scene.add(traffic.mesh);
   const roadY = layout?.groundIsWater ? plateStep * 0.8 + 0.05 : 0.05;
 
@@ -363,6 +365,7 @@ export function buildStudio(ctx) {
 
   return {
     update: () => traffic?.update(shared.uTime.value, shared.uTimeline.value, roadY),
+    traffic,
     style: S,
     heights: H,
     hub,

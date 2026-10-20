@@ -892,4 +892,4 @@ async function record() {
   progress.textContent = 'DONE — you can close this tab';
 }
 
-window.__city = { data, root, B, unit, camera, controls, setTimeline, focus, shared, bloom, scene, renderer };
+window.__city = { data, root, B, unit, camera, controls, setTimeline, focus, shared, bloom, scene, renderer, studio };

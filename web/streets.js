@@ -4,6 +4,7 @@
 // run (where the distance peaks) and how wide each street is — so we can paint asphalt only where
 // streets actually are and drive traffic down the right lanes.
 import * as THREE from 'three';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 
 const W = 1536; // field resolution; ~0.8 world units per texel for a 1000-wide city
 
@@ -14,8 +15,8 @@ export function buildStreets({ layout, B, files, inDeg, SIZE, t01 }) {
   const blocks = layout.blocks;
 
   // --- rasterise blocks (even-odd fill per texel centre)
-  blocks.forEach((b, id) => {
-    const P = b.poly.map(([x, z]) => [toTex(x), toTex(z)]);
+  const fill = (poly, set) => {
+    const P = poly.map(([x, z]) => [toTex(x), toTex(z)]);
     let a0 = Infinity, a1 = -Infinity, b0 = Infinity, b1 = -Infinity;
     for (const [x, z] of P) { a0 = Math.min(a0, x); a1 = Math.max(a1, x); b0 = Math.min(b0, z); b1 = Math.max(b1, z); }
     for (let j = Math.max(0, Math.floor(b0)); j <= Math.min(W - 1, Math.ceil(b1)); j++) {
@@ -28,10 +29,20 @@ export function buildStreets({ layout, B, files, inDeg, SIZE, t01 }) {
       }
       xs.sort((p, q) => p - q);
       for (let k = 0; k + 1 < xs.length; k += 2) {
-        for (let i = Math.max(0, Math.ceil(xs[k] - 0.5)); i <= Math.min(W - 1, Math.floor(xs[k + 1] - 0.5)); i++) label[j * W + i] = id;
+        for (let i = Math.max(0, Math.ceil(xs[k] - 0.5)); i <= Math.min(W - 1, Math.floor(xs[k + 1] - 0.5)); i++) set(j * W + i);
       }
     }
-  });
+  };
+  blocks.forEach((b, id) => fill(b.poly, p => { label[p] = id; }));
+
+  // --- where the water is: everything but the land in water cities, plus rivers; bridges stay dry
+  const wet = new Uint8Array(W * W);
+  if (layout.groundIsWater) { wet.fill(1); for (const poly of [...layout.land, ...layout.shore]) fill(poly, p => { wet[p] = 0; }); }
+  for (const poly of layout.water) fill(poly, p => { wet[p] = 1; });
+  for (const b of layout.bridges) {
+    const dx = b.b[0] - b.a[0], dz = b.b[1] - b.a[1], L = Math.hypot(dx, dz) || 1, nx = -dz / L * b.w / 2, nz = dx / L * b.w / 2;
+    fill([[b.a[0] + nx, b.a[1] + nz], [b.b[0] + nx, b.b[1] + nz], [b.b[0] - nx, b.b[1] - nz], [b.a[0] - nx, b.a[1] - nz]], p => { wet[p] = 0; });
+  }
 
   // --- vector distance transform (two-pass, 8SSEDT-style): offset from each texel to its nearest block texel
   const INF = 30000;
@@ -136,7 +147,11 @@ export function buildStreets({ layout, B, files, inDeg, SIZE, t01 }) {
     })
     : [];
 
-  return { texture, min: new THREE.Vector2(x0, x0), size: S, texel: tex, maxHalf, lanes, boats };
+  // cars only on open street ground; boats only on water
+  const at = (x, z) => sample(x, z);
+  const drivable = (x, z) => { const p = at(x, z); return p >= 0 && label[p] < 0 && !wet[p] && D[p] <= maxHalf + 1; };
+  const navigable = (x, z) => { const p = at(x, z); return p >= 0 && wet[p] === 1; };
+  return { texture, min: new THREE.Vector2(x0, x0), size: S, texel: tex, maxHalf, lanes, boats, drivable, navigable };
 }
 
 // push a polygon outward by `d` (mitred corners, clamped so sharp corners don't spike)
@@ -153,27 +168,92 @@ function offset(poly, out, d) {
 }
 function norm([x, z]) { const L = Math.hypot(x, z) || 1; return [x / L, z / L]; }
 
-// cars (and boats) running round their lanes; positions updated on the CPU each frame — a couple of
-// thousand matrices is nothing next to rendering the city
-export function buildTraffic({ streets, unit, shared, palette }) {
+// little vehicle models in a unit box (length along x, width along z, height in units of length).
+// Colour attributes are white where the instance's paint should show and dark for glass, tyres, trim.
+function part(w, h, d, x, y, z, hex) {
+  const g = new THREE.BoxGeometry(w, h, d).translate(x, y + h / 2, z);
+  const c = new THREE.Color(hex), n = g.attributes.position.count, col = new Float32Array(n * 3);
+  for (let k = 0; k < n; k++) col.set([c.r, c.g, c.b], k * 3);
+  g.setAttribute('color', new THREE.BufferAttribute(col, 3));
+  return g;
+}
+const PAINT = '#ffffff', GLASS = '#3b4a5c', TYRE = '#14121c', LAMP = '#fff2c4', TRIM = '#58585e';
+const wheels = (y = 0) => [-0.3, 0.3].flatMap(x => [-0.42, 0.42].map(z => part(0.2, 0.09, 0.14, x, y, z, TYRE)));
+const MODELS = {
+  car: () => mergeGeometries([
+    ...wheels(),
+    part(1.0, 0.14, 0.9, 0, 0.05, 0, PAINT),          // body
+    part(0.5, 0.12, 0.8, -0.06, 0.19, 0, GLASS),      // cabin windows
+    part(0.42, 0.03, 0.72, -0.06, 0.31, 0, PAINT),    // roof
+    part(0.04, 0.05, 0.22, 0.5, 0.1, -0.28, LAMP), part(0.04, 0.05, 0.22, 0.5, 0.1, 0.28, LAMP),
+  ]),
+  taxi: () => mergeGeometries([
+    ...wheels(),
+    part(1.0, 0.14, 0.9, 0, 0.05, 0, PAINT),
+    part(0.5, 0.12, 0.8, -0.06, 0.19, 0, GLASS),
+    part(0.42, 0.03, 0.72, -0.06, 0.31, 0, PAINT),
+    part(0.14, 0.06, 0.4, -0.06, 0.34, 0, TRIM),       // roof sign
+  ]),
+  bus: () => mergeGeometries([
+    ...[-0.36, 0.3].flatMap(x => [-0.44, 0.44].map(z => part(0.12, 0.05, 0.12, x, 0, z, TYRE))),
+    part(1.0, 0.24, 0.96, 0, 0.03, 0, PAINT),
+    part(0.94, 0.07, 0.98, 0.0, 0.17, 0, GLASS),      // window band
+    part(0.04, 0.12, 0.8, 0.5, 0.06, 0, GLASS),       // windscreen
+  ]),
+  boat: () => mergeGeometries([
+    part(0.8, 0.12, 0.9, -0.1, 0, 0, PAINT),          // hull
+    part(0.24, 0.12, 0.6, 0.38, 0, 0, PAINT),         // bow
+    part(0.06, 0.03, 0.92, -0.1, 0.0, 0, '#2f6188'),  // waterline stripe
+    part(0.32, 0.12, 0.6, -0.25, 0.12, 0, '#e0d7b8'), // cabin
+    part(0.28, 0.04, 0.62, -0.25, 0.17, 0, GLASS),
+  ]),
+};
+
+const CAR_PAINT = ['#c0413b', '#f2efe9', '#2f6188', '#58585e', '#86bfd9', '#e8833a', '#3d6b36', '#b8b2a2', '#7a2a35'];
+
+// cars, taxis, buses and boats running round their routes; positions updated on the CPU each frame
+// (a couple of thousand matrices is nothing next to rendering the city). Every route is resampled
+// evenly and each sample remembers whether a vehicle may be there — cars hide where a lane would
+// cross water and reappear on the far bank, boats keep to the water.
+export function buildTraffic({ streets, unit }) {
   const routes = [];
   const prep = (r, kind) => {
-    const pts = r.pts;
-    const cum = [0];
-    for (let k = 0; k < pts.length; k++) {
-      const a = pts[k], b = pts[(k + 1) % pts.length];
-      cum.push(cum[k] + Math.hypot(b[0] - a[0], b[1] - a[1]));
+    const step = Math.max(streets.texel, r.lane * 0.5);
+    const pts = [], ok = [];
+    for (let k = 0; k < r.pts.length; k++) {
+      const a = r.pts[k], b = r.pts[(k + 1) % r.pts.length];
+      const L = Math.hypot(b[0] - a[0], b[1] - a[1]), n = Math.max(1, Math.round(L / step));
+      for (let t = 0; t < n; t++) {
+        const x = a[0] + (b[0] - a[0]) * t / n, z = a[1] + (b[1] - a[1]) * t / n;
+        pts.push([x, z]);
+        ok.push(kind === 'boat' ? streets.navigable(x, z) : streets.drivable(x, z));
+      }
     }
-    routes.push({ ...r, kind, cum, L: cum[cum.length - 1] });
+    const good = ok.filter(Boolean).length;
+    if (good < 3) return;
+    routes.push({ ...r, kind, pts, ok, step: null, cum: null, good });
   };
   streets.lanes.forEach(r => prep(r, 'car'));
   streets.boats.forEach(r => prep(r, 'boat'));
+  for (const r of routes) {
+    r.cum = [0];
+    for (let k = 0; k < r.pts.length; k++) { const a = r.pts[k], b = r.pts[(k + 1) % r.pts.length]; r.cum.push(r.cum[k] + Math.hypot(b[0] - a[0], b[1] - a[1])); }
+    r.L = r.cum[r.cum.length - 1];
+  }
 
   const vehicles = [];
+  let id = 0;
   for (const [ri, r] of routes.entries()) {
-    const len = r.kind === 'boat' ? unit * 0.55 : Math.min(r.lane * 1.7, unit * 0.32);
-    const n = r.kind === 'boat' ? Math.min(5, Math.round(r.L / (unit * 7))) : Math.round((r.L / (len * 7)) * r.weight);
-    for (let k = 0; k < n; k++) vehicles.push({ ri, s0: (k / Math.max(1, n)) * r.L + Math.random() * len, speed: unit * (r.kind === 'boat' ? 0.25 : 0.7) * (0.75 + Math.random() * 0.5), len });
+    // narrow streets would shrink cars to a dot; keep them readable next to the buildings
+    const len = r.kind === 'boat' ? unit * 0.6 : Math.max(unit * 0.2, Math.min(r.lane * 1.6, unit * 0.32));
+    const validL = r.L * (r.good / r.ok.length);
+    const n = r.kind === 'boat' ? Math.min(5, Math.round(validL / (unit * 7))) : Math.round((validL / (len * 7)) * r.weight);
+    for (let k = 0; k < n; k++, id++) {
+      // busy streets get buses; one car in seven is a taxi
+      const type = r.kind === 'boat' ? 'boat' : r.weight > 0.6 && id % 6 === 0 ? 'bus' : id % 7 === 3 ? 'taxi' : 'car';
+      const L = type === 'bus' ? len * 2.2 : len;
+      vehicles.push({ ri, type, s0: (k / Math.max(1, n)) * r.L + Math.random() * len, speed: unit * (r.kind === 'boat' ? 0.25 : type === 'bus' ? 0.5 : 0.7) * (0.75 + Math.random() * 0.5), len: L, wid: type === 'bus' ? len * 0.62 : type === 'boat' ? len * 0.4 : len * 0.5 });
+    }
   }
   // keep the city lively but not jammed
   const CAP = 1800;
@@ -182,33 +262,40 @@ export function buildTraffic({ streets, unit, shared, palette }) {
     vehicles.length = CAP;
   }
 
-  const geo = new THREE.BoxGeometry(1, 1, 1).translate(0, 0.5, 0);
-  const mesh = new THREE.InstancedMesh(geo, new THREE.MeshLambertMaterial({ flatShading: true }), Math.max(1, vehicles.length));
-  const c = new THREE.Color();
-  vehicles.forEach((v, k) => {
-    const boat = routes[v.ri].kind === 'boat';
-    mesh.setColorAt(k, c.set(boat ? '#f2efe9' : palette[k % palette.length]));
-  });
-  mesh.receiveShadow = true;
-  mesh.frustumCulled = false;
+  // one instanced mesh per vehicle type
+  const group = new THREE.Group();
+  const fleets = {};
+  for (const type of Object.keys(MODELS)) {
+    const list = vehicles.filter(v => v.type === type);
+    if (!list.length) continue;
+    const mesh = new THREE.InstancedMesh(MODELS[type](), new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true }), list.length);
+    const c = new THREE.Color();
+    list.forEach((v, k) => mesh.setColorAt(k, c.set(type === 'taxi' ? '#f2c14e' : type === 'bus' ? (k % 2 ? '#c0413b' : '#f2c14e') : type === 'boat' ? '#f2efe9' : CAR_PAINT[(k * 5) % CAR_PAINT.length])));
+    mesh.receiveShadow = true;
+    mesh.frustumCulled = false;
+    group.add(mesh);
+    fleets[type] = { mesh, list };
+  }
   const m = new THREE.Matrix4(), q = new THREE.Quaternion(), UP = new THREE.Vector3(0, 1, 0), pos = new THREE.Vector3(), scl = new THREE.Vector3();
+  const hidden = new THREE.Matrix4().makeScale(0, 0, 0);
 
   function update(time, timeline, baseY) {
-    vehicles.forEach((v, k) => {
-      const r = routes[v.ri];
-      if (timeline < r.born) { mesh.setMatrixAt(k, m.makeScale(0, 0, 0)); return; }
-      const s = ((v.s0 + time * v.speed) % r.L + r.L) % r.L;
-      let lo = 0, hi = r.cum.length - 1;
-      while (hi - lo > 1) { const mid = (lo + hi) >> 1; if (r.cum[mid] <= s) lo = mid; else hi = mid; }
-      const a = r.pts[lo], b = r.pts[(lo + 1) % r.pts.length];
-      const t = (s - r.cum[lo]) / Math.max(1e-6, r.cum[lo + 1] - r.cum[lo]);
-      const boat = r.kind === 'boat';
-      pos.set(a[0] + (b[0] - a[0]) * t, boat ? 0 : baseY, a[1] + (b[1] - a[1]) * t);
-      q.setFromAxisAngle(UP, -Math.atan2(b[1] - a[1], b[0] - a[0]));
-      scl.set(v.len, v.len * (boat ? 0.3 : 0.4), v.len * (boat ? 0.38 : 0.5));
-      mesh.setMatrixAt(k, m.compose(pos, q, scl));
-    });
-    mesh.instanceMatrix.needsUpdate = true;
+    for (const { mesh, list } of Object.values(fleets)) {
+      list.forEach((v, k) => {
+        const r = routes[v.ri];
+        if (timeline < r.born) { mesh.setMatrixAt(k, hidden); return; }
+        const s = ((v.s0 + time * v.speed) % r.L + r.L) % r.L;
+        let lo = 0, hi = r.cum.length - 1;
+        while (hi - lo > 1) { const mid = (lo + hi) >> 1; if (r.cum[mid] <= s) lo = mid; else hi = mid; }
+        if (!r.ok[lo] || !r.ok[(lo + 1) % r.ok.length]) { mesh.setMatrixAt(k, hidden); return; }
+        const a = r.pts[lo], b = r.pts[(lo + 1) % r.pts.length];
+        const t = (s - r.cum[lo]) / Math.max(1e-6, r.cum[lo + 1] - r.cum[lo]);
+        pos.set(a[0] + (b[0] - a[0]) * t, v.type === 'boat' ? 0 : baseY, a[1] + (b[1] - a[1]) * t);
+        q.setFromAxisAngle(UP, -Math.atan2(b[1] - a[1], b[0] - a[0]));
+        mesh.setMatrixAt(k, m.compose(pos, q, scl.set(v.len, v.len, v.wid)));
+      });
+      mesh.instanceMatrix.needsUpdate = true;
+    }
   }
-  return { mesh, update, count: vehicles.length };
+  return { mesh: group, update, count: vehicles.length };
 }
