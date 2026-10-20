@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>gitropolis</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;800&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #05020d; --ink: #e9e4ff; --dim: #8f86b8; --neon: #4ef0ff; --pink: #ff4fd8; --panel: rgba(12, 8, 30, .72);
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink); overflow: hidden;
+    font-family: 'JetBrains Mono', ui-monospace, monospace; }
+  canvas { display: block; }
+  #hud { position: fixed; top: 20px; left: 24px; pointer-events: none; }
+  #hud h1 { margin: 0; font-size: 28px; font-weight: 800; letter-spacing: .04em; color: #fff;
+    text-shadow: 0 0 12px var(--pink), 0 0 30px rgba(255, 79, 216, .5); }
+  #hud .stats { margin-top: 6px; font-size: 12px; color: var(--dim); letter-spacing: .06em; }
+  #date { position: fixed; top: 18px; right: 24px; text-align: right; pointer-events: none; }
+  #date .d { font-size: 34px; font-weight: 800; color: #fff; text-shadow: 0 0 14px var(--neon); }
+  #date .c { font-size: 12px; color: var(--dim); letter-spacing: .06em; }
+  #bar { position: fixed; left: 50%; bottom: 22px; transform: translateX(-50%); width: min(720px, calc(100vw - 32px));
+    display: flex; gap: 12px; align-items: center; padding: 10px 14px; background: var(--panel);
+    border: 1px solid rgba(78, 240, 255, .25); border-radius: 12px; backdrop-filter: blur(8px); }
+  #bar button { all: unset; cursor: pointer; width: 30px; height: 30px; display: grid; place-items: center;
+    border-radius: 8px; color: var(--neon); border: 1px solid rgba(78, 240, 255, .4); font-size: 13px; }
+  #bar button:hover { background: rgba(78, 240, 255, .12); }
+  #bar input { flex: 1; accent-color: var(--pink); }
+  #tip { position: fixed; pointer-events: none; padding: 10px 12px; background: var(--panel); border-radius: 10px;
+    border: 1px solid rgba(255, 79, 216, .35); font-size: 12px; line-height: 1.6; display: none; max-width: 360px;
+    backdrop-filter: blur(8px); }
+  #tip b { color: #fff; word-break: break-all; }
+  #tip span { color: var(--dim); }
+  .label { position: fixed; pointer-events: none; font-size: 12px; font-weight: 600; letter-spacing: .12em;
+    text-transform: uppercase; white-space: nowrap; transform: translate(-50%, -50%);
+    text-shadow: 0 0 8px currentColor; }
+  #legend { position: fixed; right: 24px; bottom: 24px; font-size: 11px; color: var(--dim); line-height: 1.7;
+    text-align: right; pointer-events: none; }
+  #loading { position: fixed; inset: 0; display: grid; place-items: center; color: var(--neon); letter-spacing: .3em; }
+  body.recording > :not(canvas):not(#rec) { display: none !important; }
+  body.recording canvas { width: 100vw !important; height: auto !important; }
+  #rec { position: fixed; top: 12px; left: 12px; color: #ff4fd8; font-size: 14px; letter-spacing: .1em; }
+  @media (max-width: 700px) { #legend { display: none; } #date .d { font-size: 22px; } #hud h1 { font-size: 20px; } }
+</style>
+<script type="importmap">
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.169.0/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.169.0/examples/jsm/",
+  "d3-hierarchy": "https://cdn.jsdelivr.net/npm/d3-hierarchy@3.1.2/+esm"
+} }
+</script>
+</head>
+<body>
+<div id="loading">BUILDING CITY…</div>
+<div id="hud"><h1></h1><div class="stats"></div></div>
+<div id="date"><div class="d"></div><div class="c"></div></div>
+<div id="labels"></div>
+<div id="tip"></div>
+<div id="legend">height = lines of code · lit windows = recently edited<br>arcs = imports · red beacon = hot file · flash = commit</div>
+<div id="bar">
+  <button id="play" title="Play / pause (space)">❚❚</button>
+  <input id="slider" type="range" min="0" max="1000" value="0">
+  <button id="speed" title="Playback speed">1×</button>
+</div>
+<script type="module" src="main.js"></script>
+</body>
+</html>
