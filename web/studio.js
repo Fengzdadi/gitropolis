@@ -89,7 +89,7 @@ function buildTerrain(scene, layout, S, plateStep, shared, street) {
   if (layout.groundIsWater) add(slab([...layout.land, ...layout.shore], 0, landTop), S.land, 'grass-or-street');
   // lakes and rivers; on a city whose ground is the sea, they're pools sitting on the land
   if (layout.water.length) add(slab(layout.water, layout.groundIsWater ? landTop : 0, plateStep * 0.05), S.water, 'water');
-  const colors = { block: S.plate, park: S.park, plaza: S.plaza, lawn: S.lawn, yard: S.yard };
+  const colors = { block: S.plate, park: S.park, plaza: S.plaza, lawn: S.lawn, yard: S.yard, beach: S.sand };
   // terraces (a mountain city): rock cliffs up to each terrace, its surface laid on top
   const raised = layout.blocks.filter(b => b.h > 0);
   if (raised.length) add(slabEach(raised.map(b => [b.poly, landTop, b.h])), S.cliff || S.plate);
@@ -97,7 +97,7 @@ function buildTerrain(scene, layout, S, plateStep, shared, street) {
     const of = layout.blocks.filter(b => b.type === type);
     const depth = type === 'park' ? plateStep * 1.4 : plateStep;
     const geo = of.some(b => b.h > 0) ? slabEach(of.map(b => [b.poly, landTop + (b.h || 0), depth])) : slab(of.map(b => b.poly), landTop, depth);
-    add(geo, colors[type], { block: 'paving', plaza: 'paving', park: 'grass', lawn: 'grass', yard: 'paving' }[type]);
+    add(geo, colors[type], { block: 'paving', plaza: 'paving', park: 'grass', lawn: 'grass', yard: 'paving', beach: 'grass' }[type]);
   }
   if (S.flat) {
     // plan: hairline outline around every block

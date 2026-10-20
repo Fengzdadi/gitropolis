@@ -497,7 +497,7 @@ const PLANNERS = {
     });
     blocks.push({ poly: rectPoly(-HP / 2, -RD - 0.4 - HP, HP / 2, -RD - 0.4), type: 'plaza' });
     lots.push({ i: ctx.hub, x: 0, z: -RD - 0.4 - HP * 0.62, w: 1.6, d: 1.6, rot: 0 });
-    water.push(circlePoly(HP * 0.22, -RD - 0.4 - HP * 0.22, 0.75, 20)); // the fountain lake at its foot
+    water.push(circlePoly(HP / 2 + 1.5, -RD - 0.4 - HP * 0.75, 0.7, 20)); // the fountain lake beside it
     roads.push({ a: [-L / 2 - 2, 0], b: [L / 2 + 2, 0], w: RD * 1.6 });
     // inland: districts on a grid, with plots of open sand still waiting for someone to build on them
     const inland = ds.map(d => ({ d, items: d.items.filter(it => it.i !== ctx.hub && !towers.has(it.i) && !villaSet.has(it.i)) })).filter(g => g.items.length);
@@ -525,13 +525,15 @@ const PLANNERS = {
     const F = clamp(Math.round(Math.sqrt(villas.length) * 1.2), villas.length ? 4 : 0, 18);
     const perFrond = Math.ceil(villas.length / Math.max(1, F)), fl = clamp(perFrond * 0.75, 2.5, 9);
     const trunkX = L * 0.22, trunkL = Math.ceil(F / 2) * 1.6 + 2.5;
-    const land = [rectPoly(-W / 2 - 3, z0 - D - 3, W / 2 + 3, zSea)];
+    // sand to the horizon; the sea only on the coast side, with the palm and its crescent as sandbars
+    const sand = poly => blocks.push({ poly, type: 'beach' });
+    water.push(rectPoly(-W / 2 - 60, zSea, W / 2 + 60, zSea + trunkL + fl + 40));
     if (F) {
-      land.push(rectPoly(trunkX - 0.5, zSea - 0.2, trunkX + 0.5, zSea + trunkL));
+      sand(rectPoly(trunkX - 0.5, zSea - 0.2, trunkX + 0.5, zSea + trunkL));
       for (let k = 0; k < F; k++) {
         const z = zSea + 2.2 + Math.floor(k / 2) * 1.6, dir = k % 2 ? 1 : -1;
         const xa = trunkX + dir * 0.5, xb = trunkX + dir * (0.5 + fl);
-        land.push(rectPoly(Math.min(xa, xb), z - 0.4, Math.max(xa, xb), z + 0.4));
+        sand(rectPoly(Math.min(xa, xb), z - 0.4, Math.max(xa, xb), z + 0.4));
         const mine = villas.slice(k * perFrond, (k + 1) * perFrond);
         mine.forEach((it, n) => {
           const t = (n + 0.5) / Math.max(1, mine.length);
@@ -542,11 +544,11 @@ const PLANNERS = {
       const cr = [], R0 = fl + 2.2, R1 = R0 + 0.6, czc = zSea + trunkL * 0.5;
       for (let k = 0; k <= 30; k++) { const a = -0.1 + Math.PI * 1.2 * k / 30; cr.push([trunkX + Math.cos(a + Math.PI * -0.1) * R1, czc + Math.sin(a) * R1 * 0.9]); }
       for (let k = 30; k >= 0; k--) { const a = -0.1 + Math.PI * 1.2 * k / 30; cr.push([trunkX + Math.cos(a + Math.PI * -0.1) * R0, czc + Math.sin(a) * R0 * 0.9]); }
-      land.push(cr);
+      sand(cr);
       void VA;
     }
     return {
-      lots, blocks, labels, water, roads, sand: true, ground: 'water', land,
+      lots, blocks, labels, water, roads, sand: true, ground: 'land',
       camera: { az: 45, el: 30, dist: 0.9 },
       height: (i, rel) => i === ctx.hub ? 16 : towers.has(i) ? Math.min(3 + 4 * Math.pow(rel, 0.4), 11) : villaSet.has(i) ? 0.45 : Math.min(0.5 + 0.7 * Math.pow(rel, 0.5), 2.4),
     };
