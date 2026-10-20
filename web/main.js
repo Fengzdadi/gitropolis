@@ -229,12 +229,27 @@ function fitFrame() {
   });
   for (const bl of layout?.blocks || []) for (const [x, z] of bl.poly) add(x, plateStep + (bl.h || 0), z);
   if (!Number.isFinite(x0)) return { center: new THREE.Vector3(), zoom: 1 };
-  const aspect = viewW() / viewH();
-  // the city may use 90% of the width and 78% of the height, the title band at the top stays clear
-  const zoom = Math.min(2 * ISO_H * aspect * 0.9 / Math.max(x1 - x0, 1e-6), 2 * ISO_H * 0.78 / Math.max(y1 - y0, 1e-6));
+  const aspect = viewW() / viewH(), { top, bottom } = clearBands();
+  // the city may use 90% of the width and what's left of the height between the title and the timeline
+  const free = Math.max(0.3, 1 - top - bottom) * 0.94;
+  const zoom = Math.min(2 * ISO_H * aspect * 0.9 / Math.max(x1 - x0, 1e-6), 2 * ISO_H * free / Math.max(y1 - y0, 1e-6));
   const halfH = ISO_H / zoom;
-  const c = new THREE.Vector3((x0 + x1) / 2, (y0 + y1) / 2 + halfH * 0.07, -SIZE * 2).applyMatrix4(cam.matrixWorld);
-  return { center: c, zoom, aspect };
+  const c = new THREE.Vector3((x0 + x1) / 2, (y0 + y1) / 2 + halfH * (top - bottom), -SIZE * 2).applyMatrix4(cam.matrixWorld);
+  return { center: c, zoom, aspect, h: viewH() };
+}
+// the share of the screen height the overlays take at the top (title, date) and the bottom (timeline,
+// links); recordings have no overlays, only the title painted into the frame
+function clearBands() {
+  if (REC) return { top: 0.12, bottom: 0.05 };
+  const H = innerHeight, pad = 14;
+  let top = 0, bottom = 0;
+  for (const el of document.querySelectorAll('#hud, #date, #bar, #links')) {
+    const r = el.getBoundingClientRect();
+    if (!r.height) continue;
+    if (r.top + r.height / 2 < H / 2) top = Math.max(top, r.bottom + pad);
+    else bottom = Math.max(bottom, H - r.top + pad);
+  }
+  return { top: top / H, bottom: bottom / H };
 }
 function aimPixel(center, zoom) {
   camera.zoom = zoom; camera.updateProjectionMatrix();
@@ -244,7 +259,7 @@ function aimPixel(center, zoom) {
 }
 function planCamera({ az, el, dist, target }) {
   if (PIXEL) {
-    if (!FIT || FIT.aspect !== viewW() / viewH()) FIT = fitFrame();
+    if (!FIT || FIT.aspect !== viewW() / viewH() || FIT.h !== viewH()) FIT = fitFrame();
     // a close-up (--zoom) frames the city's landmark instead
     const h = B[hub], center = ZOOM > 1.5 && h ? new THREE.Vector3(h.x, h.y + h.h * 0.3, h.z) : FIT.center;
     return aimPixel(center, FIT.zoom * ZOOM);
@@ -673,6 +688,8 @@ $('#hud .stats').textContent =
 stopWaiting();
 $('#loading').remove();
 document.body.classList.remove('waiting');
+// the title and timeline are filled in now: frame the city between them
+if (PIXEL && layout?.camera && !userMoved) { FIT = null; planCamera(layout.camera); controls.update(); }
 
 const fmtDate = t => new Date(t * 1000).toISOString().slice(0, 7);
 const commits = data.commits; // [t, idx...]
@@ -979,7 +996,7 @@ async function record() {
   const baseCam = layout?.camera || { az: 45, el: 30, dist: 1, target: [0, 0] };
   function shotPixel(u) {
     const push = REC.fixed ? 0 : smooth(0.35, 1, u);
-    if (!FIT || FIT.aspect !== viewW() / viewH()) FIT = fitFrame();
+    if (!FIT || FIT.aspect !== viewW() / viewH() || FIT.h !== viewH()) FIT = fitFrame();
     aimPixel(FIT.center.clone().lerp(hubPos, push), FIT.zoom * (1 + 2.0 * push * push));
   }
 
