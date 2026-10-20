@@ -5,7 +5,7 @@
 // detail levels instead of shimmering.
 
 const COMMON = /* glsl */`
-  uniform float uTime, uWave, uPx;
+  uniform float uTime, uWave, uPx, uTimeline;
   varying vec3 vSurfWP, vSurfN;
   float sHash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
   // world size of n art pixels, snapped to a power of two
@@ -116,7 +116,8 @@ const GROUND = {
     float D = st.r * 255.0;
     float inside = step(0.0, suv.x) * step(suv.x, 1.0) * step(0.0, suv.y) * step(suv.y, 1.0);
     vec3 col = sGrass(uGrass);
-    if (inside > 0.5 && D > 0.5 && D <= uMaxHalf) {
+    // the street is paved once the block beside it has opened (G = when, over the timeline)
+    if (inside > 0.5 && D > 0.5 && D <= uMaxHalf && st.g <= uTimeline + 0.004) {
       col = uAsphalt * (1.0 + (sHash(floor(vSurfWP.xz / P(1.5))) - 0.5) * 0.08);
       // across-street direction (towards the nearest block); the centre line is where D peaks across it
       float a = st.b * 3.14159265;
@@ -139,7 +140,7 @@ function inject(material, { shared, withPart, fragment, key, uniforms = {}, decl
   material.customProgramCacheKey = () => `${prevKey()}|surface:${key}`;
   material.onBeforeCompile = (sh, r) => {
     prev?.call(material, sh, r);
-    Object.assign(sh.uniforms, { uTime: shared.uTime, uWave: shared.uWave, uPx: shared.uPx }, uniforms);
+    Object.assign(sh.uniforms, { uTime: shared.uTime, uWave: shared.uWave, uPx: shared.uPx, uTimeline: shared.uTimeline }, uniforms);
     sh.vertexShader = sh.vertexShader
       .replace('#include <common>', `#include <common>\nvarying vec3 vSurfWP, vSurfN;${withPart ? '\nattribute float part; varying float vSurfPart;' : ''}`)
       .replace('#include <project_vertex>', `vSurfWP = (modelMatrix * vec4(transformed, 1.0)).xyz;\nvSurfN = normalize(mat3(modelMatrix) * objectNormal);${withPart ? '\nvSurfPart = part;' : ''}\n#include <project_vertex>`);
@@ -166,4 +167,26 @@ export function addGroundDetail(material, kind, opts) {
       },
     });
   } else if (GROUND[kind]) inject(material, { ...opts, withPart: false, fragment: GROUND[kind], key: kind });
+}
+
+// Land that opens over time: each vertex carries aGrow = (when its block opens, the slab's base
+// height). Until then the slab lies flat and out of sight; then it rises from its base in a moment.
+const GROW = /* glsl */`
+  float gOpen = smoothstep(aGrow.x * 0.97, aGrow.x * 0.97 + 0.02, uTimeline);
+  transformed.y = aGrow.y + (transformed.y - aGrow.y) * gOpen;
+  if (gOpen < 0.001) transformed.y -= 1e5;`;
+export function addGrowth(material, shared) {
+  const prev = material.onBeforeCompile;
+  const prevKey = material.customProgramCacheKey.bind(material);
+  material.customProgramCacheKey = () => `${prevKey()}|grow`;
+  material.onBeforeCompile = (sh, r) => {
+    prev?.call(material, sh, r);
+    sh.uniforms.uTimeline = shared.uTimeline;
+    if (!sh.vertexShader.includes('uniform float uTimeline')) sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nuniform float uTimeline;');
+    sh.vertexShader = sh.vertexShader
+      .replace('#include <common>', '#include <common>\nattribute vec2 aGrow;')
+      .replace('#include <begin_vertex>', `#include <begin_vertex>\n${GROW}`);
+  };
+  material.needsUpdate = true;
+  return material;
 }

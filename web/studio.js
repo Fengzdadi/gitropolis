@@ -6,7 +6,7 @@ import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { buildingGeometry, shipGeometry } from './buildings.js';
 import { buildingSpecs, buildCityMesh } from './architecture.js';
-import { addGroundDetail } from './surfaces.js';
+import { addGroundDetail, addGrowth } from './surfaces.js';
 import { buildStreets, buildTraffic } from './streets.js';
 import { timed } from './perf.js';
 import { buildTrees } from './trees.js';
@@ -65,16 +65,21 @@ function slab(polys, base, depth) {
   return geos.length ? mergeGeometries(geos) : null;
 }
 
-// one extruded slab per [poly, base, depth]: terraces each stand at their own height
+// one extruded slab per [poly, base, depth, born?]: terraces each stand at their own height, and a
+// block that opens partway through the history carries when (aGrow = born, base) for the shader
 function slabEach(list) {
-  const geos = list.map(([poly, base, depth]) => {
+  const geos = list.map(([poly, base, depth, born]) => {
     const shape = new THREE.Shape(poly.map(([x, z]) => new THREE.Vector2(x, -z)));
-    return new THREE.ExtrudeGeometry(shape, { depth, bevelEnabled: false, curveSegments: 1 }).rotateX(-Math.PI / 2).translate(0, base, 0);
+    const g = new THREE.ExtrudeGeometry(shape, { depth, bevelEnabled: false, curveSegments: 1 }).rotateX(-Math.PI / 2).translate(0, base, 0);
+    const n = g.attributes.position.count, a = new Float32Array(n * 2);
+    for (let k = 0; k < n; k++) { a[k * 2] = born ?? 0; a[k * 2 + 1] = base; }
+    g.setAttribute('aGrow', new THREE.BufferAttribute(a, 2));
+    return g;
   });
   return geos.length ? mergeGeometries(geos) : null;
 }
 
-function buildTerrain(scene, layout, S, plateStep, shared, street) {
+function buildTerrain(scene, layout, S, plateStep, shared, street, blockBorn) {
   const mat = color => S.flat ? new THREE.MeshBasicMaterial({ color })
     : new THREE.MeshStandardMaterial({ color, roughness: 0.95, flatShading: true });
   const add = (geo, color, surface) => {
@@ -83,8 +88,14 @@ function buildTerrain(scene, layout, S, plateStep, shared, street) {
     if (S.pixel && surface) addGroundDetail(m, surface === 'grass-or-street' ? (street ? 'street' : 'grass') : surface, { shared, street });
     const mesh = new THREE.Mesh(geo, m);
     mesh.receiveShadow = mesh.castShadow = !S.flat;
+    if (geo.attributes.aGrow) { // land that opens over time (its shadow too)
+      addGrowth(m, shared);
+      mesh.customDepthMaterial = addGrowth(new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking }), shared);
+    }
     scene.add(mesh);
   };
+  // when each block opens (from the street field); without one, everything is there from the start
+  const bornOf = b => blockBorn ? blockBorn[layout.blocks.indexOf(b)] : 0;
   const landTop = layout.groundIsWater ? plateStep * 0.8 : 0;
   if (layout.groundIsWater) add(slab([...layout.land, ...layout.shore], 0, landTop), S.land, 'grass-or-street');
   // lakes and rivers; on a city whose ground is the sea, they're pools sitting on the land
@@ -92,15 +103,16 @@ function buildTerrain(scene, layout, S, plateStep, shared, street) {
   const colors = { block: S.plate, park: S.park, plaza: S.plaza, lawn: S.lawn, yard: S.yard, beach: S.sand };
   // terraces (a mountain city): rock cliffs up to each terrace, its surface laid on top
   const raised = layout.blocks.filter(b => b.h > 0);
-  if (raised.length) add(slabEach(raised.map(b => [b.poly, landTop, b.h])), S.cliff || S.plate);
+  if (raised.length) add(slabEach(raised.map(b => [b.poly, landTop, b.h, bornOf(b)])), S.cliff || S.plate);
   // farm fields: each its own crop colour, furrows running one way or the other
   const crops = new Map();
-  for (const b of layout.blocks) if (b.type === 'crop') { const k = b.color + '|' + b.rows; if (!crops.has(k)) crops.set(k, []); crops.get(k).push(b.poly); }
-  for (const [k, polys] of crops) { const [color, rows] = k.split('|'); add(slab(polys, landTop, plateStep * 0.6), color, rows === 'x' ? 'cropx' : 'cropz'); }
+  for (const b of layout.blocks) if (b.type === 'crop') { const k = b.color + '|' + b.rows; if (!crops.has(k)) crops.set(k, []); crops.get(k).push(b); }
+  for (const [k, bs] of crops) { const [color, rows] = k.split('|'); add(slabEach(bs.map(b => [b.poly, landTop, plateStep * 0.6, bornOf(b)])), color, rows === 'x' ? 'cropx' : 'cropz'); }
   for (const type of Object.keys(colors)) {
     const of = layout.blocks.filter(b => b.type === type);
     const depth = type === 'park' ? plateStep * 1.4 : plateStep;
-    const geo = of.some(b => b.h > 0) ? slabEach(of.map(b => [b.poly, landTop + (b.h || 0), depth])) : slab(of.map(b => b.poly), landTop, depth);
+    // each block rises from its own base (a terrace from its cliff top) when it opens
+    const geo = blockBorn || of.some(b => b.h > 0) ? slabEach(of.map(b => [b.poly, landTop + (b.h || 0), depth, bornOf(b)])) : slab(of.map(b => b.poly), landTop, depth);
     add(geo, colors[type], { block: 'paving', plaza: 'paving', park: 'grass', lawn: 'grass', yard: 'paving', beach: 'grass' }[type]);
   }
   if (S.flat) {
@@ -255,7 +267,9 @@ export function buildStudio(ctx) {
   scene.add(ground);
 
   // ---- city terrain from a planner: land, raised blocks, parks, plazas, bridges, hills
-  if (layout) timed('terrain', () => buildTerrain(scene, layout, S, plateStep, shared, street));
+  if (layout) timed('terrain', () => buildTerrain(scene, layout, S, plateStep, shared, street, streets?.blockBorn));
+  // district names appear with their land
+  if (layout) for (const l of layout.labels) l.born = l.bornRaw != null ? t01(l.bornRaw) : streets ? streets.bornAt(l.x, l.z) : 0;
   // traffic: lanes round every block, busier where the block's files import and are imported a lot
   // Venice has no cars, only boats
   if (streets && layout.paths) { streets.lanes = []; streets.boats = []; } // footpaths: no traffic
@@ -263,7 +277,7 @@ export function buildStudio(ctx) {
   const traffic = streets ? timed('traffic', () => buildTraffic({ streets, unit: layout.unit })) : null;
   if (traffic) scene.add(traffic.mesh);
   // the field's lookup tables were only needed to plan routes; the GPU keeps its own copy of the texture
-  const trees = S.pixel && layout ? timed('trees', () => buildTrees({ layout, B, streets, unit: layout.unit, plateStep })) : null;
+  const trees = S.pixel && layout ? timed('trees', () => buildTrees({ layout, B, streets, unit: layout.unit, plateStep, shared })) : null;
   if (trees) scene.add(trees);
   if (streets) { streets.drivable = streets.navigable = null; streets.curbs = null; streets.lanes = streets.boats = null; streets.texture.onUpdate = () => { streets.texture.image.data = null; }; }
   const roadY = layout?.groundIsWater ? plateStep * 0.8 + 0.05 : 0.05;

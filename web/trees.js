@@ -75,7 +75,7 @@ function inPoly(x, z, poly) {
   return inside;
 }
 
-export function buildTrees({ layout, B, streets, unit, plateStep }) {
+export function buildTrees({ layout, B, streets, unit, plateStep, shared }) {
   const kind = layout.kind;
   // keep trees off buildings: a coarse spatial hash of building footprints
   const cell = unit, grid = new Map();
@@ -104,13 +104,16 @@ export function buildTrees({ layout, B, streets, unit, plateStep }) {
   const raised = layout.blocks.filter(b => b.h > 0);
   const higher = (x, z, b) => raised.some(o => o !== b && o.h > b.h && inPoly(x, z, o.poly));
   const trees = []; // { x, z, y, s, sp, rot }
-  const plant = (x, z, y, size, seed) => trees.push({ x, z, y, s: size * (0.8 + hash(seed + 3) * 0.45), sp: pickSpecies(kind, seed), rot: hash(seed + 7) * Math.PI * 2 });
+  // each tree is planted a moment after the land it stands on opens
+  const plant = (x, z, y, size, seed, born = 0) => trees.push({ x, z, y, s: size * (0.8 + hash(seed + 3) * 0.45), sp: pickSpecies(kind, seed), rot: hash(seed + 7) * Math.PI * 2, born: Math.min(1, born + 0.01 + hash(seed + 9) * 0.02) });
+  const blockBorn = streets?.blockBorn;
   const landTop = layout.groundIsWater ? plateStep * 0.8 : 0;
   let seed = 1;
 
   // woods in parks, a sprinkle on lawns (lawns are where tests, docs and examples live)
-  for (const b of layout.blocks) {
+  for (const [bi, b] of layout.blocks.entries()) {
     if (b.type !== 'park' && b.type !== 'lawn') continue;
+    const opens = blockBorn ? blockBorn[bi] : 0;
     const dense = b.type === 'park';
     const step = unit * (dense ? 0.42 : 0.9);
     let x0 = Infinity, x1 = -Infinity, z0 = Infinity, z1 = -Infinity;
@@ -121,7 +124,7 @@ export function buildTrees({ layout, B, streets, unit, plateStep }) {
         const s = seed++;
         if (!dense && hash(s + 11) > 0.45) continue;
         const px = x + (hash(s) - 0.5) * step * 0.8, pz = z + (hash(s + 1) - 0.5) * step * 0.8;
-        if (inPoly(px, pz, b.poly) && clear(px, pz, unit * 0.12) && !(b.h && higher(px, pz, b))) plant(px, pz, top, unit * 0.6, s);
+        if (inPoly(px, pz, b.poly) && clear(px, pz, unit * 0.12) && !(b.h && higher(px, pz, b))) plant(px, pz, top, unit * 0.6, s, opens);
       }
     }
   }
@@ -137,7 +140,7 @@ export function buildTrees({ layout, B, streets, unit, plateStep }) {
         const L = Math.hypot(b[0] - a[0], b[1] - a[1]);
         for (let t = spacing * 0.6; t < L - spacing * 0.6; t += spacing) {
           const x = a[0] + (b[0] - a[0]) * t / L, z = a[1] + (b[1] - a[1]) * t / L;
-          if (streets.drivable(x, z) && clear(x, z, unit * 0.05)) plant(x, z, landTop, unit * 0.45, seed++);
+          if (streets.drivable(x, z) && clear(x, z, unit * 0.05)) plant(x, z, landTop, unit * 0.45, seed++, c.born ?? 0);
         }
       }
     }
@@ -151,7 +154,7 @@ export function buildTrees({ layout, B, streets, unit, plateStep }) {
       const off = Math.max(b.w, b.d) * 0.5 + unit * 0.22;
       const c = Math.cos(b.rot || 0), s = Math.sin(b.rot || 0);
       const x = b.x + c * off * side, z = b.z - s * off * side;
-      if (clear(x, z, unit * 0.05)) plant(x, z, b.y, unit * 0.55, 1000 + i);
+      if (clear(x, z, unit * 0.05)) plant(x, z, b.y, unit * 0.55, 1000 + i, b.born);
     });
   }
 
@@ -163,7 +166,23 @@ export function buildTrees({ layout, B, streets, unit, plateStep }) {
   for (const sp of Object.keys(SPECIES)) {
     const list = trees.filter(t => t.sp === sp);
     if (!list.length) continue;
-    const mesh = new THREE.InstancedMesh(SPECIES[sp](), new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true }), list.length);
+    const geo = SPECIES[sp]();
+    geo.setAttribute('aBorn', new THREE.InstancedBufferAttribute(Float32Array.from(list, t => t.born), 1));
+    const mat = new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true });
+    // a tree grows up from its base when it's planted (before that it isn't there at all)
+    const grow = sh => {
+      sh.uniforms.uTimeline = shared.uTimeline;
+      sh.vertexShader = sh.vertexShader
+        .replace('#include <common>', '#include <common>\nattribute float aBorn; uniform float uTimeline;')
+        .replace('#include <begin_vertex>', '#include <begin_vertex>\nfloat gTree = smoothstep(aBorn, aBorn + 0.015, uTimeline); transformed *= gTree; if (gTree < 0.001) transformed.y -= 1e5;');
+    };
+    if (shared) { mat.onBeforeCompile = grow; mat.customProgramCacheKey = () => 'tree-grow'; }
+    const mesh = new THREE.InstancedMesh(geo, mat, list.length);
+    if (shared) {
+      mesh.customDepthMaterial = new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking });
+      mesh.customDepthMaterial.onBeforeCompile = grow;
+      mesh.customDepthMaterial.customProgramCacheKey = () => 'tree-grow-depth';
+    }
     list.forEach((t, k) => {
       q.setFromAxisAngle(UP, t.rot);
       mesh.setMatrixAt(k, m.compose(new THREE.Vector3(t.x, t.y, t.z), q, new THREE.Vector3(t.s, t.s, t.s)));

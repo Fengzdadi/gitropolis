@@ -1031,6 +1031,13 @@ function placeLandmarks(lots, files, inDeg, frontAz) {
   }
 }
 
+function districtBorn(files, text) {
+  const name = text.replace(/ \(downtown\)$| \+\d+$/, '');
+  let born = Infinity;
+  for (const f of files) if (f.p === name || f.p.startsWith(name + '/')) born = Math.min(born, f.born);
+  return born < Infinity ? born : null;
+}
+
 export function buildLayout(kind, { files, inDeg, SIZE, frontAz }) {
   const N = files.length;
   const v = files.map(f => Math.sqrt(f.loc) + 3);
@@ -1098,7 +1105,8 @@ export function buildLayout(kind, { files, inDeg, SIZE, frontAz }) {
     stairs: (L.stairs || []).map(st => ({ ...st, x: (st.x - mx) * s, z: (st.z - mz) * s, rise: st.rise * s, run: st.run * s, w: st.w * s, top: st.top * s })),
     cables: (L.cables || []).map(c => ({ a: [...P(c.a), c.a[2] * s], b: [...P(c.b), c.b[2] * s] })),
     ships: (L.ships || []).map(sh => ({ ...sh, x: (sh.x - mx) * s, z: (sh.z - mz) * s, len: sh.len * s, beam: sh.beam * s })),
-    labels: L.labels.map(l => ({ text: shortLabel(l.text), weight: l.weight ?? (areaOf.get(l.text.replace(' (downtown)', '')) || 0), x: (l.x - mx) * s, z: (l.z - mz) * s, y: (l.y || 0) * s }))
+    // a label appears with its district: when the first file under that name was born
+    labels: L.labels.map(l => ({ bornRaw: districtBorn(files, l.text), text: shortLabel(l.text), weight: l.weight ?? (areaOf.get(l.text.replace(' (downtown)', '')) || 0), x: (l.x - mx) * s, z: (l.z - mz) * s, y: (l.y || 0) * s }))
       .sort((a, b) => b.weight - a.weight),
   };
 }

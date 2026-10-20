@@ -7,6 +7,15 @@ import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 
 
+function inside([x, z], poly) {
+  let c = false;
+  for (let k = 0, m = poly.length - 1; k < poly.length; m = k++) {
+    const [xa, za] = poly[k], [xb, zb] = poly[m];
+    if ((za > z) !== (zb > z) && x < xa + (z - za) / (zb - za) * (xb - xa)) c = !c;
+  }
+  return c;
+}
+
 export function buildStreets({ layout, B, files, inDeg, SIZE, t01 }) {
   // resolution follows the city's grain: dense cities have narrow alleys that need finer texels
   const x0 = -SIZE * 0.6, S = SIZE * 1.2;
@@ -108,6 +117,25 @@ export function buildStreets({ layout, B, files, inDeg, SIZE, t01 }) {
   });
   const maxW = Math.max(1, ...weight);
 
+  // --- when each block "opens": its first file's birth. Blocks with no files of their own (a park, a
+  // plaza, a fallow field) open with the nearest files; a terrace never opens after one standing on it.
+  const centroid = poly => [poly.reduce((a, q) => a + q[0], 0) / poly.length, poly.reduce((a, q) => a + q[1], 0) / poly.length];
+  blocks.forEach((b, id) => {
+    if (born[id] < 1) return;
+    const [cx, cz] = centroid(b.poly);
+    let best = Infinity, bt = 0;
+    files.forEach((f, i) => { if (!(B[i].w > 0.01)) return; const d = Math.hypot(B[i].x - cx, B[i].z - cz); if (d < best) { best = d; bt = t01(f.born); } });
+    born[id] = best < Infinity ? bt : 0;
+  });
+  const raised = [...blocks.keys()].filter(id => blocks[id].h > 0);
+  for (const a of raised) for (const c of raised) {
+    if (blocks[c].h > blocks[a].h && born[c] < born[a] && inside(centroid(blocks[c].poly), blocks[a].poly)) born[a] = born[c];
+  }
+  // G channel: when the nearest block opens (0–255 over the timeline); the street shader paves only then
+  const bornOf = p => { const q = vx[p] === INF ? -1 : p + vz[p] * W + vx[p]; const id = label[p] >= 0 ? label[p] : q >= 0 ? label[q] : -1; return id >= 0 ? born[id] : 0; };
+  for (let p = 0; p < W * W; p++) data[p * 4 + 1] = Math.round(Math.min(1, bornOf(p)) * 255);
+  const bornAt = (x, z) => { const p = sample(x, z); return p < 0 ? 0 : bornOf(p); };
+
   // --- lanes: every block is circled by a lane halfway between its kerb and the street's centre line,
   // so the two blocks either side of a street give it traffic in both directions
   const lanes = [], curbs = [];
@@ -139,7 +167,7 @@ export function buildStreets({ layout, B, files, inDeg, SIZE, t01 }) {
     if (half < 1.5) return; // alleys too narrow for a car
     lanes.push({ pts: offset(poly, out, half * tex * 0.5), lane: half * tex * 0.5, weight: 0.15 + 0.85 * Math.sqrt(weight[id] / maxW), born: born[id] });
     // a line just off the kerb, where street trees go
-    curbs.push({ pts: offset(poly, out, half * tex * 0.2), half: half * tex });
+    curbs.push({ pts: offset(poly, out, half * tex * 0.2), half: half * tex, born: born[id] });
   });
 
   // --- boats: loops out on the water around each island
@@ -155,7 +183,7 @@ export function buildStreets({ layout, B, files, inDeg, SIZE, t01 }) {
   const at = (x, z) => sample(x, z);
   const drivable = (x, z) => { const p = at(x, z); return p >= 0 && label[p] < 0 && !wet[p] && D[p] <= maxHalf + 1; };
   const navigable = (x, z) => { const p = at(x, z); return p >= 0 && wet[p] === 1; };
-  return { texture, min: new THREE.Vector2(x0, x0), size: S, texel: tex, maxHalf, lanes, curbs, boats, drivable, navigable };
+  return { texture, min: new THREE.Vector2(x0, x0), size: S, texel: tex, maxHalf, lanes, curbs, boats, drivable, navigable, blockBorn: born, bornAt };
 }
 
 // push a polygon outward by `d` (mitred corners, clamped so sharp corners don't spike)

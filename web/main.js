@@ -678,7 +678,7 @@ function moveTimeline(v) {
 
 // ------------------------------------------------------------ labels for top-level districts
 const labelSource = layout
-  ? layout.labels.slice(0, 24).map(l => ({ data: { name: l.text }, born: 0, hue: 0, at: [l.x, l.z], y: l.y || 0 }))
+  ? layout.labels.slice(0, 24).map(l => ({ data: { name: l.text }, born: l.born || 0, hue: 0, at: [l.x, l.z], y: l.y || 0 }))
   : (root.children || []).filter(c => c.children).slice(0, 24);
 const labelEls = labelSource.map(n => {
   const el = document.createElement('div');
@@ -912,6 +912,7 @@ async function record() {
     g.letterSpacing = ST.labelCase === 'upper' ? `${Math.round(3 * S)}px` : '0px';
     const fontPx = Math.round((ST.labelCase === 'upper' ? 13 : 19) * S);
     const boxes = labelEls.map(({ n, p }) => {
+      if (shared.uTimeline.value < n.born) return null; // not built yet
       v.copy(p).project(camera);
       if (v.z > 1 || Math.abs(v.x) > 0.95 || Math.abs(v.y) > 0.95) return null;
       const txt = ST.labelCase === 'upper' ? n.data.name.toUpperCase() : n.data.name;
