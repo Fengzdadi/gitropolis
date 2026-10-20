@@ -57,6 +57,33 @@ export function cityMetrics(city, now = Date.now() / 1000) {
   }
   const dirSizes = [...dirs.values()];
   const avgDepth = mean(F.map(f => f.p.split('/').length - 1));
+  // the mountain: directories that hold no files and a single subdirectory are just a staircase
+  // (src/main/java/org/acme/…); how much of an average path is climbing, and the longest such climb
+  const tree = new Map();
+  const node = d => { if (!tree.has(d)) tree.set(d, { files: 0, subs: new Set() }); return tree.get(d); };
+  for (const f of F) {
+    const segs = f.p.split('/').slice(0, -1);
+    let cur = '';
+    node('');
+    for (const sg of segs) { const nx = cur ? cur + '/' + sg : sg; node(cur).subs.add(nx); cur = nx; node(cur); }
+    node(cur).files++;
+  }
+  let passSteps = 0, steps = 0;
+  const climbs = new Map();
+  for (const f of F) {
+    const segs = f.p.split('/').slice(0, -1);
+    let cur = '', len = 0, best = { len: 0, at: '' };
+    for (const sg of segs) {
+      cur = cur ? cur + '/' + sg : sg; steps++;
+      const d = tree.get(cur), pass = d.files === 0 && d.subs.size === 1;
+      if (pass) { passSteps++; len++; if (len > best.len) best = { len, at: cur }; } else len = 0;
+    }
+    // the climb ends where the staircase reaches a real directory: name it by the dir it arrives at
+    if (best.len >= 2) { const key = [...tree.get(best.at).subs][0]; climbs.set(key, { n: (climbs.get(key)?.n || 0) + 1, len: best.len }); }
+  }
+  const passShare = passSteps / Math.max(1, steps);
+  const top = [...climbs].sort((a, b) => b[1].n * b[1].len - a[1].n * a[1].len)[0];
+  const climb = top ? { to: top[0], len: top[1].len } : { to: '', len: 0 };
 
   // districts: monorepo packages when present, otherwise top-level directories
   const group = p => (GROUP_RE.exec(p) || [p.includes('/') ? p.split('/')[0] : '.'])[0];
@@ -139,6 +166,8 @@ export function cityMetrics(city, now = Date.now() / 1000) {
     top5Share,
     locCv: cv(locs),
     avgDepth,
+    passShare,
+    climb,
     dirs: dirs.size,
     filesPerDir: mean(dirSizes),
     dirCv: cv(dirSizes),
@@ -171,6 +200,10 @@ export function cityMetrics(city, now = Date.now() / 1000) {
 
 // Each archetype: a list of [score 0..1, reason] terms; the city's score is their mean.
 const ARCHETYPES = {
+  mountain: m => [
+    [ramp(m.passShare, 0.2, 0.4), m.climb.len ? `${m.climb.len} empty directories of stairs up to ${m.climb.to}/` : `${pct(m.passShare)} of every path is stairs`],
+    [ramp(m.avgDepth, 4, 7), `terraces ${m.avgDepth.toFixed(1)} directories up`],
+  ],
   university: m => [
     [ramp(m.proseShare, 0.4, 0.7), `${pct(m.proseShare)} of it is prose: about ${m.proseWords.toLocaleString()} words over ${m.proseFiles} pages`],
     [ramp(m.proseFiles, 10, 60), m.locales > 1 ? `taught in ${m.locales + 1} languages` : `the longest page runs to about ${m.proseLongest.toLocaleString()} words`],
@@ -194,7 +227,8 @@ const ARCHETYPES = {
   ],
   tokyo: m => [
     [ramp(m.files, 300, 1500), `${m.files.toLocaleString()} buildings`],
-    [ramp(m.avgDepth, 2.5, 4.5), `wards inside wards — ${m.avgDepth.toFixed(1)} directories deep on average`],
+    // depth that's only an empty staircase (src/main/java/…) belongs to the mountain, not the wards
+    [ramp(m.avgDepth * (1 - m.passShare), 2.5, 4.5), `wards inside wards — ${m.avgDepth.toFixed(1)} directories deep on average`],
     [1 - ramp(m.medianLoc, 120, 300), `mostly small buildings (median ${m.medianLoc} lines)`],
     [ramp(m.edgesPerFile, 0.4, 1.4), `${m.edgesPerFile.toFixed(1)} imports per file — everything connects`],
   ],
@@ -230,7 +264,7 @@ const STATES = {
 };
 
 export const CITY_NAMES = {
-  university: 'University Town', port: 'Port City', smalltown: 'Small Town', manhattan: 'Manhattan', hongkong: 'Hong Kong', tokyo: 'Tokyo',
+  mountain: 'Mountain City', university: 'University Town', port: 'Port City', smalltown: 'Small Town', manhattan: 'Manhattan', hongkong: 'Hong Kong', tokyo: 'Tokyo',
   la: 'Los Angeles', paris: 'Paris', venice: 'Venice', barcelona: 'Barcelona',
 };
 

@@ -50,6 +50,10 @@ gitropolis reads the shape of your code and picks a plan to match it. A big mono
 <td><img src="docs/media/university-ydkjs.png" alt="You Don't Know JS as a university town"><br><b>University town</b>: You Don't Know JS. A book, not code. Each directory is a quad of colleges round a lawn, with footpaths between them and the library in the middle.</td>
 <td><img src="docs/media/university-vuejs-docs.png" alt="close-up of the Vue docs as a university town"><br><b>University town</b>: the Vue docs, close up. Guides are brick colleges, API pages are domed halls, and the site's own components are a small town on the edge.</td>
 </tr>
+<tr>
+<td><img src="docs/media/mountain-commons-lang.png" alt="Apache Commons Lang as a mountain city"><br><b>Mountain city</b>: Apache Commons Lang. Java's deep packages become terraced mountains, one terrace per package. The main code and the tests face each other across a river, with a cable car between their peaks.</td>
+<td><img src="docs/media/mountain-petclinic.png" alt="close-up of Spring PetClinic as a mountain city"><br><b>Mountain city</b>: Spring PetClinic, close up. The empty directories on the way down to <code>src/main/java/org/springframework/samples/petclinic</code> are a stone stairway, one step each, up from the river.</td>
+</tr>
 </table>
 
 <sub><sup>*</sup> These were forced with `--city`; left to itself, gitropolis plans these repos as Paris and Manhattan. Any repo can be drawn as any city.</sub>
@@ -76,6 +80,7 @@ Some repos also get a condition on top of their plan. A repo with no recent comm
 | The tallest spire | the most-imported file |
 | City hall · courthouse · clock tower | README · LICENSE · CHANGELOG |
 | Port · power plant · airport | lockfile · package manifest · deploy config |
+| Terrace · stairway | a package (subpackages are higher terraces) · the empty directories a path climbs through |
 | College · chapel · library | docs and books: a page · a table of contents · the most-linked page |
 | Container yard · warehouse · tank farm · factory | infrastructure as code: Kubernetes manifests · Helm, Kustomize and Ansible · jsonnet and Nix · Terraform |
 | Crane on site | a file that's being edited heavily right now |
@@ -98,7 +103,7 @@ Filming runs in headless Chrome, so it looks the same on every machine. It needs
 
 | Option | Default | |
 |---|---|---|
-| `--city <plan>` | `auto` | `university` `port` `smalltown` `manhattan` `hongkong` `tokyo` `la` `paris` `venice` `barcelona` |
+| `--city <plan>` | `auto` | `mountain` `university` `port` `smalltown` `manhattan` `hongkong` `tokyo` `la` `paris` `venice` `barcelona` |
 | `--style <look>` | `pixel` | `maquette` `plan` `nocturne` are smooth-shaded alternatives |
 | `--pixel <n>` | `2` | size of one art pixel, in screen pixels |
 | `--zoom <n>` | `1` | close-up factor; `3` frames the city centre |
@@ -114,7 +119,7 @@ Filming runs in headless Chrome, so it looks the same on every machine. It needs
 
 ## How it works
 
-1. **Scan.** `git ls-files`, a regex import pass for JS/TS, Python, Go, Rust and C/C++ (including workspace packages), and a pass over `git log --numstat` that follows renames. Infrastructure as code is read too, when a repo has enough of it: Terraform module sources, jsonnet imports, Kustomize resources, Helm values and Ansible roles all count as links. So does prose in a docs site or a book: Markdown links between pages.
+1. **Scan.** `git ls-files`, a regex import pass for JS/TS, Python, Go, Rust, Java, Kotlin and C/C++ (including workspace packages), and a pass over `git log --numstat` that follows renames. Infrastructure as code is read too, when a repo has enough of it: Terraform module sources, jsonnet imports, Kustomize resources, Helm values and Ansible roles all count as links. So does prose in a docs site or a book: Markdown links between pages.
 2. **Plan.** gitropolis measures the code: file sizes, directory depth, import density, how much the packages depend on each other, and the project's age. It scores each city archetype on these numbers and lays out the winner's streets, blocks, water and landmarks.
 3. **Build.** Every file gets a procedural building. Thousands of them merge into one mesh, so even an 8,600-file repo like svelte keeps a full frame rate.
 4. **Draw.** The lit scene renders at a fraction of screen resolution and is quantised to a fixed palette with ordered dithering. Silhouettes get ink outlines from the depth buffer, and the result is scaled up with hard pixels. Brick courses, roof tiles, glass and water are painted in art pixels, so they stay crisp at every zoom.

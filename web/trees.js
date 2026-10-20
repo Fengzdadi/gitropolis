@@ -52,6 +52,7 @@ const MIX = {
   smalltown: { round: 3, conifer: 2, autumn: 2 },
   port: { conifer: 2, round: 1 },
   university: { round: 3, autumn: 2, conifer: 1, blossom: 1 },
+  mountain: { conifer: 3, round: 2, blossom: 1 },
 };
 
 function pickSpecies(kind, seed) {
@@ -96,6 +97,9 @@ export function buildTrees({ layout, B, streets, unit, plateStep }) {
     });
   };
 
+  // terraces: is there a higher block over this point (a terrace nested inside this one)?
+  const raised = layout.blocks.filter(b => b.h > 0);
+  const higher = (x, z, b) => raised.some(o => o !== b && o.h > b.h && inPoly(x, z, o.poly));
   const trees = []; // { x, z, y, s, sp, rot }
   const plant = (x, z, y, size, seed) => trees.push({ x, z, y, s: size * (0.8 + hash(seed + 3) * 0.45), sp: pickSpecies(kind, seed), rot: hash(seed + 7) * Math.PI * 2 });
   const landTop = layout.groundIsWater ? plateStep * 0.8 : 0;
@@ -108,13 +112,13 @@ export function buildTrees({ layout, B, streets, unit, plateStep }) {
     const step = unit * (dense ? 0.42 : 0.9);
     let x0 = Infinity, x1 = -Infinity, z0 = Infinity, z1 = -Infinity;
     for (const [x, z] of b.poly) { x0 = Math.min(x0, x); x1 = Math.max(x1, x); z0 = Math.min(z0, z); z1 = Math.max(z1, z); }
-    const top = landTop + plateStep * (dense ? 1.4 : 1);
+    const top = landTop + plateStep * (dense ? 1.4 : 1) + (b.h || 0);
     for (let x = x0 + step / 2; x < x1; x += step) {
       for (let z = z0 + step / 2; z < z1; z += step) {
         const s = seed++;
         if (!dense && hash(s + 11) > 0.45) continue;
         const px = x + (hash(s) - 0.5) * step * 0.8, pz = z + (hash(s + 1) - 0.5) * step * 0.8;
-        if (inPoly(px, pz, b.poly) && clear(px, pz, unit * 0.12)) plant(px, pz, top, unit * 0.6, s);
+        if (inPoly(px, pz, b.poly) && clear(px, pz, unit * 0.12) && !(b.h && higher(px, pz, b))) plant(px, pz, top, unit * 0.6, s);
       }
     }
   }

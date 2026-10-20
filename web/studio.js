@@ -18,7 +18,7 @@ export const STYLES = {
     hemi: { sky: '#f6f3ee', ground: '#a69d90', intensity: 1.25 },
     heightScale: 0.42, maxHeight: 4.5,
     building: '#f1ede6', buildingJitter: 0.035, ground: '#d8d1c5', plate: '#e4ded4', roughness: 0.92,
-    rail: '#8f877c', water: '#b7c2c3', land: '#ddd6ca', yard: '#c9c4b8', plaza: '#ece7de', park: '#c6cab0', lawn: '#d4d4bf', hill: '#d9d1c4', road: '#c9c1b4',
+    rail: '#8f877c', water: '#b7c2c3', land: '#ddd6ca', yard: '#c9c4b8', cliff: '#cbbfae', plaza: '#ece7de', park: '#c6cab0', lawn: '#d4d4bf', hill: '#d9d1c4', road: '#c9c1b4',
     windows: 0, accent: '#d8452b', edges: { color: '#2a2724', opacity: 0.07 },
     toneMapping: THREE.NeutralToneMapping, exposure: 1.15, bloom: null,
     ink: '#2a2724', inkSoft: 'rgba(42,39,36,.55)', font: "'Instrument Serif', Georgia, serif", labelCase: 'none',
@@ -26,7 +26,7 @@ export const STYLES = {
   plan: {
     background: '#f1ede4', fog: null, flat: true,
     building: '#1c1b1a', buildingJitter: 0, ground: '#f1ede4', plate: '#e7e2d7',
-    rail: '#2f5d7c', water: '#dce3e3', land: '#f1ede4', yard: '#e4e0d6', plaza: '#ece8df', park: '#e1e3d0', lawn: '#ebebdf', hill: '#e4dfd4', road: '#ddd7cb',
+    rail: '#2f5d7c', water: '#dce3e3', land: '#f1ede4', yard: '#e4e0d6', cliff: '#ddd5c6', plaza: '#ece8df', park: '#e1e3d0', lawn: '#ebebdf', hill: '#e4dfd4', road: '#ddd7cb',
     windows: 0, accent: '#d23c2a', edges: { color: '#d23c2a', opacity: 0.22 },
     toneMapping: THREE.NoToneMapping, exposure: 1.0, bloom: null,
     ink: '#1c1b1a', inkSoft: 'rgba(28,27,26,.55)', font: "'Instrument Serif', Georgia, serif", labelCase: 'upper',
@@ -36,7 +36,7 @@ export const STYLES = {
     sun: { color: '#fff4e0', intensity: 2.6, elevation: 50, azimuth: 75 },
     hemi: { sky: '#c4e4ee', ground: '#61944a', intensity: 1.0 },
     building: '#bdb293', buildingJitter: 0.06, ground: '#61944a', plate: '#cdc8d2', roughness: 1,
-    rail: '#4a4458', water: '#2f6188', land: '#61944a', yard: '#9c97a8', plaza: '#e0d7b8', park: '#3d6b36', lawn: '#93bf62', hill: '#3d6b36', road: '#6e6880',
+    rail: '#4a4458', water: '#2f6188', land: '#61944a', yard: '#9c97a8', cliff: '#968a6e', plaza: '#e0d7b8', park: '#3d6b36', lawn: '#93bf62', hill: '#3d6b36', road: '#6e6880',
     windows: 0, accent: '#c0413b', edges: null,
     toneMapping: THREE.NoToneMapping, exposure: 1.0, bloom: null,
     ink: '#14121c', inkSoft: 'rgba(20,18,28,.7)', font: "'Pixelify Sans', monospace", uiFont: "'Pixelify Sans', monospace", labelCase: 'none',
@@ -47,7 +47,7 @@ export const STYLES = {
     hemi: { sky: '#56607e', ground: '#17151a', intensity: 1.15 },
     heightScale: 0.55, maxHeight: 6,
     building: '#3d4049', buildingJitter: 0.04, ground: '#14161c', plate: '#24262e', roughness: 0.8,
-    rail: '#6d6050', water: '#0b1626', land: '#1c1e25', yard: '#25272e', plaza: '#2d2f37', park: '#18211a', lawn: '#1b211d', hill: '#15161c', road: '#0e0f13',
+    rail: '#6d6050', water: '#0b1626', land: '#1c1e25', yard: '#25272e', cliff: '#1d1f25', plaza: '#2d2f37', park: '#18211a', lawn: '#1b211d', hill: '#15161c', road: '#0e0f13',
     windows: 1, windowColor: '#ffc27a', accent: '#ffc27a', edges: { color: '#ffc27a', opacity: 0.018 }, hubEdgeBoost: 3,
     toneMapping: THREE.ACESFilmicToneMapping, exposure: 1.1, bloom: { strength: 0.35, radius: 0.4, threshold: 0.85 },
     ink: '#e8e2d6', inkSoft: 'rgba(232,226,214,.55)', font: "'Instrument Serif', Georgia, serif", labelCase: 'none',
@@ -59,6 +59,15 @@ const UP = new THREE.Vector3(0, 1, 0);
 // polygons in the xz plane → one merged, extruded mesh per surface type
 function slab(polys, base, depth) {
   const geos = polys.map(poly => {
+    const shape = new THREE.Shape(poly.map(([x, z]) => new THREE.Vector2(x, -z)));
+    return new THREE.ExtrudeGeometry(shape, { depth, bevelEnabled: false, curveSegments: 1 }).rotateX(-Math.PI / 2).translate(0, base, 0);
+  });
+  return geos.length ? mergeGeometries(geos) : null;
+}
+
+// one extruded slab per [poly, base, depth]: terraces each stand at their own height
+function slabEach(list) {
+  const geos = list.map(([poly, base, depth]) => {
     const shape = new THREE.Shape(poly.map(([x, z]) => new THREE.Vector2(x, -z)));
     return new THREE.ExtrudeGeometry(shape, { depth, bevelEnabled: false, curveSegments: 1 }).rotateX(-Math.PI / 2).translate(0, base, 0);
   });
@@ -80,9 +89,14 @@ function buildTerrain(scene, layout, S, plateStep, shared, street) {
   if (layout.groundIsWater) add(slab([...layout.land, ...layout.shore], 0, landTop), S.land, 'grass-or-street');
   if (layout.water.length) add(slab(layout.water, 0, plateStep * 0.05), S.water, 'water');
   const colors = { block: S.plate, park: S.park, plaza: S.plaza, lawn: S.lawn, yard: S.yard };
+  // terraces (a mountain city): rock cliffs up to each terrace, its surface laid on top
+  const raised = layout.blocks.filter(b => b.h > 0);
+  if (raised.length) add(slabEach(raised.map(b => [b.poly, landTop, b.h])), S.cliff || S.plate);
   for (const type of Object.keys(colors)) {
-    const polys = layout.blocks.filter(b => b.type === type).map(b => b.poly);
-    add(slab(polys, landTop, type === 'park' ? plateStep * 1.4 : plateStep), colors[type], { block: 'paving', plaza: 'paving', park: 'grass', lawn: 'grass', yard: 'paving' }[type]);
+    const of = layout.blocks.filter(b => b.type === type);
+    const depth = type === 'park' ? plateStep * 1.4 : plateStep;
+    const geo = of.some(b => b.h > 0) ? slabEach(of.map(b => [b.poly, landTop + (b.h || 0), depth])) : slab(of.map(b => b.poly), landTop, depth);
+    add(geo, colors[type], { block: 'paving', plaza: 'paving', park: 'grass', lawn: 'grass', yard: 'paving' }[type]);
   }
   if (S.flat) {
     // plan: hairline outline around every block
@@ -106,6 +120,42 @@ function buildTerrain(scene, layout, S, plateStep, shared, street) {
     mesh.rotation.y = -Math.atan2(dz, dx);
     mesh.castShadow = mesh.receiveShadow = !S.flat;
     scene.add(mesh);
+  }
+  // stairways up the mountainside: one step per empty directory on the way up
+  for (const st of layout.stairs || []) {
+    const rise = st.top / st.n, steps = [];
+    for (let k = 0; k < st.n; k++) {
+      const d = (k + 0.5) * st.run, hk = st.top - k * rise;
+      const g = new THREE.BoxGeometry(st.run * 1.02, plateStep + hk, st.w);
+      g.rotateY(-Math.atan2(st.dz, st.dx)).translate(st.x + st.dx * d, landTop + (plateStep + hk) / 2, st.z + st.dz * d);
+      steps.push(g);
+    }
+    add(mergeGeometries(steps), S.plaza);
+  }
+  // cable car across the river: a cable between the peaks, two red cabins on it
+  for (const c of layout.cables || []) {
+    const A = new THREE.Vector3(c.a[0], landTop + c.a[2], c.a[1]), Bv = new THREE.Vector3(c.b[0], landTop + c.b[2], c.b[1]);
+    const L = A.distanceTo(Bv), mid = A.clone().add(Bv).multiplyScalar(0.5), u = layout.unit;
+    const cable = new THREE.Mesh(new THREE.BoxGeometry(L, u * 0.03, u * 0.03), mat(S.ink || '#2b2737'));
+    cable.position.copy(mid);
+    cable.quaternion.setFromUnitVectors(new THREE.Vector3(1, 0, 0), Bv.clone().sub(A).normalize());
+    scene.add(cable);
+    for (const t of [0.3, 0.68]) {
+      const p = A.clone().lerp(Bv, t);
+      const cab = new THREE.Mesh(new THREE.BoxGeometry(u * 0.42, u * 0.3, u * 0.26), mat('#c0413b'));
+      cab.position.set(p.x, p.y - u * 0.26, p.z);
+      cab.castShadow = !S.flat;
+      scene.add(cab);
+      const hanger = new THREE.Mesh(new THREE.BoxGeometry(u * 0.03, u * 0.12, u * 0.03), mat(S.ink || '#2b2737'));
+      hanger.position.set(p.x, p.y - u * 0.06, p.z);
+      scene.add(hanger);
+    }
+    for (const [P, e] of [[A, c.a], [Bv, c.b]]) { // pylons on the peaks
+      const py = new THREE.Mesh(new THREE.BoxGeometry(u * 0.12, u * 0.9, u * 0.12), mat(S.ink || '#2b2737'));
+      py.position.set(P.x, P.y - u * 0.45, P.z);
+      scene.add(py);
+      void e;
+    }
   }
   // elevated rail: a deck on slim pillars, platforms at the stations
   const u = layout.unit;

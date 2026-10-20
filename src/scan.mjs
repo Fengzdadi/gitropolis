@@ -38,7 +38,7 @@ const MAX_BYTES = 1_000_000;
 const NONCODE = new Set(['cfg', 'doc', 'lock']);
 const DAY = 86400, YEAR = 365.25 * DAY;
 // only these languages get import edges, so only they can honestly be called "unimported"
-const LINKED = new Set(['js', 'ts', 'py', 'go', 'rs', 'c', 'cpp']);
+const LINKED = new Set(['js', 'ts', 'py', 'go', 'rs', 'c', 'cpp', 'java', 'kt']);
 const ENTRY = /(^|\/)((main|index|cli|app|server)\.[^/]+|__main__\.py|mod\.rs|lib\.rs)$|(^|\/)(bin|cmd)\//;
 // not reached by imports on purpose: samples / fixtures / generated apps, framework file conventions, test setup
 const LOOSE = /(^|\/)(__\w*fixtures?__|fixtures?|examples?|templates?|integrations?|playgrounds?|e2e)\/|(^|\/)(layout|page|route|loading|error|middleware|test-setup|setup|conftest)\.[^/]+$/;
@@ -212,6 +212,8 @@ const PY_RE = /^\s*from\s+(\.*[\w.]*)\s+import\s+([\w*, ()]+)|^\s*import\s+([\w.
 const GO_BLOCK = /import\s*\(([\s\S]*?)\)|import\s+(?:\w+\s+)?"([^"]+)"/g;
 const RS_RE = /^\s*(?:pub(?:\([^)]*\))?\s+)?mod\s+(\w+)\s*;|use\s+(crate|super|self)((?:::\w+)+)/gm;
 const C_RE = /#include\s*"([^"]+)"/g;
+const JVM_PKG = /^\s*package\s+([\w.]+)/m;
+const JVM_IMPORT = /^\s*import\s+(?:static\s+)?([\w.]+?)(\.\*)?\s*;?\s*$/gm;
 
 const JS_EXT = ['', '.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs', '.vue', '.svelte',
   '/index.ts', '/index.tsx', '/index.js', '/index.jsx', '/index.mjs'];
@@ -276,6 +278,15 @@ function resolveImports(root, files, index, listed) {
   for (const ps of infraByDir.values()) for (const p of ps) {
     const segs = p.split('/');
     for (let k = 1; k <= Math.min(3, segs.length); k++) { const key = segs.slice(-k).join('/'); if (!infraByDir.suffix.has(key)) infraByDir.suffix.set(key, p); }
+  }
+  // java / kotlin: fully qualified class name → file (from the package declaration), package → files
+  const jvmClass = new Map(), jvmPkg = new Map();
+  for (const [i, f] of files.entries()) if ((f.lang === 'java' || f.lang === 'kt') && f.text) {
+    const pkg = (JVM_PKG.exec(f.text) || [])[1] || '';
+    const fq = (pkg ? pkg + '.' : '') + stemOf(f.p);
+    if (!jvmClass.has(fq)) jvmClass.set(fq, i);
+    if (!jvmPkg.has(pkg)) jvmPkg.set(pkg, []);
+    jvmPkg.get(pkg).push(i);
   }
   // prose: "guide/intro.md" → path, for site-absolute links like (/guide/intro)
   const proseSuffix = new Map();
@@ -387,6 +398,18 @@ function resolveImports(root, files, index, listed) {
     } else if (f.lang === 'c' || f.lang === 'cpp') {
       for (const m of text.matchAll(C_RE)) {
         addEdge(f, path.posix.normalize(path.posix.join(dir, m[1])));
+      }
+    } else if ((f.lang === 'java' || f.lang === 'kt') && jvmClass.size) {
+      for (const m of text.matchAll(JVM_IMPORT)) {
+        let name = m[1], j;
+        if (m[2]) { // wildcard: the package's biggest file stands for it
+          const pkg = jvmPkg.get(name);
+          if (pkg) j = pkg.reduce((b, k) => files[k].loc > files[b].loc ? k : b, pkg[0]);
+        } else {
+          // a.b.C, a.b.C.Nested or a static a.b.C.member: walk back to the class that has a file
+          while (name.includes('.') && (j = jvmClass.get(name)) === undefined) name = name.slice(0, name.lastIndexOf('.'));
+        }
+        if (j !== undefined && files[j] !== f) f.imp.add(j);
       }
     } else if (INFRA.has(f.lang)) {
       linkInfra(f, dir, text, index, infraByDir, addEdge);

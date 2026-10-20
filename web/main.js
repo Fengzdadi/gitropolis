@@ -111,7 +111,7 @@ if (layout) {
   const base = (layout.groundIsWater ? plateStep * 0.8 : 0) + plateStep;
   files.forEach((f, i) => {
     const l = layout.lots[i] || { x: 0, z: 0, w: 0.001, d: 0.001, rot: 0 };
-    Object.assign(B[i], { x: l.x, z: l.z, w: l.w * 0.88, d: l.d * 0.88, rot: l.rot, y: base, h: Math.max(layout.heights[i], unit * 0.1) });
+    Object.assign(B[i], { x: l.x, z: l.z, w: l.w * 0.88, d: l.d * 0.88, rot: l.rot, y: base + (l.y || 0), h: Math.max(layout.heights[i], unit * 0.1) });
   });
 }
 
@@ -637,7 +637,7 @@ function moveTimeline(v) {
 
 // ------------------------------------------------------------ labels for top-level districts
 const labelSource = layout
-  ? layout.labels.slice(0, 24).map(l => ({ data: { name: l.text }, born: 0, hue: 0, at: [l.x, l.z] }))
+  ? layout.labels.slice(0, 24).map(l => ({ data: { name: l.text }, born: 0, hue: 0, at: [l.x, l.z], y: l.y || 0 }))
   : (root.children || []).filter(c => c.children).slice(0, 24);
 const labelEls = labelSource.map(n => {
   const el = document.createElement('div');
@@ -646,7 +646,7 @@ const labelEls = labelSource.map(n => {
   const c = new THREE.Color().setHSL(n.hue, 1, 0.65);
   el.style.color = studio ? studio.style.ink : `#${c.getHexString()}`;
   $('#labels').append(el);
-  const p = n.at ? new THREE.Vector3(n.at[0], plateStep * 2, n.at[1])
+  const p = n.at ? new THREE.Vector3(n.at[0], plateStep * 2 + (n.y || 0), n.at[1])
     : new THREE.Vector3((n.x0 + n.x1) / 2 - cx, plateStep, n.y1 - cz + est * 0.15);
   return { el, n, p };
 });
@@ -854,7 +854,7 @@ async function record() {
     g.fillText(`${year(data.start)}–${year(data.end)}   ·   ${N.toLocaleString()} files   ·   ${data.stats.loc.toLocaleString()} lines`, pad, pad + 98 * S);
     if (layout && data.identity) {
       const id = data.identity;
-      const name = { university: 'a university town', port: 'a port city', smalltown: 'a small town', manhattan: 'Manhattan', hongkong: 'Hong Kong', tokyo: 'Tokyo', la: 'Los Angeles', paris: 'Paris', venice: 'Venice', barcelona: 'Barcelona' }[layout.kind];
+      const name = { mountain: 'a mountain city', university: 'a university town', port: 'a port city', smalltown: 'a small town', manhattan: 'Manhattan', hongkong: 'Hong Kong', tokyo: 'Tokyo', la: 'Los Angeles', paris: 'Paris', venice: 'Venice', barcelona: 'Barcelona' }[layout.kind];
       g.fillStyle = ST.ink; g.font = `italic 400 ${Math.round(30 * S)}px ${ST.font}`;
       g.fillText(`built like ${name}`, pad, pad + 146 * S);
       if (layout.kind === id.city && id.reasons.length) {

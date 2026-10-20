@@ -22,7 +22,7 @@ function shortLabel(t) {
   return s.length > 22 ? s.slice(0, 21) + '…' : s;
 }
 
-export const CITY_KINDS = ['university', 'port', 'smalltown', 'manhattan', 'hongkong', 'tokyo', 'la', 'paris', 'venice', 'barcelona'];
+export const CITY_KINDS = ['mountain', 'university', 'port', 'smalltown', 'manhattan', 'hongkong', 'tokyo', 'la', 'paris', 'venice', 'barcelona'];
 
 // ---------------------------------------------------------------- shared helpers
 
@@ -432,6 +432,104 @@ const PLANNERS = {
     };
   },
 
+  // a mountain city: the directory tree *is* the mountain. Every package is a round terrace and its
+  // subpackages are higher terraces inside it, like contour lines; the main code and the tests are two
+  // mountains across a river, joined by bridges and a cable car; and the empty directories every path
+  // climbs through (src/main/java/org/acme/…) are a long stairway up from the water.
+  mountain(ds, ctx) {
+    const STEP = 0.55, STAIR = 0.22, GAP = 5;
+    const TEST = /(^|\/)(src\/test|tests?|__tests__|specs?|testing)\//;
+    const files = ctx.files;
+    const all = ds.flatMap(d => d.items);
+    let banks = [all.filter(it => !TEST.test(files[it.i].p)), all.filter(it => TEST.test(files[it.i].p))];
+    if (banks[1].length < all.length * 0.1) banks = [all];
+    const lots = [], blocks = [], labels = [], stairs = [], cables = [], tops = [];
+    let xOff = 0, prevR = 0;
+    const placed = [];
+    banks.forEach((items, b) => {
+      // the bank's directory tree, with empty single-child directories collapsed into a staircase
+      const root = { name: '', kids: new Map(), files: [] };
+      for (const it of items) {
+        let n = root;
+        for (const sg of files[it.i].p.split('/').slice(0, -1)) {
+          if (!n.kids.has(sg)) n.kids.set(sg, { name: sg, kids: new Map(), files: [] });
+          n = n.kids.get(sg);
+        }
+        n.files.push(it);
+      }
+      // the longest run of empty floors anywhere in the bank is the stairway's flight count
+      let climb = 0;
+      const collapse = n => { // returns the node plus how many empty floors it swallowed
+        let steps = 0;
+        while (!n.files.length && n.kids.size === 1) { const [c] = n.kids.values(); n = { ...c, name: n.name ? n.name + '/' + c.name : c.name }; steps++; }
+        climb = Math.max(climb, steps);
+        n.kids = new Map([...n.kids].map(([k, c]) => [k, collapse(c).n]));
+        return { n, steps };
+      };
+      const top = collapse(root);
+      const toD3 = n => ({ name: n.name, children: [...[...n.kids.values()].map(toD3), ...n.files.map(it => ({ it }))] });
+      const h = hierarchy(toD3(top.n)).sum(d => d.it ? d.it.a : 0).sort((p, q) => q.value - p.value);
+      pack().radius(d => Math.sqrt(d.data.it.a) * 0.62).padding(d => d.depth === 0 ? 0.5 : 0.28)(h);
+      const R = h.r;
+      // a big mountain climbs in bigger steps, so it still reads as a mountain and not a stack of plates
+      const step = clamp(R * 0.11, STEP, 2.4), base = climb * STAIR * step / STEP;
+      // banks side by side across the river, the second a little downstream
+      const gap = Math.max(GAP, (prevR + R) * 0.3); // tall mountains need a wider valley to see the river
+      const cx = b === 0 ? 0 : xOff + prevR + gap + R, cz = b === 0 ? 0 : prevR * 0.35;
+      xOff = cx; prevR = R;
+      const elev = n => base + (n.depth + 1) * step;
+      let peak = null;
+      h.each(n => {
+        const x = cx + n.x - h.x, z = cz + n.y - h.y;
+        if (n.data.it) {
+          const s = n.r * 1.3;
+          lots.push({ i: n.data.it.i, x, z, w: s, d: s, rot: 0, y: elev(n.parent) });
+          return;
+        }
+        const e = elev(n);
+        blocks.push({ poly: circlePoly(x, z, n.r, Math.max(12, Math.min(48, Math.round(n.r * 10)))), type: 'lawn', h: e });
+        if (!peak || e > peak.e || (e === peak.e && n.r > peak.r)) peak = { x, z, e, r: n.r };
+        if (n.depth === 1 || (n.depth === 0 && !n.children?.some(c => c.children))) labels.push({ text: n.data.name.split('/').pop() || n.data.name, x, z: z + n.r + 0.3, y: e, weight: n.value });
+      });
+      tops.push(peak);
+      placed.push({ cx, cz, R });
+      // the stairway: one flight per empty directory, from the riverside up to the first terrace
+      if (climb > 0) {
+        const a = b === 0 ? 0 : Math.PI; // face the river
+        const ex = cx + Math.cos(a) * R, ez = cz + Math.sin(a) * R;
+        stairs.push({ x: ex, z: ez, dx: Math.cos(a), dz: Math.sin(a), n: climb, rise: STAIR, run: Math.min(0.5, GAP / 2 / climb), w: 0.6, top: base + step });
+      }
+    });
+    // the river between the mountains (or along the one mountain), with a bend in it
+    const [A, Bk] = [placed[0], placed[1]];
+    const rx = A.cx + A.R + (Bk ? (Bk.cx - Bk.R - A.cx - A.R) / 2 : GAP / 2);
+    const span = Math.max(A.R, Bk?.R || 0) * 5, W = Bk ? Math.max(1.7, (Bk.cx - Bk.R - A.cx - A.R) * 0.3) : 1.7;
+    const left = [], right = [];
+    for (let k = 0; k <= 80; k++) {
+      const t = k / 80, z = -span + (2 * span + (Bk ? Bk.cz : 0)) * t;
+      // the river swings wide away from the mountains and narrows between them
+      const near = Math.max(0, 1 - Math.abs(z - (Bk ? Bk.cz / 2 : 0)) / (Math.max(A.R, Bk?.R || 0) * 1.1));
+      const wob = Math.sin(t * Math.PI * 5) * (1 - near) * 2.2, w = W * (1.5 - 0.5 * near);
+      left.push([rx - w + wob, z]); right.unshift([rx + w + wob, z]);
+    }
+    const water = [[...left, ...right]];
+    const bridges = [];
+    if (Bk) {
+      for (const f of [0.2, -0.45]) { const z = A.cz + A.R * f; bridges.push({ a: [rx - W - 0.9, z], b: [rx + W + 0.9, z], w: 0.42 }); }
+      const [p, q] = tops;
+      cables.push({ a: [p.x, p.z, p.e + 2.6], b: [q.x, q.z, q.e + 2.6] });
+    }
+    const all2 = placed.map(p => [p.cx - p.R - 2, p.cz - p.R - 2, p.cx + p.R + 2, p.cz + p.R + 2]);
+    const x0 = Math.min(...all2.map(r => r[0]), rx - 3), x1 = Math.max(...all2.map(r => r[2]), rx + 3);
+    const z0 = Math.min(...all2.map(r => r[1])), z1 = Math.max(...all2.map(r => r[3]));
+    return {
+      lots, blocks, labels, water, bridges, stairs, cables, ground: 'land', land: [rectPoly(x0, z0, x1, z1)],
+      camera: { az: 45, el: 32, dist: 1.05 },
+      // tall, thin towers on every terrace: the city grows up because there's no room to grow out
+      height: (i, rel) => i === ctx.hub ? 7 : Math.min(0.6 + 1.5 * Math.pow(rel, 0.55), 6),
+    };
+  },
+
   // a university: every directory is a quadrangle, buildings round a lawn courtyard, footpaths between
   // the quads, and the most-linked page (the table of contents, usually) as the library on the main square
   university(ds, ctx) {
@@ -674,7 +772,7 @@ export function buildLayout(kind, { files, inDeg, SIZE, frontAz }) {
   const mx = (x0 + x1) / 2, mz = (z0 + z1) / 2;
   const P = ([x, z]) => [(x - mx) * s, (z - mz) * s];
   const lots = new Array(N);
-  for (const l of L.lots) lots[l.i] = { x: (l.x - mx) * s, z: (l.z - mz) * s, w: l.w * s, d: l.d * s, rot: l.rot || 0 };
+  for (const l of L.lots) lots[l.i] = { x: (l.x - mx) * s, z: (l.z - mz) * s, w: l.w * s, d: l.d * s, rot: l.rot || 0, y: (l.y || 0) * s };
   placeLandmarks(lots, files, inDeg, frontAz ?? L.camera?.az);
   const districtOf = L.districtOf || (() => null);
   const heights = files.map((f, i) => L.height(i, f.loc / medLoc, districtOf(i)) * s);
@@ -700,7 +798,7 @@ export function buildLayout(kind, { files, inDeg, SIZE, frontAz }) {
     lots,
     heights,
     hub,
-    blocks: L.blocks.map(b => ({ ...b, poly: b.poly.map(P) })),
+    blocks: L.blocks.map(b => ({ ...b, poly: b.poly.map(P), h: (b.h || 0) * s })),
     land: (L.land || []).map(p => p.map(P)),
     ground: groundKind,
     groundIsWater: groundKind === 'water',
@@ -713,8 +811,10 @@ export function buildLayout(kind, { files, inDeg, SIZE, frontAz }) {
     roads: (L.roads || []).map(r => ({ a: P(r.a), b: P(r.b), w: r.w * s })),
     hills: (L.hills || []).map(h => ({ x: (h.x - mx) * s, z: (h.z - mz) * s, r: h.r * s, h: h.h * s })),
     paths: !!L.paths,
+    stairs: (L.stairs || []).map(st => ({ ...st, x: (st.x - mx) * s, z: (st.z - mz) * s, rise: st.rise * s, run: st.run * s, w: st.w * s, top: st.top * s })),
+    cables: (L.cables || []).map(c => ({ a: [...P(c.a), c.a[2] * s], b: [...P(c.b), c.b[2] * s] })),
     ships: (L.ships || []).map(sh => ({ ...sh, x: (sh.x - mx) * s, z: (sh.z - mz) * s, len: sh.len * s, beam: sh.beam * s })),
-    labels: L.labels.map(l => ({ text: shortLabel(l.text), weight: areaOf.get(l.text.replace(' (downtown)', '')) || 0, x: (l.x - mx) * s, z: (l.z - mz) * s }))
+    labels: L.labels.map(l => ({ text: shortLabel(l.text), weight: l.weight ?? (areaOf.get(l.text.replace(' (downtown)', '')) || 0), x: (l.x - mx) * s, z: (l.z - mz) * s, y: (l.y || 0) * s }))
       .sort((a, b) => b.weight - a.weight),
   };
 }
