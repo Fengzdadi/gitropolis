@@ -6,7 +6,7 @@ import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { buildingGeometry, shipGeometry } from './buildings.js';
 import { buildingSpecs, buildCityMesh } from './architecture.js';
-import { addGroundDetail, addGrowth } from './surfaces.js';
+import { addGroundDetail, addGrowth, LAND_LEAD } from './surfaces.js';
 import { buildStreets, buildTraffic } from './streets.js';
 import { timed } from './perf.js';
 import { buildTrees } from './trees.js';
@@ -269,7 +269,8 @@ export function buildStudio(ctx) {
   // ---- city terrain from a planner: land, raised blocks, parks, plazas, bridges, hills
   if (layout) timed('terrain', () => buildTerrain(scene, layout, S, plateStep, shared, street, streets?.blockBorn));
   // district names appear with their land
-  if (layout) for (const l of layout.labels) l.born = l.bornRaw != null ? t01(l.bornRaw) : streets ? streets.bornAt(l.x, l.z) : 0;
+  // (a district's name goes up with its land, ahead of its first building)
+  if (layout) for (const l of layout.labels) l.born = Math.max(0, (l.bornRaw != null ? t01(l.bornRaw) : streets ? streets.bornAt(l.x, l.z) : 0) - LAND_LEAD);
   // traffic: lanes round every block, busier where the block's files import and are imported a lot
   // Venice has no cars, only boats
   if (streets && layout.paths) { streets.lanes = []; streets.boats = []; } // footpaths: no traffic

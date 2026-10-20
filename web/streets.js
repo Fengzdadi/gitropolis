@@ -4,6 +4,7 @@
 // run (where the distance peaks) and how wide each street is — so we can paint asphalt only where
 // streets actually are and drive traffic down the right lanes.
 import * as THREE from 'three';
+import { LAND_LEAD } from './surfaces.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 
 
@@ -165,7 +166,7 @@ export function buildStreets({ layout, B, files, inDeg, SIZE, t01 }) {
     gaps.sort((p, q) => p - q);
     const half = gaps[Math.floor(gaps.length * 0.3)];
     if (half < 1.5) return; // alleys too narrow for a car
-    lanes.push({ pts: offset(poly, out, half * tex * 0.5), lane: half * tex * 0.5, weight: 0.15 + 0.85 * Math.sqrt(weight[id] / maxW), born: born[id] });
+    lanes.push({ pts: offset(poly, out, half * tex * 0.5), lane: half * tex * 0.5, weight: 0.15 + 0.85 * Math.sqrt(weight[id] / maxW), born: Math.max(0, born[id] - LAND_LEAD) }); // traffic comes with the road
     // a line just off the kerb, where street trees go
     curbs.push({ pts: offset(poly, out, half * tex * 0.2), half: half * tex, born: born[id] });
   });

@@ -4,6 +4,10 @@
 // tower, and whether we're zoomed in or out. Sizes snap to powers of two so zooming steps between
 // detail levels instead of shimmering.
 
+// land is prepared before anyone builds on it: a block and its streets open this much of the timeline
+// ahead of its first file (a few months in a decade-old repo), so the city is laid out, then filled in
+export const LAND_LEAD = 0.04;
+
 const COMMON = /* glsl */`
   uniform float uTime, uWave, uPx, uTimeline;
   varying vec3 vSurfWP, vSurfN;
@@ -118,7 +122,7 @@ const GROUND = {
     vec3 col = sGrass(uGrass);
     // the street is paved once the block beside it has opened (G = when, over the timeline)
     // (on the same clock as the block rising beside it, so no road appears before its land)
-    if (inside > 0.5 && D > 0.5 && D <= uMaxHalf && st.g * 0.97 + 0.012 <= uTimeline) {
+    if (inside > 0.5 && D > 0.5 && D <= uMaxHalf && st.g * 0.97 - ${LAND_LEAD.toFixed(3)} + 0.012 <= uTimeline) {
       col = uAsphalt * (1.0 + (sHash(floor(vSurfWP.xz / P(1.5))) - 0.5) * 0.08);
       // across-street direction (towards the nearest block); the centre line is where D peaks across it
       float a = st.b * 3.14159265;
@@ -173,7 +177,7 @@ export function addGroundDetail(material, kind, opts) {
 // Land that opens over time: each vertex carries aGrow = (when its block opens, the slab's base
 // height). Until then the slab lies flat and out of sight; then it rises from its base in a moment.
 const GROW = /* glsl */`
-  float gOpen = smoothstep(aGrow.x * 0.97, aGrow.x * 0.97 + 0.02, uTimeline);
+  float gOpen = smoothstep(aGrow.x * 0.97 - ${LAND_LEAD.toFixed(3)}, aGrow.x * 0.97 - ${LAND_LEAD.toFixed(3)} + 0.02, uTimeline);
   transformed.y = aGrow.y + (transformed.y - aGrow.y) * gOpen;
   if (gOpen < 0.001) transformed.y -= 1e5;`;
 export function addGrowth(material, shared) {
