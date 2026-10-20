@@ -15,10 +15,12 @@ const pct = x => `${Math.round(x * 100)}%`;
 
 export function cityMetrics(city, now = Date.now() / 1000) {
   const all = city.files;
-  const coreIdx = all.map((f, i) => NONCORE_RE.test(f.p) ? -1 : i).filter(i => i >= 0);
+  // manifests / build files ('cfg') are buildings in the city but not part of the codebase being judged
+  const codeIdx = all.map((f, i) => f.lang === 'cfg' ? -1 : i).filter(i => i >= 0);
+  const coreIdx = codeIdx.filter(i => !NONCORE_RE.test(all[i].p));
   // re-index imports onto the core subset (fall back to everything for tiny / test-only repos)
   const useCore = coreIdx.length >= 20;
-  const remap = new Map((useCore ? coreIdx : all.map((_, i) => i)).map((i, k) => [i, k]));
+  const remap = new Map((useCore ? coreIdx : codeIdx).map((i, k) => [i, k]));
   const F = [...remap.keys()].map(i => ({ ...all[i], imp: all[i].imp.filter(j => remap.has(j)).map(j => remap.get(j)) }));
   const n = F.length;
   const locs = F.map(f => f.loc).sort((a, b) => a - b);
@@ -96,11 +98,16 @@ export function cityMetrics(city, now = Date.now() / 1000) {
     }
   }
 
-  const span = Math.max(1, city.end - city.start);
+  // history is judged on code alone: a late package.json bump must not stretch the timeline
+  const cfgOnly = codeIdx.length < all.length;
+  const start = cfgOnly && codeIdx.length ? Math.min(...codeIdx.map(i => all[i].born)) : city.start;
+  const end = cfgOnly && codeIdx.length ? Math.max(...codeIdx.map(i => all[i].last)) : city.end;
+  const commits = cfgOnly ? city.commits.filter(c => { for (let k = 1; k < c.length; k++) if (all[c[k]].lang !== 'cfg') return true; return false; }) : city.commits;
+  const span = Math.max(1, end - start);
   const recentWindow = 90 * 86400;
-  const recentCommits = city.commits.filter(c => c[0] > city.end - recentWindow).length;
-  const commitCount = city.commits.length;
-  const avgPerWindow = city.commits.length / Math.max(1, span / recentWindow);
+  const recentCommits = commits.filter(c => c[0] > end - recentWindow).length;
+  const commitCount = commits.length;
+  const avgPerWindow = commits.length / Math.max(1, span / recentWindow);
 
   return {
     files: n,
@@ -120,12 +127,12 @@ export function cityMetrics(city, now = Date.now() / 1000) {
     crossShare: edges ? cross / edges : 0,
     cycleShare: inCycles / Math.max(1, n),
     split,
-    testShare: sum(all.filter(f => TEST_RE.test(f.p)).map(f => f.loc)) / Math.max(1, sum(all.map(f => f.loc))),
+    testShare: sum(codeIdx.filter(i => TEST_RE.test(all[i].p)).map(i => all[i].loc)) / Math.max(1, sum(codeIdx.map(i => all[i].loc))),
     coreFiles: n,
-    totalFiles: all.length,
+    totalFiles: codeIdx.length,
     ageYears: span / YEAR,
-    idleYears: Math.max(0, (now - city.end) / YEAR),
-    staleShare: F.filter(f => city.end - f.last > 2 * YEAR).length / Math.max(1, n),
+    idleYears: Math.max(0, (now - end) / YEAR),
+    staleShare: F.filter(f => end - f.last > 2 * YEAR).length / Math.max(1, n),
     recentBoost: avgPerWindow && commitCount >= 200 && recentCommits >= 30 ? recentCommits / avgPerWindow : 0,
     hardware: (city.extras?.hardwareFiles || 0) > 0,
     usedCore: useCore,

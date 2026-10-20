@@ -4,6 +4,8 @@
 //   nocturne  — dark, hazy city where only recently edited files are lit from inside (Hopper, Todd Hido)
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
+import { buildingGeometry } from './buildings.js';
+import { buildingSpecs, buildCityMesh } from './architecture.js';
 
 export const STYLES = {
   maquette: {
@@ -24,6 +26,16 @@ export const STYLES = {
     windows: 0, accent: '#d23c2a', edges: { color: '#d23c2a', opacity: 0.22 },
     toneMapping: THREE.NoToneMapping, exposure: 1.0, bloom: null,
     ink: '#1c1b1a', inkSoft: 'rgba(28,27,26,.55)', font: "'Instrument Serif', Georgia, serif", labelCase: 'upper',
+  },
+  pixel: {
+    background: '#86bfd9', fog: null, pixel: true,
+    sun: { color: '#fff4e0', intensity: 2.6, elevation: 50, azimuth: 75 },
+    hemi: { sky: '#c4e4ee', ground: '#61944a', intensity: 1.0 },
+    building: '#bdb293', buildingJitter: 0.06, ground: '#61944a', plate: '#cdc8d2', roughness: 1,
+    rail: '#4a4458', water: '#2f6188', land: '#61944a', plaza: '#e0d7b8', park: '#3d6b36', lawn: '#93bf62', hill: '#3d6b36', road: '#6e6880',
+    windows: 0, accent: '#c0413b', edges: null,
+    toneMapping: THREE.NoToneMapping, exposure: 1.0, bloom: null,
+    ink: '#14121c', inkSoft: 'rgba(20,18,28,.7)', font: "'Pixelify Sans', monospace", uiFont: "'Pixelify Sans', monospace", labelCase: 'none',
   },
   nocturne: {
     background: '#0d1018', fog: ['#2a2629', 0.25, 1.9], sky: ['#0a0d15', '#2b2830', '#6a4a35'],
@@ -132,7 +144,7 @@ export function buildStudio(ctx) {
   // ---- light
   if (!S.flat) {
     renderer.shadowMap.enabled = true;
-    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    renderer.shadowMap.type = S.pixel ? THREE.BasicShadowMap : THREE.PCFSoftShadowMap; // pixel art wants hard shadows
     const sun = new THREE.DirectionalLight(S.sun.color, S.sun.intensity);
     const el = THREE.MathUtils.degToRad(S.sun.elevation), az = THREE.MathUtils.degToRad(S.sun.azimuth);
     sun.position.set(Math.cos(el) * Math.cos(az), Math.sin(el), Math.cos(el) * Math.sin(az)).multiplyScalar(SIZE * 1.6);
@@ -279,9 +291,16 @@ export function buildStudio(ctx) {
   mesh.computeBoundingSphere();
   mesh.frustumCulled = false;
   scene.add(mesh);
+  // pixel style: real architecture per file; the box mesh stays as an invisible picking proxy
+  if (S.pixel && layout) {
+    const specs = buildingSpecs({ files, B, inDeg, unit, kind: layout.kind, t01 });
+    scene.add(buildCityMesh({ buildingGeometry, specs, B, files, t01, shared }));
+    mesh.material.visible = false;
+    mesh.castShadow = false;
+  }
 
   // ---- imports: hairline arcs (flat curves in plan), the hub's own lines in the accent colour
-  {
+  if (S.edges) {
     const edges = [];
     files.forEach((f, i) => f.imp.forEach(j => edges.push([i, j])));
     const SEG = 20, curve = new THREE.QuadraticBezierCurve3();

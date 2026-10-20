@@ -5,6 +5,7 @@ import { readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
 import readline from 'node:readline';
 import { classify } from './classify.mjs';
+import { fileAnatomy } from './anatomy.mjs';
 
 const LANGS = {
   js: 'js', jsx: 'js', mjs: 'js', cjs: 'js', ts: 'ts', tsx: 'ts', mts: 'ts', cts: 'ts',
@@ -13,6 +14,8 @@ const LANGS = {
   swift: 'swift', scala: 'scala', lua: 'lua', zig: 'zig', ex: 'ex', exs: 'ex',
   css: 'css', scss: 'css', less: 'css', html: 'html', sh: 'sh',
 };
+// non-code files that still matter in the city: dependency manifests and build/CI definitions
+const CFG_FILE = /(^|\/)(package\.json|Cargo\.toml|pyproject\.toml|setup\.cfg|go\.mod|Gemfile|pom\.xml|build\.gradle(\.kts)?|requirements[^/]*\.txt|Dockerfile[^/]*|Makefile|tsconfig[^/]*\.json)$|^\.github\/workflows\/[^/]+\.ya?ml$/;
 const SKIP_DIR = /(^|\/)(node_modules|vendor|third_party|deps|dist|build|out|\.next|target|__pycache__|\.git)\//;
 const SKIP_FILE = /(\.min\.(js|css)|\.bundle\.js|\.d\.ts)$/;
 const MAX_BYTES = 1_000_000;
@@ -32,7 +35,7 @@ export async function scanRepo(repo, { maxCommits = 20000 } = {}) {
   const hardwareFiles = listed.filter(p => /\.(v|sv|svh|vhd|vhdl)$/i.test(p)).length;
   for (const p of listed) {
     const ext = p.slice(p.lastIndexOf('.') + 1).toLowerCase();
-    const lang = LANGS[ext];
+    const lang = CFG_FILE.test(p) ? 'cfg' : LANGS[ext];
     if (!lang || SKIP_DIR.test(p) || SKIP_FILE.test(p)) continue;
     let text;
     try {
@@ -44,7 +47,7 @@ export async function scanRepo(repo, { maxCommits = 20000 } = {}) {
     for (const line of text.split('\n')) if (line.trim()) loc++;
     if (!loc) continue;
     index.set(p, files.length);
-    files.push({ p, lang, loc, text, imp: new Set(), churn: 0, born: 0, last: 0 });
+    files.push({ p, lang, loc, a: fileAnatomy(p, text, lang), text, imp: new Set(), churn: 0, born: 0, last: 0 });
   }
 
   resolveImports(root, files, index, listed);
@@ -98,7 +101,7 @@ export async function scanRepo(repo, { maxCommits = 20000 } = {}) {
     scanMs: Date.now() - t0,
     start, end,
     stats: { files: files.length, loc: files.reduce((n, f) => n + f.loc, 0), edges, commits: touched.length },
-    files: files.map(f => ({ p: f.p, lang: f.lang, loc: f.loc, imp: [...f.imp], churn: f.churn, born: f.born, last: f.last })),
+    files: files.map(f => ({ p: f.p, lang: f.lang, loc: f.loc, imp: [...f.imp], a: f.a, churn: f.churn, born: f.born, last: f.last })),
     // compact: [time, fileIdx, fileIdx, ...]; skip giant sweeping commits (formatting, renames)
     commits: touched.filter(c => c.f.length < 200).map(c => [c.t, ...c.f]),
     extras: { hardwareFiles },
@@ -152,7 +155,8 @@ function resolveImports(root, files, index, listed) {
   const jsNames = [...ws.js.keys()].sort((a, b) => b.length - a.length);
   const addEdge = (f, target) => {
     const j = index.get(target);
-    if (j !== undefined && files[j] !== f) f.imp.add(j);
+    // manifests are buildings but never import targets (`import pkg from './package.json'`)
+    if (j !== undefined && files[j] !== f && files[j].lang !== 'cfg') f.imp.add(j);
   };
 
   // python module index: dotted path -> idx, also with a leading "src/" or package root stripped

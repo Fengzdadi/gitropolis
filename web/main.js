@@ -8,11 +8,13 @@ import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
 import { hierarchy, treemap, treemapSquarify } from 'd3-hierarchy';
 import { buildStudio } from './studio.js';
 import { buildLayout, CITY_KINDS } from './layouts.js';
+import { createPixelPipeline } from './pixel.js';
 
 const params = new URLSearchParams(location.search);
 // neon (original) | maquette | plan | nocturne
 const STYLE = params.get('style') || 'neon';
 const NEON = STYLE === 'neon';
+const PIXEL = STYLE === 'pixel';
 const data = await fetch(params.get('data') || 'city.json').then(r => r.json());
 const files = data.files;
 const N = files.length;
@@ -116,7 +118,7 @@ const viewW = () => REC ? REC.w : innerWidth;
 const viewH = () => REC ? REC.h : innerHeight;
 
 const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance', preserveDrawingBuffer: !!REC });
-renderer.setPixelRatio(REC ? 1.5 : Math.min(devicePixelRatio, 2)); // 1.5x supersampling when filming
+renderer.setPixelRatio(REC ? (PIXEL ? 1 : 1.5) : Math.min(devicePixelRatio, 2)); // 1.5x supersampling when filming (pixel art does its own)
 renderer.setSize(viewW(), viewH(), !REC);
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 1.0;
@@ -127,7 +129,11 @@ const FOG = new THREE.Color(0.055, 0.02, 0.1);
 const fogDensity = 0.75 / SIZE;
 scene.background = new THREE.Color(0.012, 0.006, 0.03);
 
-const camera = new THREE.PerspectiveCamera(50, viewW() / viewH(), 0.5, SIZE * 12);
+// pixel art is drawn in true isometric: an orthographic camera, no perspective
+const ISO_H = SIZE * 0.36;
+const camera = PIXEL
+  ? new THREE.OrthographicCamera(-ISO_H * viewW() / viewH(), ISO_H * viewW() / viewH(), ISO_H, -ISO_H, -SIZE * 6, SIZE * 6)
+  : new THREE.PerspectiveCamera(50, viewW() / viewH(), 0.5, SIZE * 12);
 // big cities: start closer and lower so it reads as a skyline, not a carpet
 const camK = N > 1000 ? 0.42 : N > 300 ? 0.6 : 0.8;
 camera.position.set(SIZE * camK, SIZE * camK * (N > 1000 ? 0.45 : 0.68), SIZE * camK);
@@ -144,6 +150,8 @@ controls.addEventListener('start', () => { controls.autoRotate = false; });
 
 // each planned city has its own establishing shot: azimuth, elevation, distance (× SIZE) and a target
 function planCamera({ az, el, dist, target }) {
+  // pixel art keeps the classic 2:1 isometric angle for every city; the city's framing becomes zoom
+  if (PIXEL) { camera.zoom = 0.9 / dist; camera.updateProjectionMatrix(); az = 45; el = 30; }
   const A = THREE.MathUtils.degToRad(az), E = THREE.MathUtils.degToRad(el);
   const t = new THREE.Vector3(target[0], unit * 0.5, target[1]);
   camera.position.set(Math.cos(E) * Math.cos(A), Math.sin(E), Math.cos(E) * Math.sin(A)).multiplyScalar(SIZE * 1.25 * dist).add(t);
@@ -539,15 +547,19 @@ composer.addPass(new ShaderPass({
 const bloom = new UnrealBloomPass(new THREE.Vector2(viewW(), viewH()), 0.7, 0.45, 0.75);
 composer.addPass(bloom);
 studio?.setupPost(bloom);
+const pix = PIXEL ? createPixelPipeline(renderer, scene, camera, { pixel: 3 }) : null;
+const renderFrame = () => pix ? pix.render() : composer.render();
 composer.addPass(new OutputPass());
 
 addEventListener('resize', () => {
   if (REC) return;
-  camera.aspect = innerWidth / innerHeight;
+  if (camera.isOrthographicCamera) { camera.left = -ISO_H * innerWidth / innerHeight; camera.right = -camera.left; }
+  else camera.aspect = innerWidth / innerHeight;
   camera.updateProjectionMatrix();
   renderer.setSize(innerWidth, innerHeight);
   composer.setSize(innerWidth, innerHeight);
   shared.uPixel.value = renderer.getPixelRatio() * innerHeight * 0.5;
+  pix?.resize();
 });
 
 // ------------------------------------------------------------ HUD + timeline
@@ -694,7 +706,7 @@ if (!REC) {
     $('#date .c').textContent = `commit ${ci.toLocaleString()} / ${commits.length.toLocaleString()}`;
     controls.update();
     updateLabels();
-    composer.render();
+    renderFrame();
   });
 } else {
   record().catch(err => report('/log', String(err?.stack || err)));
@@ -751,7 +763,7 @@ async function record() {
     g.textAlign = 'left'; g.textBaseline = 'alphabetic'; g.letterSpacing = '0px';
     g.fillStyle = ST.ink; g.font = `400 ${Math.round(76 * S)}px ${ST.font}`;
     g.fillText(data.name, pad, pad + 60 * S);
-    g.fillStyle = ST.inkSoft; g.font = `400 ${Math.round(17 * S)}px Inter, sans-serif`;
+    g.fillStyle = ST.inkSoft; g.font = `400 ${Math.round(17 * S)}px ${ST.uiFont || 'Inter, sans-serif'}`;
     g.fillText(`${year(data.start)}–${year(data.end)}   ·   ${N.toLocaleString()} files   ·   ${data.stats.loc.toLocaleString()} lines`, pad, pad + 98 * S);
     if (layout && data.identity) {
       const id = data.identity;
@@ -759,7 +771,7 @@ async function record() {
       g.fillStyle = ST.ink; g.font = `italic 400 ${Math.round(30 * S)}px ${ST.font}`;
       g.fillText(`built like ${name}`, pad, pad + 146 * S);
       if (layout.kind === id.city && id.reasons.length) {
-        g.fillStyle = ST.inkSoft; g.font = `400 ${Math.round(15 * S)}px Inter, sans-serif`;
+        g.fillStyle = ST.inkSoft; g.font = `400 ${Math.round(15 * S)}px ${ST.uiFont || 'Inter, sans-serif'}`;
         id.reasons.slice(0, 2).forEach((r, k) => g.fillText(r, pad, pad + (178 + k * 22) * S));
       }
     }
@@ -773,7 +785,7 @@ async function record() {
       g.fillText(txt, (v.x * 0.5 + 0.5) * REC.w, (-v.y * 0.5 + 0.5) * REC.h);
     }
     g.letterSpacing = '0px';
-    g.textAlign = 'right'; g.textBaseline = 'alphabetic'; g.font = `400 ${Math.round(14 * S)}px Inter, sans-serif`;
+    g.textAlign = 'right'; g.textBaseline = 'alphabetic'; g.font = `400 ${Math.round(14 * S)}px ${ST.uiFont || 'Inter, sans-serif'}`;
     g.fillText('gitropolis', REC.w - pad * 0.7, REC.h - pad * 0.6);
   }
 
@@ -788,7 +800,7 @@ async function record() {
     }
     // a small town is long and thin: come in closer so it doesn't shrink to a speck
     const near = layout?.kind === 'smalltown' ? 0.7 : 1;
-    if (layout?.camera && name === 'hero') return planCamera(layout.camera);
+    if (layout?.camera && (name === 'hero' || PIXEL)) return planCamera(layout.camera);
     const [az, el, d] = ({ hero: [35, N > 1000 ? 27 : 20, (N > 1000 ? 0.95 : 1.0) * near], aerial: [40, 42, 1.15 * near], street: [60, 7, 0.5] }[name] || [35, 13, 0.8])
       .map((x, k) => k < 2 ? THREE.MathUtils.degToRad(x) : x);
     camera.position.set(Math.cos(el) * Math.cos(az), Math.sin(el), Math.cos(el) * Math.sin(az))
@@ -833,12 +845,12 @@ async function record() {
     g.fillText('made with gitropolis', REC.w - pad * 0.6, REC.h - pad * 0.5);
   }
 
-  if (studio) await Promise.all([document.fonts.load(`400 64px ${studio.style.font}`), document.fonts.load('400 16px Inter')]);
+  if (studio) await Promise.all([document.fonts.load(`400 64px ${studio.style.font}`), document.fonts.load(`400 16px ${studio.style.uiFont || 'Inter'}`)]);
   if (REC.still) {
     setTimeline(1);
     heat.fill(0);
     stillCamera(REC.shot);
-    for (let i = 0; i < 3; i++) { tick(0); composer.render(); }
+    for (let i = 0; i < 3; i++) { tick(0); renderFrame(); }
     overlay(0.5);
     const blob = await new Promise(r => out.toBlob(r, 'image/png'));
     await fetch('/frame?i=0', { method: 'POST', body: blob });
@@ -862,7 +874,7 @@ async function record() {
     if (u > 0.86 && shared.uFocus.value !== hub) focus(hub);
     tick(dt);
     shot(u);
-    composer.render();
+    renderFrame();
     overlay(u);
     const blob = await new Promise(r => out.toBlob(r, 'image/jpeg', 0.95));
     await fetch(`/frame?i=${i}`, { method: 'POST', body: blob });

@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>gitropolis building gallery</title>
+<style>
+  html, body { margin: 0; background: #e9e6dc; font: 11px/1.2 ui-monospace, Menlo, monospace; color: #333; }
+  canvas { display: block; }
+  #labels { position: fixed; inset: 0; pointer-events: none; }
+  #labels span { position: absolute; transform: translateX(-50%); white-space: nowrap; text-align: center; }
+  #labels b { font-weight: 600; }
+</style>
+<script type="importmap">
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.169.0/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.169.0/examples/jsm/",
+  "d3-hierarchy": "https://cdn.jsdelivr.net/npm/d3-hierarchy@3.1.2/+esm"
+} }
+</script>
+</head>
+<body>
+<div id="labels"></div>
+<script type="module">
+import * as THREE from 'three';
+import { buildingGeometry, FORMS, ERAS, ROOFS } from './buildings.js';
+
+// One scene, one orthographic iso camera, every building laid out on a grid.
+const W = innerWidth, H = innerHeight;
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(1);
+renderer.setSize(W, H);
+renderer.setClearColor(0xe9e6dc);
+document.body.prepend(renderer.domElement);
+
+const scene = new THREE.Scene();
+const sun = new THREE.DirectionalLight(0xffffff, 2.3);
+sun.position.set(-3, 6, 4); // upper left of the iso view
+scene.add(sun, new THREE.HemisphereLight(0xdfe8ff, 0x8a8068, 1.1));
+const mat = new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true });
+
+const rows = [];
+const sizes = { // representative footprints per form: [w, d, h]
+  slab: [8, 6, 14], tower: [7, 7, 34], setback: [10, 10, 38], podium: [12, 10, 30],
+  house: [6, 5, 5], shed: [12, 8, 5.5], plant: [12, 8, 20], hall: [14, 10, 8], frame: [8, 8, 17],
+};
+// rows 1-3: every form x era
+ERAS.forEach((era, r) => rows.push({
+  label: era,
+  items: FORMS.map((form, i) => ({ spec: { form, era, seed: 7 + r * 3 + i, w: sizes[form][0], d: sizes[form][1], h: sizes[form][2] }, name: form })),
+}));
+// row 4: roofs on a slab / row 5: props on a tower
+rows.push({ label: 'roofs', items: ROOFS.map((roof, i) => ({ spec: { form: 'slab', era: i % 2 ? 'old' : 'mid', roof, seed: 3 + i, w: 8, d: 7, h: 14 }, name: roof })) });
+const PROPS = ['spire', 'antenna', 'crane', 'tank', 'ac'];
+rows.push({ label: 'props', items: PROPS.map((p, i) => ({ spec: { form: 'slab', era: ['old', 'mid', 'new'][i % 3], seed: 11 + i, w: 8, d: 7, h: 16, props: { [p]: true } }, name: p })) });
+// row 6: scale + seed variety (tiny, huge, tiers)
+rows.push({ label: 'misc', items: [
+  { spec: { form: 'setback', era: 'old', tiers: 2, seed: 1, w: 10, d: 10, h: 30 }, name: 'setback x2' },
+  { spec: { form: 'setback', era: 'mid', tiers: 4, seed: 2, w: 10, d: 10, h: 42 }, name: 'setback x4' },
+  { spec: { form: 'tower', era: 'new', seed: 5, w: 6, d: 6, h: 44, props: { spire: true } }, name: 'tower+spire' },
+  { spec: { form: 'podium', era: 'old', seed: 9, w: 12, d: 10, h: 30, props: { crane: true, antenna: true } }, name: 'podium+crane' },
+  { spec: { form: 'house', era: 'new', seed: 4, w: 6, d: 5, h: 5 }, name: 'house new' },
+  { spec: { form: 'plant', era: 'mid', seed: 3, w: 12, d: 8, h: 20 }, name: 'plant (seed 3)' },
+  { spec: { form: 'plant', era: 'old', seed: 4, w: 12, d: 10, h: 20 }, name: 'plant (seed 4)' },
+  { spec: { form: 'frame', era: 'mid', seed: 6, w: 10, d: 8, h: 22, props: { crane: true } }, name: 'frame+crane' },
+  { spec: { form: 'house', era: 'old', roof: 'hip', seed: 8, w: 6, d: 6, h: 5 }, name: 'house hip' },
+] });
+
+const cols = Math.max(...rows.map(r => r.items.length));
+const labels = document.getElementById('labels');
+const counts = [];
+const ground = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), new THREE.MeshLambertMaterial({ color: 0xcfc7a8 }));
+ground.rotation.x = -Math.PI / 2; ground.position.y = -0.02;
+scene.add(ground);
+const holder = new THREE.Group(); scene.add(holder);
+
+// 2:1 iso: azimuth 45deg, elevation atan(0.5) ~ 26.6deg (true 2:1 pixel ratio)
+const el = Math.atan(0.5), az = (+new URLSearchParams(location.search).get('az') || 45) * Math.PI / 180; // ?az=225 views from behind (winding check)
+const cam = new THREE.OrthographicCamera(-1, 1, 1, -1, 1, 3000);
+cam.position.set(Math.cos(az) * Math.cos(el), Math.sin(el), Math.sin(az) * Math.cos(el)).multiplyScalar(500);
+cam.lookAt(0, 0, 0);
+cam.updateMatrixWorld();
+const cw = W / cols, ch = H / rows.length;
+renderer.setScissorTest(true);
+const tmp = new THREE.Vector3();
+rows.forEach((row, r) => row.items.forEach((it, c) => {
+  const g = buildingGeometry(it.spec);
+  const tris = g.attributes.position.count / 3;
+  counts.push({ name: `${it.spec.form}/${it.spec.era}`, tris });
+  const m = new THREE.Mesh(g, mat);
+  holder.add(m);
+  ground.scale.set(it.spec.w * 1.35, it.spec.d * 1.35, 1);
+  // fit this building (plus a ground margin) to its cell in view space
+  const bb = g.boundingBox, f = Math.max(it.spec.w, it.spec.d) * 0.7;
+  let x0 = 1e9, x1 = -1e9, y0 = 1e9, y1 = -1e9;
+  for (const x of [bb.min.x - f * 0.2, bb.max.x + f * 0.2]) for (const y of [0, bb.max.y]) for (const z of [bb.min.z - f * 0.2, bb.max.z + f * 0.2]) {
+    tmp.set(x, y, z).applyMatrix4(cam.matrixWorldInverse);
+    x0 = Math.min(x0, tmp.x); x1 = Math.max(x1, tmp.x); y0 = Math.min(y0, tmp.y); y1 = Math.max(y1, tmp.y);
+  }
+  const pad = 1.08, aspect = (cw - 6) / (ch - 36);
+  let hw = (x1 - x0) / 2 * pad, hh = (y1 - y0) / 2 * pad;
+  if (hw / hh < aspect) hw = hh * aspect; else hh = hw / aspect;
+  const cxv = (x0 + x1) / 2, cyv = (y0 + y1) / 2;
+  cam.left = cxv - hw; cam.right = cxv + hw; cam.top = cyv + hh; cam.bottom = cyv - hh;
+  cam.updateProjectionMatrix();
+  const px = c * cw + 3, py = H - (r + 1) * ch + 33; // GL origin is bottom-left; leave room for the label
+  renderer.setViewport(px, py, cw - 6, ch - 36);
+  renderer.setScissor(px, py, cw - 6, ch - 36);
+  renderer.render(scene, cam);
+  holder.remove(m); g.dispose();
+  const s = document.createElement('span');
+  s.style.left = (c * cw + cw / 2) + 'px';
+  s.style.top = ((r + 1) * ch - 31) + 'px';
+  s.innerHTML = `<b>${it.name}</b><br>${it.spec.era} \u00b7 ${tris} tris`;
+  labels.appendChild(s);
+}));
+const t = counts.map(c => c.tris);
+window.__stats = { min: Math.min(...t), max: Math.max(...t), mean: t.reduce((a, b) => a + b, 0) / t.length, counts };
+</script>
+</body>
+</html>
