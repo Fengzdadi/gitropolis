@@ -51,7 +51,7 @@ const FACADE = /* glsl */`
         col = mix(col, col * 0.9, streak * fade);
       }
     }
-  } else if (abs(vSurfPart - 3.0) < 0.5) {
+  } else if (abs(vSurfPart - 3.0) < 0.5 || vSurfPart > 5.5) {
     // glass: a diagonal sky reflection sweeping across, 1-pixel mullion grid
     vec2 f = sFacade(vSurfWP, sN);
     float d = fract((f.x * 0.7 + f.y) / P(40.0));
@@ -117,7 +117,8 @@ const GROUND = {
     float inside = step(0.0, suv.x) * step(suv.x, 1.0) * step(0.0, suv.y) * step(suv.y, 1.0);
     vec3 col = sGrass(uGrass);
     // the street is paved once the block beside it has opened (G = when, over the timeline)
-    if (inside > 0.5 && D > 0.5 && D <= uMaxHalf && st.g <= uTimeline + 0.004) {
+    // (on the same clock as the block rising beside it, so no road appears before its land)
+    if (inside > 0.5 && D > 0.5 && D <= uMaxHalf && st.g * 0.97 + 0.012 <= uTimeline) {
       col = uAsphalt * (1.0 + (sHash(floor(vSurfWP.xz / P(1.5))) - 0.5) * 0.08);
       // across-street direction (towards the nearest block); the centre line is where D peaks across it
       float a = st.b * 3.14159265;

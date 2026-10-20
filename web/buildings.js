@@ -47,8 +47,9 @@ export const FORMS = [...BASE_FORMS, ...LANDMARKS, ...INDUSTRY, ...CAMPUS, ...CA
 export const STYLES = ['rust', 'c', 'cpp', 'go', 'python', 'js', 'ts', 'java', 'ruby', 'php', 'shell', 'default'];
 export const ERAS = ['old', 'mid', 'new'];
 export const ROOFS = ['flat', 'gable', 'hip', 'mansard', 'spire', 'dome'];
-export const PARTS = { wall: 0, roof: 1, trim: 2, glass: 3, accent: 4, podium: 5 };
-const WALL = 0, ROOF = 1, TRIM = 2, GLASS = 3, ACC = 4, POD = 5;
+// window: a pane laid on a wall (glass, but the city drops it when buildings are too small to show it)
+export const PARTS = { wall: 0, roof: 1, trim: 2, glass: 3, accent: 4, podium: 5, window: 6 };
+const WALL = 0, ROOF = 1, TRIM = 2, GLASS = 3, ACC = 4, POD = 5, WIN = 6;
 
 const TAU = Math.PI * 2, SQ = Math.SQRT2;
 const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
@@ -366,6 +367,7 @@ const floorsFor = (g, ya, yb, k, cap) => clamp(Math.round((yb - ya) / (g.u * k))
 
 // Flat quad laid on a visible face. f=0: the +z face (a..b along x), f=1: the +x face (a..b along z).
 function put(M, g, f, a, b, ya, yb, off, part, col) {
+  if (part === GLASS) part = WIN; // glass laid on a wall is a window pane
   if (f === 0) { const z = g.z1 + off; M.quad([a, ya, z], [b, ya, z], [b, yb, z], [a, yb, z], part, col); }
   else { const x = g.x1 + off; M.quad([x, ya, b], [x, ya, a], [x, yb, a], [x, yb, b], part, col); }
 }

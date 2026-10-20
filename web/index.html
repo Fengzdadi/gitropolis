@@ -103,6 +103,14 @@
   <input id="slider" type="range" min="0" max="1000" value="0">
   <button id="speed" title="Playback speed">1×</button>
 </div>
+<script>
+  // a page that can't even load its code (a syntax error, a missing file) still tells the CLI at once
+  addEventListener('error', e => {
+    if (!/[?&]record=1/.test(location.search) || window.__failed) return;
+    window.__failed = true;
+    fetch('/fail', { method: 'POST', body: `${e.message} (${(e.filename || '').split('/').pop()}:${e.lineno})` }).catch(() => {});
+  }, true);
+</script>
 <script type="module" src="main.js"></script>
 </body>
 </html>

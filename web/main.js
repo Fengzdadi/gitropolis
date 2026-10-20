@@ -198,7 +198,8 @@ controls.minDistance = unit * 2;
 controls.maxDistance = SIZE * 2.5;
 controls.autoRotate = true;
 controls.autoRotateSpeed = 0.35;
-controls.addEventListener('start', () => { controls.autoRotate = false; });
+let userMoved = false; // once you've panned or zoomed, a window resize doesn't snap the view back
+controls.addEventListener('start', () => { controls.autoRotate = false; userMoved = true; });
 // pixel art stays isometric: drag pans, scroll zooms, no orbiting
 if (PIXEL) {
   controls.autoRotate = false;
@@ -210,11 +211,43 @@ if (PIXEL) {
 }
 
 // each planned city has its own establishing shot: azimuth, elevation, distance (× SIZE) and a target
+// Pixel art keeps the classic 2:1 isometric angle; what changes per city is the framing. Frame what
+// is actually built (every building, base and top, and every block), not the map with its water and
+// margins: centre it on screen, leave a margin, keep clear of the title above.
+const ISO_DIR = (() => { const A = Math.PI / 4, E = Math.PI / 6; return new THREE.Vector3(Math.cos(E) * Math.cos(A), Math.sin(E), Math.cos(E) * Math.sin(A)); })();
+let FIT = null;
+function fitFrame() {
+  const cam = camera.clone();
+  cam.position.copy(ISO_DIR).multiplyScalar(SIZE * 2); cam.lookAt(0, 0, 0); cam.updateMatrixWorld();
+  const inv = cam.matrixWorldInverse, v = new THREE.Vector3();
+  let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
+  const add = (x, y, z) => { v.set(x, y, z).applyMatrix4(inv); x0 = Math.min(x0, v.x); x1 = Math.max(x1, v.x); y0 = Math.min(y0, v.y); y1 = Math.max(y1, v.y); };
+  B.forEach((b, i) => {
+    if (!(b.w > 0.01) || !Number.isFinite(b.x)) return;
+    for (const sx of [-0.5, 0.5]) for (const sz of [-0.5, 0.5]) add(b.x + sx * b.w, b.y, b.z + sz * b.d);
+    add(b.x, b.y + b.h, b.z);
+  });
+  for (const bl of layout?.blocks || []) for (const [x, z] of bl.poly) add(x, plateStep + (bl.h || 0), z);
+  if (!Number.isFinite(x0)) return { center: new THREE.Vector3(), zoom: 1 };
+  const aspect = viewW() / viewH();
+  // the city may use 90% of the width and 78% of the height, the title band at the top stays clear
+  const zoom = Math.min(2 * ISO_H * aspect * 0.9 / Math.max(x1 - x0, 1e-6), 2 * ISO_H * 0.78 / Math.max(y1 - y0, 1e-6));
+  const halfH = ISO_H / zoom;
+  const c = new THREE.Vector3((x0 + x1) / 2, (y0 + y1) / 2 + halfH * 0.07, -SIZE * 2).applyMatrix4(cam.matrixWorld);
+  return { center: c, zoom, aspect };
+}
+function aimPixel(center, zoom) {
+  camera.zoom = zoom; camera.updateProjectionMatrix();
+  camera.position.copy(ISO_DIR).multiplyScalar(SIZE * 2).add(center);
+  camera.lookAt(center);
+  controls.target.copy(center);
+}
 function planCamera({ az, el, dist, target }) {
-  // pixel art keeps the classic 2:1 isometric angle for every city; the city's framing becomes zoom
   if (PIXEL) {
-    camera.zoom = 0.9 / dist * ZOOM; camera.updateProjectionMatrix(); az = 45; el = 30;
-    if (ZOOM > 1.5) { const h = B[hub]; target = [h.x, h.z]; }
+    if (!FIT || FIT.aspect !== viewW() / viewH()) FIT = fitFrame();
+    // a close-up (--zoom) frames the city's landmark instead
+    const h = B[hub], center = ZOOM > 1.5 && h ? new THREE.Vector3(h.x, h.y + h.h * 0.3, h.z) : FIT.center;
+    return aimPixel(center, FIT.zoom * ZOOM);
   }
   const A = THREE.MathUtils.degToRad(az), E = THREE.MathUtils.degToRad(el);
   const t = new THREE.Vector3(target[0], unit * 0.5, target[1]);
@@ -627,6 +660,7 @@ addEventListener('resize', () => {
   composer.setSize(innerWidth, innerHeight);
   shared.uPixel.value = renderer.getPixelRatio() * innerHeight * 0.5;
   pix?.resize();
+  if (PIXEL && layout?.camera && !userMoved) planCamera(layout.camera);
 });
 
 // ------------------------------------------------------------ HUD + timeline
@@ -867,10 +901,8 @@ async function record() {
   const baseCam = layout?.camera || { az: 45, el: 30, dist: 1, target: [0, 0] };
   function shotPixel(u) {
     const push = REC.fixed ? 0 : smooth(0.35, 1, u);
-    const tx = THREE.MathUtils.lerp(baseCam.target[0], hubPos.x, push), tz = THREE.MathUtils.lerp(baseCam.target[1], hubPos.z, push);
-    planCamera({ ...baseCam, target: [tx, tz] });
-    camera.zoom = (0.82 / baseCam.dist) * (1 + 2.0 * push * push);
-    camera.updateProjectionMatrix();
+    if (!FIT || FIT.aspect !== viewW() / viewH()) FIT = fitFrame();
+    aimPixel(FIT.center.clone().lerp(hubPos, push), FIT.zoom * (1 + 2.0 * push * push));
   }
 
   function shot(u) {

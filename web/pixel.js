@@ -32,12 +32,12 @@ export function createPixelPipeline(renderer, scene, camera, { pixel = 3, outlin
     uniforms: {
       tColor: { value: target.texture }, tDepth: { value: target.depthTexture },
       uRes: { value: lowRes }, uPalette: { value: palette.map(c => new THREE.Vector3(c.r, c.g, c.b)) },
-      uInk: { value: new THREE.Color(outline) }, uNear: { value: 1 }, uFar: { value: 1000 }, uOrtho: { value: 1 },
+      uInk: { value: new THREE.Color(outline) }, uNear: { value: 1 }, uFar: { value: 1000 }, uOrtho: { value: 1 }, uEdgePx: { value: 0 },
     },
     vertexShader: `varying vec2 vUv; void main(){ vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }`,
     fragmentShader: `
       uniform sampler2D tColor, tDepth; uniform vec2 uRes; uniform vec3 uPalette[${palette.length}];
-      uniform vec3 uInk; uniform float uNear, uFar, uOrtho; varying vec2 vUv;
+      uniform vec3 uInk; uniform float uNear, uFar, uOrtho, uEdgePx; varying vec2 vUv;
       float lin(float d) {
         return uOrtho > 0.5 ? uNear + d * (uFar - uNear)
           : (uNear * uFar) / (uFar - d * (uFar - uNear));
@@ -53,7 +53,7 @@ export function createPixelPipeline(renderer, scene, camera, { pixel = 3, outlin
       void main() {
         vec2 px = floor(vUv * uRes);
         vec3 c = toSRGB(clamp(texture2D(tColor, (px + 0.5) / uRes).rgb, 0.0, 1.0));
-        c += bayer4(px) * 0.035; // just enough to break up banding; more reads as noise
+        c += bayer4(px) * 0.022; // just enough to break up banding; more reads as noise (and muddies the overview)
         // nearest palette entry, weighted towards how the eye judges brightness
         vec3 best = uPalette[0]; float bd = 1e9;
         for (int k = 0; k < ${palette.length}; k++) {
@@ -64,7 +64,9 @@ export function createPixelPipeline(renderer, scene, camera, { pixel = 3, outlin
         // ink a pixel when a neighbour is much farther away: the silhouette of whatever is in front
         float d0 = depthAt(px);
         float far = max(max(depthAt(px + vec2(1, 0)), depthAt(px - vec2(1, 0))), max(depthAt(px + vec2(0, 1)), depthAt(px - vec2(0, 1))));
-        float edge = step(d0 * 0.012 + 2.0, far - d0);
+        // in the isometric view a jump of a few art pixels' worth of depth is a building's edge: ink
+        // every silhouette, so neighbours read as separate blocks even from far off
+        float edge = step(uEdgePx > 0.0 ? uEdgePx : d0 * 0.012 + 2.0, far - d0);
         gl_FragColor = vec4(mix(best, uInk, edge * 0.85), 1.0);
       }`,
   }));
@@ -86,6 +88,7 @@ export function createPixelPipeline(renderer, scene, camera, { pixel = 3, outlin
       const u = quad.material.uniforms;
       // tell surface shaders how big one art pixel is in world units, so their patterns can match it
       if (pxUniform && camera.isOrthographicCamera) pxUniform.value = (camera.top - camera.bottom) / camera.zoom / lowRes.y;
+      u.uEdgePx.value = camera.isOrthographicCamera ? 3 * (camera.top - camera.bottom) / camera.zoom / lowRes.y : 0;
       u.uNear.value = camera.near; u.uFar.value = camera.far; u.uOrtho.value = camera.isOrthographicCamera ? 1 : 0;
       renderer.setRenderTarget(target);
       renderer.render(scene, camera);
