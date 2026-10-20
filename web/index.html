@@ -4,8 +4,10 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>gitropolis</title>
+<!-- three.js and d3-hierarchy are vendored (web/vendor), so the city builds offline; the web fonts are
+     optional: their stylesheet doesn't block the page, and without it the city uses system fonts -->
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Instrument+Serif&family=Inter:wght@400;500&family=Pixelify+Sans:wght@400;600&family=JetBrains+Mono:wght@400;600;800&display=swap" rel="stylesheet">
+<link id="webfonts" href="https://fonts.googleapis.com/css2?family=Instrument+Serif&family=Inter:wght@400;500&family=Pixelify+Sans:wght@400;600&family=JetBrains+Mono:wght@400;600;800&display=swap" rel="stylesheet" media="print" onload="this.media='all'; this.dataset.done = 1" onerror="this.dataset.done = 1">
 <style>
   :root {
     --bg: #05020d; --ink: #e9e4ff; --dim: #8f86b8; --neon: #4ef0ff; --pink: #ff4fd8; --panel: rgba(12, 8, 30, .72);
@@ -62,9 +64,9 @@
 </style>
 <script type="importmap">
 { "imports": {
-  "three": "https://cdn.jsdelivr.net/npm/three@0.169.0/build/three.module.js",
-  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.169.0/examples/jsm/",
-  "d3-hierarchy": "https://cdn.jsdelivr.net/npm/d3-hierarchy@3.1.2/+esm"
+  "three": "./vendor/three/three.module.min.js",
+  "three/addons/": "./vendor/three/addons/",
+  "d3-hierarchy": "./vendor/d3-hierarchy/index.js"
 } }
 </script>
 </head>

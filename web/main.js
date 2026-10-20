@@ -812,7 +812,16 @@ function report(url, body) { return fetch(url, { method: 'POST', body }); }
 async function record() {
   document.body.classList.add('recording');
   controls.enabled = false;
-  await document.fonts.ready;
+  // the web fonts are optional: offline their stylesheet may never arrive, and while it's pending
+  // document.fonts.ready doesn't resolve either. Give them a few seconds, then draw with what there is.
+  const sheet = document.getElementById('webfonts');
+  await Promise.race([
+    (async () => {
+      if (sheet && !sheet.dataset.done) await new Promise(r => { sheet.addEventListener('load', r); sheet.addEventListener('error', r); });
+      await document.fonts.ready;
+    })(),
+    new Promise(r => setTimeout(r, 5000)),
+  ]);
 
   // the landmark the film ends on: the most imported file (the city's CBD)
   const hb = B[hub];
