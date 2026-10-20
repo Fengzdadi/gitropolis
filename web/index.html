@@ -103,7 +103,8 @@
   #card-dialog .card-view img:not([src]) { display: none; }
   #card-dialog .card-view span { position: absolute; font-size: 15px; }
   #card-dialog .card-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
-  #card-dialog .card-hd { font-size: 13px; margin-right: auto; display: flex; gap: 6px; align-items: center; cursor: pointer; }
+  #card-dialog .card-hd + .card-hd { margin-right: auto; }
+  #card-dialog .card-hd { font-size: 13px; margin-right: 10px; display: flex; gap: 6px; align-items: center; cursor: pointer; }
   body.recording > :not(canvas):not(#rec) { display: none !important; }
   body.recording canvas { width: 100vw !important; height: auto !important; }
   #rec { position: fixed; top: 12px; left: 12px; color: #ff4fd8; font-size: 14px; letter-spacing: .1em; }

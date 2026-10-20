@@ -233,7 +233,9 @@ function fitFrame(aspect = viewW() / viewH(), bands = clearBands()) {
   const { top, bottom, left = 0, right = 0 } = bands;
   // the city may use 90% of the width and what's left of the height between the title and the timeline
   const freeW = Math.max(0.3, 1 - left - right) * 0.9, freeH = Math.max(0.3, 1 - top - bottom) * 0.94;
-  const zoom = Math.min(2 * ISO_H * aspect * freeW / Math.max(x1 - x0, 1e-6), 2 * ISO_H * freeH / Math.max(y1 - y0, 1e-6));
+  const zw = 2 * ISO_H * aspect * freeW / Math.max(x1 - x0, 1e-6), zh = 2 * ISO_H * freeH / Math.max(y1 - y0, 1e-6);
+  // full-bleed cards fill the frame instead, cropping the city's far corners (but zooming in at most `fill` times)
+  const zoom = bands.fill ? Math.min(Math.max(zw, zh), Math.min(zw, zh) * bands.fill) : Math.min(zw, zh);
   const halfH = ISO_H / zoom, halfW = halfH * aspect;
   const c = new THREE.Vector3((x0 + x1) / 2 - halfW * (left - right), (y0 + y1) / 2 + halfH * (top - bottom), -SIZE * 2).applyMatrix4(cam.matrixWorld);
   return { center: c, zoom, aspect, h: viewH() };

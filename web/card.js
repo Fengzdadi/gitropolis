@@ -13,7 +13,7 @@ const M = 36, P = 22, BORDER = 4, SHADOW = 6;
 
 // info: { owner, repo, phrase, reasons[], stats: [[n, word]…], years: [a, b], activity(n) → 0..1 bars, url }
 // capture(artW, artH, bands) → ImageData of the grown city framed inside the bands (fractions of the frame)
-export async function drawCard(format, info, capture, { k = 2 } = {}) {
+export async function drawCard(format, info, capture, { k = 2, full = false } = {}) {
   const { W, H } = FORMATS[format];
   await Promise.race([document.fonts.load(`600 40px ${FONT}`), new Promise(r => setTimeout(r, 2500))]);
   const out = document.createElement('canvas');
@@ -58,7 +58,23 @@ export async function drawCard(format, info, capture, { k = 2 } = {}) {
 
   // where the text goes, and so the band the city has to keep clear of
   let bands, paint;
-  if (format === 'landscape') {
+  if (full) {
+    // full bleed: the city is the picture, with a small name tag in one corner and the address in the other
+    const z = n => Math.round(n * (format === 'story' ? 1.7 : format === 'square' ? 1.25 : 1));
+    const name = info.owner ? `${info.owner}/${info.repo}` : info.repo;
+    const np = fit(name, z(30), W * 0.6), tagW = Math.max(width(name, np, 600), width(`built like ${info.phrase}`, z(20), 600)) + P * 2;
+    const tagH = P * 2 + np + z(30), urlP = z(16), urlW = width(info.url, urlP, 600) + z(14) * 2, urlH = urlP + z(14) * 2;
+    bands = { top: 0, bottom: 0, fill: format === 'story' ? 2.8 : 1.8 }; // how far past 'fits' it may zoom
+    paint = () => {
+      const x = M, y = H - M - tagH;
+      panel(x, y, tagW, tagH);
+      text(name, x + P, y + P + np * 0.9, np, INK, 600);
+      text('built like ', x + P, y + P + np + z(24), z(18), SOFT);
+      text(info.phrase, x + P + width('built like ', z(18)), y + P + np + z(24), z(20), ACCENT, 600);
+      panel(W - M - urlW, H - M - urlH, urlW, urlH);
+      text(info.url, W - M - z(14), H - M - z(14) - urlP * 0.15, urlP, INK, 600, 'right');
+    };
+  } else if (format === 'landscape') {
     const PW = 384, iw = PW - P * 2;
     bands = { left: (M + PW + 12) / W, right: 12 / W, top: 16 / H, bottom: 16 / H };
     paint = () => {
@@ -142,13 +158,15 @@ export function openShareDialog({ info, capture, link, filename }) {
     <div class="card-formats">${Object.entries(FORMATS).map(([id, f]) => `<button data-f="${id}">${id}<small>${f.label}</small></button>`).join('')}</div>
     <div class="card-view"><span>drawing…</span><img alt="Share card preview"></div>
     <div class="card-actions">
-      <label class="card-hd"><input type="checkbox"> extra sharp (3×)</label>
+      <label class="card-hd"><input type="checkbox" data-o="full"> full bleed</label>
+      <label class="card-hd"><input type="checkbox" data-o="hd"> extra sharp (3×)</label>
       <button data-a="download">download PNG</button><button data-a="copy">copy image</button>
       <button data-a="share" hidden>share…</button><button data-a="link">copy link</button>
     </div></div>`;
   document.body.append(box);
   const $ = s => box.querySelector(s), img = $('img'), status = $('.card-view span');
   let format = innerWidth < innerHeight ? 'story' : 'landscape', blob = null, job = 0;
+  const name = () => format + ($('[data-o=full]').checked ? '-full' : '');
   const close = () => { box.remove(); removeEventListener('keydown', onKey, true); };
   const onKey = e => { if (e.key === 'Escape') close(); if (box.contains(e.target) || e.key === 'Escape') e.stopPropagation(); };
   addEventListener('keydown', onKey, true);
@@ -160,29 +178,29 @@ export function openShareDialog({ info, capture, link, filename }) {
     const mine = ++job;
     box.querySelectorAll('[data-f]').forEach(b => b.classList.toggle('on', b.dataset.f === format));
     status.hidden = false; img.style.opacity = 0.35; blob = null;
-    await new Promise(r => requestAnimationFrame(() => setTimeout(r, 0))); // let "drawing…" show first
-    const canvas = await drawCard(format, info, capture, { k: $('.card-hd input').checked ? 3 : 2 });
+    await new Promise(r => setTimeout(r, 40)); // let "drawing…" show first
+    const canvas = await drawCard(format, info, capture, { k: $('[data-o=hd]').checked ? 3 : 2, full: $('[data-o=full]').checked });
     const b = await new Promise(r => canvas.toBlob(r, 'image/png'));
     if (mine !== job) return;
     blob = b;
     if (img.src) URL.revokeObjectURL(img.src);
     img.src = URL.createObjectURL(b); img.style.opacity = 1; status.hidden = true;
-    const file = new File([b], `${filename}-${format}.png`, { type: 'image/png' });
+    const file = new File([b], `${filename}-${name()}.png`, { type: 'image/png' });
     $('[data-a=share]').hidden = !navigator.canShare?.({ files: [file] });
   }
   box.querySelectorAll('[data-f]').forEach(b => { b.onclick = () => { format = b.dataset.f; render(); }; });
-  $('.card-hd input').onchange = render;
+  box.querySelectorAll('[data-o]').forEach(i => { i.onchange = render; });
   $('[data-a=download]').onclick = () => {
     if (!blob) return;
     const a = document.createElement('a');
-    a.href = img.src; a.download = `${filename}-${format}.png`; a.click();
+    a.href = img.src; a.download = `${filename}-${name()}.png`; a.click();
   };
   $('[data-a=copy]').onclick = async e => {
     try { await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]); flash(e.target, 'copied'); }
     catch { flash(e.target, "can't copy here"); }
   };
   $('[data-a=share]').onclick = async () => {
-    try { await navigator.share({ files: [new File([blob], `${filename}-${format}.png`, { type: 'image/png' })], text: `${info.owner ? info.owner + '/' : ''}${info.repo} is built like ${info.phrase}`, url: link }); }
+    try { await navigator.share({ files: [new File([blob], `${filename}-${name()}.png`, { type: 'image/png' })], text: `${info.owner ? info.owner + '/' : ''}${info.repo} is built like ${info.phrase}`, url: link }); }
     catch { /* cancelled */ }
   };
   $('[data-a=link]').onclick = async e => {
