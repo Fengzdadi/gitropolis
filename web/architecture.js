@@ -185,7 +185,9 @@ export function buildCityMesh({ buildingGeometry, specs, B, files, t01, shared, 
     if (!g.attributes.part) g.setAttribute('part', new THREE.BufferAttribute(new Float32Array(n), 1));
     geos.push(g);
   });
-  const geo = mergeGeometries(geos);
+  // a city with nothing to build (no recognised files) still gets a valid, empty mesh
+  const empty = () => { const g = new THREE.BufferGeometry(); for (const [k, n] of [['position', 3], ['normal', 3], ['color', 3], ['part', 1], ['aMeta', 3]]) g.setAttribute(k, new THREE.Float32BufferAttribute([], n)); return g; };
+  const geo = geos.length ? mergeGeometries(geos) : empty();
   // the per-building pieces would otherwise live as long as any closure from this scope (syncState below)
   for (const g of geos) g.dispose();
   geos.length = 0;

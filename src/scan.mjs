@@ -28,7 +28,7 @@ const MODEL_EXT = /\.(pt|pth|ckpt|onnx|safetensors|h5|hdf5|pkl|pickle|joblib|npy
 const BINARY_FARM = /\.(xlsx?|parquet|feather|arrow|dta|sav|pt|pth|ckpt|onnx|safetensors|h5|hdf5|pkl|pickle|joblib|npy|npz|bin|gguf)$/i;
 // a docs site or a book: its pages are the city (a university town). Ordinary repos' docs/ folders
 // stay out, so their cities don't change.
-const PROSE_MIN = 0.4;
+const PROSE_MIN = 0.5;
 export const INFRA = new Set(['hcl', 'yaml', 'jsonnet', 'nix', 'tmpl']);
 // a repo keeps its infrastructure files as buildings when they're at least this share of its lines
 // (ordinary repos sit near 0%: a few CI and config YAMLs, which stay out of the city as before).
@@ -112,26 +112,21 @@ export async function scanRepo(repo, { maxCommits = 20000 } = {}) {
     files.push({ p, lang, loc, a, text, imp: new Set(), churn: 0, born: 0, last: 0 });
   }
   {
-    let infraLoc = 0, infraN = 0, codeLoc = 0;
+    // What share of the repo's lines is infrastructure, prose, notebooks and data? Each is measured
+    // once, over the same total, before anything is dropped (test fixtures don't count towards a
+    // category: a YAML parser's test YAML isn't infrastructure).
+    const kind = f => INFRA.has(f.lang) ? 'infra' : PROSE.has(f.lang) ? 'prose' : FARM.has(f.lang) ? 'farm' : NONCODE.has(f.lang) ? null : 'code';
+    const loc = { code: 0, infra: 0, prose: 0, farm: 0 }, n = { infra: 0, prose: 0, farm: 0 };
     for (const f of files) {
-      if (INFRA.has(f.lang)) { if (!INFRA_FIXTURE.test(f.p)) { infraLoc += f.loc; infraN++; } } else if (!NONCODE.has(f.lang)) codeLoc += f.loc;
+      const k = kind(f);
+      if (!k) continue;
+      if (k !== 'code' && INFRA_FIXTURE.test(k === 'prose' ? f.p.replace(/(^|\/)docs?\//, '$1') : f.p)) continue;
+      loc[k] += f.loc;
+      if (k !== 'code') n[k]++;
     }
-    if (infraN < 8 || infraLoc / Math.max(1, infraLoc + codeLoc) < INFRA_MIN) {
-      for (let k = files.length - 1; k >= 0; k--) if (INFRA.has(files[k].lang)) files.splice(k, 1);
-    }
-    // a farm keeps its notebooks, datasets and models when together they're a real share of the repo
-    let farmLoc = 0, farmN = 0;
-    for (const f of files) if (FARM.has(f.lang) && !INFRA_FIXTURE.test(f.p)) { farmLoc += f.loc; farmN++; }
-    const plainLoc = codeLoc - files.filter(f => FARM.has(f.lang) && !INFRA_FIXTURE.test(f.p)).reduce((s2, f) => s2 + f.loc, 0);
-    if (farmN < 8 || farmLoc / Math.max(1, farmLoc + Math.max(0, plainLoc) + infraLoc) < FARM_MIN) {
-      for (let k = files.length - 1; k >= 0; k--) if (FARM.has(files[k].lang)) files.splice(k, 1);
-      codeLoc = Math.max(0, plainLoc);
-    }
-    let proseLoc = 0, proseN = 0;
-    for (const f of files) if (PROSE.has(f.lang) && !INFRA_FIXTURE.test(f.p.replace(/(^|\/)docs?\//, '$1'))) { proseLoc += f.loc; proseN++; }
-    if (proseN < 10 || proseLoc / Math.max(1, proseLoc + codeLoc + infraLoc) < PROSE_MIN) {
-      for (let k = files.length - 1; k >= 0; k--) if (PROSE.has(files[k].lang)) files.splice(k, 1);
-    }
+    const total = Math.max(1, loc.code + loc.infra + loc.prose + loc.farm);
+    const keep = { infra: n.infra >= 8 && loc.infra / total >= INFRA_MIN, prose: n.prose >= 10 && loc.prose / total >= PROSE_MIN, farm: n.farm >= 8 && loc.farm / total >= FARM_MIN };
+    for (let k = files.length - 1; k >= 0; k--) { const c = kind(files[k]); if (c && c !== 'code' && !keep[c]) files.splice(k, 1); }
   }
   files.forEach((f, i) => index.set(f.p, i));
 
@@ -142,7 +137,8 @@ export async function scanRepo(repo, { maxCommits = 20000 } = {}) {
   const commits = [];
   const alias = new Map(); // path at this point in history -> history record
   await new Promise((resolve, reject) => {
-    const proc = spawn('git', ['-C', root, 'log', `--max-count=${maxCommits}`, '--numstat',
+    // quotePath=false: non-ASCII names (中文.md, café.js) come back as raw UTF-8, matching ls-files
+    const proc = spawn('git', ['-C', root, '-c', 'core.quotePath=false', 'log', `--max-count=${maxCommits}`, '--numstat',
       '--format=@@%ct', '-M', '--reverse'], { stdio: ['ignore', 'pipe', 'ignore'] });
     const rl = readline.createInterface({ input: proc.stdout });
     let cur = null;
@@ -228,8 +224,26 @@ function fileStatus(files, start, end, tails, refs) {
 }
 
 // numstat rename forms: "a.py => b.py" and "src/{old => new}/x.py" (either side of the braces may be empty)
-function renamePaths(p) {
+// git still C-quotes a path with a tab, newline, quote or backslash in it: "a\"b.js", "x\303\251"
+function unquote(p) {
+  if (!(p.length > 1 && p.startsWith('"') && p.endsWith('"'))) return p;
+  const bytes = [];
+  const body = p.slice(1, -1);
+  for (let k = 0; k < body.length; k++) {
+    const c = body[k];
+    if (c !== '\\') { bytes.push(...Buffer.from(c)); continue; }
+    const n = body[++k];
+    if (/[0-7]/.test(n)) { bytes.push(parseInt(body.substr(k, 3), 8)); k += 2; }
+    else bytes.push({ n: 10, t: 9, r: 13, a: 7, b: 8, f: 12, v: 11 }[n] ?? n.charCodeAt(0));
+  }
+  return Buffer.from(bytes).toString('utf8');
+}
+
+function renamePaths(raw) {
+  // a rename is "old => new" (each side quoted if it needs to be), or "dir/{old => new}/rest"
+  const p = raw.includes(' => ') ? raw : unquote(raw);
   if (!p.includes(' => ')) return [p, p];
+  if (p.startsWith('"')) { const [a, b] = p.split(' => '); return [unquote(a), unquote(b)]; }
   const m = /^(.*)\{(.*) => (.*)\}(.*)$/.exec(p);
   if (!m) { const [a, b] = p.split(' => '); return [a, b]; }
   const clean = s => s.replace(/\/{2,}/g, '/').replace(/^\//, '');

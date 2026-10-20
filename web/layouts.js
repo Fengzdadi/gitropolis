@@ -566,7 +566,8 @@ const PLANNERS = {
     const root = hierarchy({ children: cells }).sum(c => c.a || 0);
     treemap().tile(treemapSquarify.ratio(1)).size([W, D]).paddingInner(0.7)(root);
     const seen = new Set();
-    for (const l of root.leaves()) {
+    // (a handful of files can all be towers and villas, leaving nothing inland: the root is then its only leaf)
+    for (const l of cells.length ? root.leaves() : []) {
       const c = l.data;
       if (c.vacant) continue;
       const x0 = l.x0 - W / 2, x1 = l.x1 - W / 2, zA = z0 - l.y1, zB = z0 - l.y0;
@@ -722,6 +723,9 @@ const PLANNERS = {
     const all = ds.flatMap(d => d.items);
     let banks = [all.filter(it => !TEST.test(files[it.i].p)), all.filter(it => TEST.test(files[it.i].p))];
     if (banks[1].length < all.length * 0.1) banks = [all];
+    // a repo that's all tests has nothing on the main bank: one mountain then, made of the tests
+    banks = banks.filter(b => b.length);
+    if (!banks.length) return { lots: [], blocks: [], labels: [], ground: 'land', land: [rectPoly(-2, -2, 2, 2)], height: () => 1 };
     const lots = [], blocks = [], labels = [], stairs = [], cables = [], tops = [];
     let xOff = 0, prevR = 0;
     const placed = [];

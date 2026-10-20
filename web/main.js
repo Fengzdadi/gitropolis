@@ -12,6 +12,15 @@ import { createPixelPipeline } from './pixel.js';
 import { PERF, HEAP, timed } from './perf.js';
 
 const params = new URLSearchParams(location.search);
+// when filming, any error on the page goes straight back to the CLI (rather than a silent 90s wait);
+// in the live view it replaces the loading message
+const fail = msg => {
+  if (params.get('record')) fetch('/fail', { method: 'POST', body: String(msg) }).catch(() => {});
+  const l = document.getElementById('loading');
+  if (l) { l.textContent = `couldn't build the city: ${msg}`; l.style.display = 'block'; }
+};
+addEventListener('error', e => fail(e.message || e.error));
+addEventListener('unhandledrejection', e => fail(e.reason?.stack || e.reason));
 // pixel | maquette | plan | nocturne | neon (the original prototype)
 const STYLE = params.get('style') || 'pixel';
 const NEON = STYLE === 'neon';
@@ -19,7 +28,9 @@ const PIXEL = STYLE === 'pixel';
 // art-pixel size in screen pixels, and how far to zoom in (close-ups frame the city's landmark)
 const PIXEL_SIZE = Math.max(1, Math.round(+params.get('px') || 2));
 const ZOOM = +params.get('zoom') || 1;
-const data = await fetch(params.get('data') || 'city.json').then(r => r.json());
+// ?data= may point at another city file, but only on this server: never a URL from somewhere else
+const dataSrc = params.get('data');
+const data = await fetch(dataSrc && !/^([a-z][\w+.-]*:|\/\/|\\)/i.test(dataSrc) ? dataSrc : 'city.json').then(r => r.json());
 globalThis.gc?.();
 const BASE_HEAP = performance.memory ? performance.memory.usedJSHeapSize / 1e6 : 0; // after loading + parsing city.json
 const files = data.files;
@@ -701,9 +712,13 @@ renderer.domElement.addEventListener('pointermove', e => {
   if (hoverId < 0) { tip.style.display = 'none'; renderer.domElement.style.cursor = ''; return; }
   renderer.domElement.style.cursor = 'pointer';
   const f = files[hoverId];
-  tip.innerHTML = `<b>${f.p}</b><br><span>lines</span> ${f.loc.toLocaleString()} · <span>commits</span> ${f.churn}<br>` +
-    `<span>imports</span> ${f.imp.length} · <span>imported by</span> ${inDeg[hoverId]}<br>` +
-    `<span>born</span> ${fmtDate(f.born)} · <span>last edit</span> ${fmtDate(f.last)}`;
+  // built from text nodes: a file name is data, never markup (a repo can name a file <img onerror=…>)
+  const row = (...parts) => { const d = document.createElement('div'); for (const [k, v] of parts) { if (k) { const s = document.createElement('span'); s.textContent = k; d.append(s, ' '); } d.append(v); } return d; };
+  const name = document.createElement('b'); name.textContent = f.p;
+  tip.replaceChildren(name,
+    row(['lines', `${f.loc.toLocaleString()} · `], ['commits', String(f.churn)]),
+    row(['imports', `${f.imp.length} · `], ['imported by', String(inDeg[hoverId])]),
+    row(['born', `${fmtDate(f.born)} · `], ['last edit', fmtDate(f.last)]));
   tip.style.display = 'block';
   tip.style.left = `${Math.min(e.clientX + 16, innerWidth - 380)}px`;
   tip.style.top = `${e.clientY + 16}px`;
@@ -750,7 +765,7 @@ if (!REC) {
     renderFrame();
   });
 } else {
-  record().catch(err => report('/log', String(err?.stack || err)));
+  record().catch(err => report('/fail', String(err?.stack || err)));
 }
 
 // ------------------------------------------------------------ benchmark (--bench)

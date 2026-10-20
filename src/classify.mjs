@@ -210,7 +210,7 @@ export function cityMetrics(city, now = Date.now() / 1000) {
     recentBoost: avgPerWindow && commitCount >= 200 && recentCommits >= 30 ? recentCommits / avgPerWindow : 0,
     hardware: (city.extras?.hardwareFiles || 0) > 0,
     infraFiles: infraIdx.length,
-    infraShare: infraLoc / Math.max(1, infraLoc + codeLoc),
+    infraShare: infraLoc / workLoc, // the same denominator as prose and farm, and as the port test above
     farmFiles: farmIdx.length,
     farmShare: farmLoc / workLoc,
     notebooks: farmCount('nb'), datasets: farmCount('data'), models: farmCount('model'),

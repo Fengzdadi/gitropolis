@@ -5,8 +5,8 @@
 //           [--video city.mp4] [--gif city.gif] [--static] [--duration 20] [--fps 30] [--size 1920x1080] [--max-mb 9.5] [--headed]
 //           [--bench] [--help] [--version]
 import { createServer } from 'node:http';
-import { readFile, writeFile, mkdtemp, stat, rm } from 'node:fs/promises';
-import { existsSync } from 'node:fs';
+import { readFile, writeFile, mkdtemp, stat } from 'node:fs/promises';
+import { existsSync, rmSync } from 'node:fs';
 import { exec, spawn, execFileSync } from 'node:child_process';
 import os from 'node:os';
 import path from 'node:path';
@@ -39,7 +39,8 @@ const flag = (name, def) => {
   return v;
 };
 const bool = name => { const i = args.indexOf(name); if (i < 0) return false; args.splice(i, 1); return true; };
-const port = +flag('--port', process.env.PORT || 4173);
+const portGiven = args.includes('--port') || !!process.env.PORT;
+let port = +flag('--port', process.env.PORT || 4173);
 const out = flag('--out');
 const video = flag('--video');
 const gif = flag('--gif');
@@ -87,6 +88,12 @@ console.log(`\n  this repo is ${pink(id.name)}${id.reasons.length ? ' — ' + id
 for (const st of id.states) console.log(`  + ${st.reason}`);
 console.log('');
 
+// nothing to draw (only images, binaries, vendored code…): say so instead of opening an empty page
+if (!city.files.length && !out) {
+  console.error('  gitropolis: no source files here that gitropolis knows how to draw');
+  process.exit(1);
+}
+
 if (out) {
   await writeFile(out, json);
   console.log(`  wrote ${out}`);
@@ -103,6 +110,9 @@ if (recording) {
     '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '12', '-pix_fmt', 'yuv420p', mp4],
     { stdio: ['pipe', 'inherit', 'inherit'] });
   const ffDone = ff && new Promise(r => ff.on('close', r));
+  // ffmpeg dying mid-film (bad build, disk full) ends the recording with a message, not an EPIPE crash
+  ff?.stdin.on('error', () => {});
+  ff?.on('close', code => { if (code && !quitting) { console.error(`\n  gitropolis: ffmpeg stopped (exit ${code})`); quit(1); } });
   rec = { tmp, mp4, ff, ffDone, total: still ? 1 : Math.round(fps * duration), got: 0, browser: null, t0: Date.now() };
 }
 
@@ -113,16 +123,35 @@ const readBody = req => new Promise((resolve, reject) => {
   req.on('error', reject);
 });
 
-const server = createServer(async (req, res) => {
+// The server is for this machine's browser only: it listens on loopback, answers only requests
+// addressed to localhost (a DNS-rebinding page can't read the city), and takes POSTs only from its
+// own page (another site can't end a recording or write the --still file).
+const LOCAL_HOST = /^(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/i;
+const server = createServer((req, res) => handle(req, res).catch(err => {
+  console.error(`\n  gitropolis: ${err.message}`);
+  if (!res.headersSent) res.writeHead(500);
+  res.end();
+}));
+
+async function handle(req, res) {
+  if (!LOCAL_HOST.test(req.headers.host || '')) { res.writeHead(403); return res.end(); }
   const url = new URL(req.url, 'http://x').pathname;
   if (url === '/city.json') {
     res.writeHead(200, { 'content-type': 'application/json' });
     return res.end(json);
   }
-  if (rec && req.method === 'POST') {
+  if (req.method === 'POST') {
+    const origin = req.headers.origin;
+    if (!rec || (origin && !LOCAL_HOST.test(origin.replace(/^https?:\/\//, '')))) { res.writeHead(403); return res.end(); }
     const body = await readBody(req);
+    if (url === '/fail') {
+      console.error(`\n  gitropolis: the page failed to build the city:\n    ${String(body).split('\n').slice(0, 6).join('\n    ')}`);
+      res.writeHead(204).end();
+      return quit(1);
+    }
     if (url === '/bench') {
-      const r = JSON.parse(body);
+      let r;
+      try { r = JSON.parse(body); } catch { res.writeHead(400); return res.end(); }
       console.log(`\n  bench — ${r.files} files, ${r.style}/${r.city}, ${r.size}`);
       for (const [k, v] of Object.entries(r.setupMs)) console.log(`    setup  ${k.padEnd(28)} ${String(v).padStart(6)} ms`);
       console.log(`    frame  avg ${r.frameMs.avg} ms  p95 ${r.frameMs.p95} ms   (cpu tick avg ${r.cpuTickMs.avg} ms)`);
@@ -130,8 +159,7 @@ const server = createServer(async (req, res) => {
       console.log(`    city mesh ${r.cityMeshMB} MB of vertex data, JS heap ${r.jsHeapMB} MB`);
       console.log(`    heap at load ${r.heapAtLoadMB} MB; retained per step: ${Object.entries(r.heapGrowthMB).map(([k, v]) => `${k} ${v}`).join(', ')}`);
       res.writeHead(204).end();
-      rec.browser?.kill();
-      process.exit(0);
+      return quit(0);
     }
     if (url === '/frame' && still) {
       await writeFile(path.resolve(still), body);
@@ -150,7 +178,7 @@ const server = createServer(async (req, res) => {
     return res.writeHead(204).end();
   }
   const file = path.join(WEB, path.normalize(url === '/' ? '/index.html' : url));
-  if (!file.startsWith(WEB)) { res.writeHead(403); return res.end(); }
+  if (!file.startsWith(WEB + path.sep)) { res.writeHead(403); return res.end(); }
   try {
     const body = await readFile(file);
     res.writeHead(200, { 'content-type': TYPES[path.extname(file)] || 'application/octet-stream' });
@@ -158,9 +186,40 @@ const server = createServer(async (req, res) => {
   } catch {
     res.writeHead(404); res.end('not found');
   }
-});
+}
 
-server.listen(port, () => {
+// One way out, whatever happened: stop headless Chrome and wait until it has let go of its profile,
+// stop ffmpeg, remove the temp folder, then exit. (Killing Chrome and deleting straight away leaves
+// the profile behind: Chrome writes it back on the way down.)
+let quitting = false;
+async function quit(code) {
+  if (quitting) return;
+  quitting = true;
+  const b = rec?.browser;
+  if (b && b.exitCode === null && b.signalCode === null) {
+    const gone = new Promise(r => b.once('exit', r));
+    b.kill();
+    await Promise.race([gone, new Promise(r => setTimeout(r, 4000))]);
+    if (b.exitCode === null && b.signalCode === null) b.kill('SIGKILL');
+  }
+  if (rec?.ff && rec.ff.exitCode === null) rec.ff.kill('SIGKILL');
+  if (rec) try { rmSync(rec.tmp, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 }); } catch {}
+  server.close();
+  process.exit(code);
+}
+process.on('SIGINT', () => quit(130));
+process.on('SIGTERM', () => quit(143));
+process.on('uncaughtException', err => { console.error(`\n  gitropolis: ${err.stack || err}`); quit(1); });
+process.on('unhandledRejection', err => { console.error(`\n  gitropolis: ${err?.stack || err}`); quit(1); });
+
+// a busy default port moves on to the next one; a port you asked for is reported, not changed
+server.on('error', err => {
+  if (err.code === 'EADDRINUSE' && !portGiven && port < 4173 + 20) { port++; return server.listen(port, '127.0.0.1'); }
+  console.error(err.code === 'EADDRINUSE' ? `  gitropolis: port ${port} is already in use — try --port <n>` : `  gitropolis: ${err.message}`);
+  quit(1);
+});
+server.listen(port, '127.0.0.1');
+server.on('listening', () => {
   const link = `http://localhost:${port}`;
   if (!rec) {
     const view = `${link}/?style=${style}&city=${cityOpt}${pxOpt ? `&px=${pxOpt}` : ''}${zoomOpt ? `&zoom=${zoomOpt}` : ''}`;
@@ -171,13 +230,13 @@ server.listen(port, () => {
   const recUrl = `${link}/?record=1&w=${w}&h=${h}&fps=${fps}&dur=${duration}&style=${style}&city=${cityOpt}${pxOpt ? `&px=${pxOpt}` : ''}${zoomOpt ? `&zoom=${zoomOpt}` : ''}` +
     (still ? `&still=1&shot=${shot}${noHud ? '&hud=0' : ''}` : '') + (fixedCam ? '&static=1' : '') + (benchMode ? '&bench=1' : '');
   console.log(still ? `  photographing ${style} / ${shot} at ${w}x${h} …` : `  filming ${duration}s at ${w}x${h}@${fps}fps …`);
-  // a browser that never sends a frame (GPU trouble, blocked CDN) shouldn't hang the CLI forever
+  // a browser that never sends a frame (GPU trouble, blocked CDN) shouldn't hang the CLI forever;
+  // a still is one frame, which on a software GPU can take a while for a big city
   setTimeout(() => {
     if (rec.got) return;
     console.error('\n  gitropolis: the browser never sent a frame — try --headed to watch what happens');
-    rec.browser?.kill();
-    process.exit(1);
-  }, benchMode ? 300_000 : 90_000).unref();
+    quit(1);
+  }, benchMode || still ? 300_000 : 90_000).unref();
   const chrome = findChrome();
   if (chrome && !headed) {
     rec.browser = spawn(chrome, ['--headless=new', `--window-size=${w},${h}`, '--hide-scrollbars', '--mute-audio',
@@ -190,12 +249,9 @@ server.listen(port, () => {
 });
 
 async function finishRecording() {
-  rec.browser?.kill();
   if (still) {
     console.log(`\n  ${cyan('still')} ${path.resolve(still)} (${await size(still)})`);
-    await rm(rec.tmp, { recursive: true, force: true }).catch(() => {});
-    server.close();
-    process.exit(0);
+    return quit(0);
   }
   rec.ff.stdin.end();
   await rec.ffDone;
@@ -211,9 +267,7 @@ async function finishRecording() {
     const used = await encodeGif(rec.mp4, path.resolve(gif));
     console.log(`done\n  ${cyan('gif')}   ${path.resolve(gif)} (${await size(gif)}, ${used})`);
   }
-  await rm(rec.tmp, { recursive: true, force: true }).catch(() => {});
-  server.close();
-  process.exit(0);
+  return quit(0);
 }
 
 // ---------------------------------------------------------------- encoding
