@@ -59,7 +59,18 @@
   body.recording canvas { width: 100vw !important; height: auto !important; }
   #rec { position: fixed; top: 12px; left: 12px; color: #ff4fd8; font-size: 14px; letter-spacing: .1em; }
   @media (max-width: 700px) { #legend { display: none; } #date .d { font-size: 22px; } #hud h1 { font-size: 20px; } }
+  /* the hosted site's front door: shown when there's no city to draw */
+  #landing { position: fixed; inset: 0; display: none; place-items: center; background: #86bfd9; color: #14121c; font-family: 'Pixelify Sans', monospace; z-index: 20; padding: 16px; }
+  #landing .box { max-width: 620px; width: 100%; }
+  #landing h1 { font-size: clamp(40px, 9vw, 72px); margin: 0 0 6px; letter-spacing: .02em; }
+  #landing p { font-family: 'JetBrains Mono', monospace; font-size: 14px; line-height: 1.6; margin: 0 0 22px; }
+  #landing form { display: flex; gap: 8px; }
+  #landing input { flex: 1; min-width: 0; font: 16px 'JetBrains Mono', monospace; padding: 12px 14px; border: 3px solid #14121c; background: #f2efe9; color: #14121c; }
+  #landing button { font: 16px 'Pixelify Sans', monospace; padding: 0 18px; border: 3px solid #14121c; background: #f2c14e; cursor: pointer; }
+  #landing .eg { margin-top: 18px; font: 13px 'JetBrains Mono', monospace; }
+  #landing .eg a { color: #14121c; margin-right: 12px; }
 </style>
+<base href="/">
 <script type="importmap">
 { "imports": {
   "three": "https://cdn.jsdelivr.net/npm/three@0.169.0/build/three.module.js",
@@ -70,6 +81,12 @@
 </head>
 <body>
 <div id="loading">BUILDING CITY…</div>
+<div id="landing"><div class="box">
+  <h1>gitropolis</h1>
+  <p>Your git repo as a pixel-art city. Swap <b>github.com</b> for this site in any repository's address, or type one here.</p>
+  <form id="go"><input id="repo" placeholder="owner/repo or a GitHub link" autocomplete="off" spellcheck="false" aria-label="GitHub repository"><button>Build</button></form>
+  <div class="eg">try <a href="/pallets/flask">pallets/flask</a><a href="/vitejs/vite">vitejs/vite</a><a href="/redis/redis">redis/redis</a><a href="/getify/You-Dont-Know-JS">You-Dont-Know-JS</a></div>
+</div></div>
 <div id="hud"><h1></h1><div class="stats"></div></div>
 <div id="date"><div class="d"></div><div class="c"></div></div>
 <div id="labels"></div>

@@ -28,9 +28,32 @@ const PIXEL = STYLE === 'pixel';
 // art-pixel size in screen pixels, and how far to zoom in (close-ups frame the city's landmark)
 const PIXEL_SIZE = Math.max(1, Math.round(+params.get('px') || 2));
 const ZOOM = +params.get('zoom') || 1;
-// ?data= may point at another city file, but only on this server: never a URL from somewhere else
+// Where the city comes from: the CLI serves city.json; the hosted site (gitropolis.dev/owner/repo)
+// asks its API; ?data= may point at another city file, but only on this server, never another site.
 const dataSrc = params.get('data');
-const data = await fetch(dataSrc && !/^([a-z][\w+.-]*:|\/\/|\\)/i.test(dataSrc) ? dataSrc : 'city.json').then(r => r.json());
+const route = /^\/([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+?)(?:\.git)?\/?$/.exec(location.pathname);
+const loadingEl = document.getElementById('loading');
+if (route) loadingEl.textContent = `SURVEYING ${route[1]}/${route[2]}… (a first visit takes up to a minute)`;
+const resp = await fetch(dataSrc && !/^([a-z][\w+.-]*:|\/\/|\\)/i.test(dataSrc) ? dataSrc
+  : route ? `/api/city/${encodeURIComponent(route[1])}/${encodeURIComponent(route[2])}` : 'city.json');
+const isJSON = (resp.headers.get('content-type') || '').includes('json');
+if (!route && !(resp.ok && isJSON)) {
+  // no city here: the hosted site's front door
+  loadingEl.style.display = 'none';
+  document.getElementById('landing').style.display = 'grid';
+  document.getElementById('go').onsubmit = e => {
+    e.preventDefault();
+    const m = /(?:github\.com\/)?([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+?)(?:\.git)?(?:[/?#].*)?$/.exec(document.getElementById('repo').value.trim());
+    if (m) location.href = `/${m[1]}/${m[2]}`;
+  };
+  await new Promise(() => {}); // nothing more to do on this page
+}
+if (!resp.ok) {
+  const why = isJSON ? (await resp.json()).error : `the server said ${resp.status}`;
+  loadingEl.textContent = why || "couldn't build that city";
+  await new Promise(() => {});
+}
+const data = await resp.json();
 globalThis.gc?.();
 const BASE_HEAP = performance.memory ? performance.memory.usedJSHeapSize / 1e6 : 0; // after loading + parsing city.json
 const files = data.files;
