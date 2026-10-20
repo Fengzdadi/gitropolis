@@ -27,7 +27,7 @@ const STYLE = params.get('style') || 'pixel';
 const NEON = STYLE === 'neon';
 const PIXEL = STYLE === 'pixel';
 // art-pixel size in screen pixels, and how far to zoom in (close-ups frame the city's landmark)
-const PIXEL_SIZE = Math.max(1, Math.round((+params.get('px') || 2) * 4) / 4); // in quarter steps: 1, 1.25, 1.5, … 2
+const PIXEL_SIZE = Math.max(1, Math.round((+params.get('px') || 1) * 4) / 4); // one art pixel per screen pixel unless ?px= asks for chunkier (quarter steps)
 const ZOOM = +params.get('zoom') || 1;
 // Where the city comes from: the CLI serves city.json; the hosted site (gitropolis.dev/owner/repo)
 // asks its API; ?data= may point at another city file, but only on this server, never another site.
@@ -647,17 +647,8 @@ composer.addPass(new ShaderPass({
 const bloom = new UnrealBloomPass(new THREE.Vector2(viewW(), viewH()), 0.7, 0.45, 0.75);
 composer.addPass(bloom);
 studio?.setupPost(bloom);
-// How big an art pixel is. A small city keeps fat 2-pixel art; a dense one (thousands of buildings)
-// gets finer pixels, so each building still has ~22 art pixels across in the overview instead of
-// dissolving into confetti. Always a whole number of device pixels, so pixels stay even. (?px= wins.)
-function autoPixel() {
-  if (params.has('px') || !FIT) return PIXEL_SIZE;
-  const pr = renderer.getPixelRatio();
-  const lotPx1 = unit * FIT.zoom * viewH() / (2 * ISO_H); // art pixels per lot at size 1
-  const p = Math.min(2, Math.max(1, lotPx1 / 22));
-  return Math.max(1, Math.floor(p * pr + 1e-6) / pr);
-}
-const ART_PX = PIXEL ? autoPixel() : PIXEL_SIZE;
+// how big an art pixel is, in whole device pixels so pixels stay even
+const ART_PX = Math.max(1, Math.floor(PIXEL_SIZE * renderer.getPixelRatio() + 1e-6) / renderer.getPixelRatio());
 const pix = PIXEL ? createPixelPipeline(renderer, scene, camera, { pixel: ART_PX, pxUniform: shared.uPx }) : null;
 const renderFrame = () => pix ? pix.render() : composer.render();
 composer.addPass(new OutputPass());

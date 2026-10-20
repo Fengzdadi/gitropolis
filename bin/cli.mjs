@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // gitropolis [repo] [--port 4173] [--out city.json] [--no-open]
-//           [--style pixel|maquette|plan|nocturne|neon] [--city auto|<archetype>] [--pixel 2] [--zoom 1]
+//           [--style pixel|maquette|plan|nocturne|neon] [--city auto|<archetype>] [--pixel 1] [--zoom 1]
 //           [--still frame.png] [--shot hero|aerial|street|plan] [--no-hud]
 //           [--video city.mp4] [--gif city.gif] [--static] [--duration 20] [--fps 30] [--size 1920x1080] [--max-mb 9.5] [--headed]
 //           [--bench] [--help] [--version]
@@ -24,7 +24,7 @@ if (args.includes('--help') || args.includes('-h')) {
   --style pixel|maquette|plan|nocturne  look (default pixel)
   --city auto|farm|desert|capital|mountain|university|port|smalltown|manhattan|hongkong|tokyo|la|paris|venice|barcelona
                                         city plan (default: picked from the code)
-  --pixel <n>  --zoom <n>               art-pixel size (default 2), close-up factor
+  --pixel <n>  --zoom <n>               art-pixel size (default 1, 2 for chunkier art), close-up factor
   --still <file.png> [--shot hero|aerial|street|plan] [--no-hud]
   --video <file.mp4>  --gif <file.gif>  film the city growing (needs ffmpeg and Chrome)
   --static  --duration <s>  --fps <n>  --size <WxH>  --max-mb <n>  --headed
@@ -50,7 +50,7 @@ const [w, h] = flag('--size', '1920x1080').split('x').map(Number);
 const maxMB = +flag('--max-mb', 9.5); // GitHub README uploads cap at 10 MB
 const headed = bool('--headed');
 const style = flag('--style', 'pixel');
-const pxOpt = flag('--pixel'); // pixel style: size of one art pixel (default 2)
+const pxOpt = flag('--pixel'); // pixel style: size of one art pixel (default 1; 2 for chunkier art)
 const zoomOpt = flag('--zoom'); // close-up factor (pixel style)
 const cityOpt = flag('--city', 'auto'); // auto | classic | farm | desert | capital | mountain | university | port | smalltown | manhattan | hongkong | tokyo | la | paris | venice | barcelona
 const still = flag('--still');
@@ -288,12 +288,12 @@ async function encodeGif(src, dst) {
   // pixel art: shrink by exactly the art-pixel size with nearest-neighbour (one GIF pixel per art pixel),
   // keep the palette as it is and don't dither again; flat colours make it compress very well
   if (style === 'pixel') {
-    const px = Math.max(1, Math.round(rec.meta?.px || +pxOpt || 2)); // the art-pixel size the page used
+    const px = Math.max(1, Math.round(rec.meta?.px || +pxOpt || 1)); // the art-pixel size the page used
     for (const div of [1, 2]) {
       for (const gfps of [15, 12, 10, 8]) {
         await run('ffmpeg', ['-y', '-loglevel', 'error', '-i', src, '-vf',
           `fps=${gfps},scale=iw/${px * div}:ih/${px * div}:flags=neighbor,split[a][b];[a]palettegen=max_colors=128:stats_mode=full[p];[b][p]paletteuse=dither=none`, dst]);
-        if ((await stat(dst)).size <= maxMB * 1e6) return `${Math.round(w / px / div)}px @ ${gfps}fps, 1 GIF pixel = ${div} art pixel${div > 1 ? 's' : ''}${px === 1 ? ' (fine pixels for a dense city)' : ''}`;
+        if ((await stat(dst)).size <= maxMB * 1e6) return `${Math.round(w / px / div)}px @ ${gfps}fps, 1 GIF pixel = ${div} art pixel${div > 1 ? 's' : ''}`;
       }
     }
     return 'over the size cap — try a shorter --duration';
