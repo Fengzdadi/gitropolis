@@ -68,7 +68,7 @@ try { execFileSync('git', ['-C', repo, 'rev-parse', '--is-inside-work-tree'], { 
 const recording = !!(video || gif || still || benchMode);
 
 const WEB = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'web');
-const TYPES = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.json': 'application/json' };
+const TYPES = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.json': 'application/json', '.svg': 'image/svg+xml', '.png': 'image/png' };
 const pink = s => `\x1b[35m${s}\x1b[0m`, cyan = s => `\x1b[36m${s}\x1b[0m`;
 
 if (video || gif) {
