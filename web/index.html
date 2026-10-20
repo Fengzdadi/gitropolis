@@ -95,6 +95,11 @@
   #card-dialog button[hidden] { display: none; }
   #card-dialog .card-x { border: 0; background: none; font-size: 24px; padding: 0 4px; line-height: 1; }
   #card-dialog .card-formats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+  #card-dialog .card-kinds { display: flex; gap: 8px; }
+  #card-dialog .card-kinds button.on { background: #14121c; color: #f2efe9; }
+  #card-dialog .card-hd[hidden] { display: none; }
+  #card-dialog .card-view video { max-width: 100%; max-height: 52vh; display: block; box-shadow: 4px 4px 0 #14121c; }
+  #card-dialog .card-view video[hidden], #card-dialog .card-view img[hidden] { display: none; }
   #card-dialog .card-formats button { display: grid; gap: 2px; }
   #card-dialog .card-formats small { font-size: 11px; color: #4a4458; }
   #card-dialog .card-formats button.on { background: #f2c14e; }
@@ -129,7 +134,9 @@
 { "imports": {
   "three": "./vendor/three/three.module.min.js",
   "three/addons/": "./vendor/three/addons/",
-  "d3-hierarchy": "./vendor/d3-hierarchy/index.js"
+  "d3-hierarchy": "./vendor/d3-hierarchy/index.js",
+  "gifenc": "./vendor/gifenc/gifenc.esm.js",
+  "mp4-muxer": "./vendor/mp4-muxer/mp4-muxer.js"
 } }
 </script>
 </head>

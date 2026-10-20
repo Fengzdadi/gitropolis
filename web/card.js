@@ -2,6 +2,9 @@
 // post, a story), with the repo's name, what kind of city it is, its history and where to see it.
 // The city is rendered off screen at art resolution and every art pixel becomes a 2×2 block, so the
 // pixels survive a social network's JPEG recompression and stay crisp on phone screens.
+import { GIFEncoder, quantize, applyPalette } from 'gifenc';
+import { Muxer, ArrayBufferTarget } from 'mp4-muxer';
+
 const INK = '#14121c', SOFT = '#4a4458', PAPER = '#f2efe9', ACCENT = '#c0413b', BAR_OFF = '#cdc8d2';
 const FONT = "'Pixelify Sans', monospace";
 export const FORMATS = {
@@ -11,15 +14,18 @@ export const FORMATS = {
 };
 const M = 36, P = 22, BORDER = 4, SHADOW = 6;
 
-// info: { owner, repo, phrase, reasons[], stats: [[n, word]…], years: [a, b], activity(n) → 0..1 bars, url }
-// capture(artW, artH, bands) → ImageData of the grown city framed inside the bands (fractions of the frame)
-export async function drawCard(format, info, capture, { k = 2, full = false } = {}) {
-  const { W, H } = FORMATS[format];
-  await Promise.race([document.fonts.load(`600 40px ${FONT}`), new Promise(r => setTimeout(r, 2500))]);
-  const out = document.createElement('canvas');
-  out.width = W * k; out.height = H * k;
-  const g = out.getContext('2d');
-  g.scale(k, k);
+
+// films are always full bleed, the date ticking in a corner; sized for video (1080p) and shrunk for GIFs
+export const FILM = {
+  landscape: { W: 1920, H: 1080, scale: 1.6, gif: 960 },
+  square: { W: 1080, H: 1080, scale: 1.25, gif: 800 },
+  story: { W: 1080, H: 1920, scale: 1.7, gif: 960 },
+};
+export const canFilmVideo = () => typeof VideoEncoder === 'function' && typeof VideoFrame === 'function';
+const fontsReady = () => Promise.race([document.fonts.load(`600 40px ${FONT}`), new Promise(r => setTimeout(r, 2500))]);
+
+// where the text goes on a W × H design (and so the bands the city keeps clear of), and how to paint it
+function layout(g, format, info, { W, H, full, scale }) {
   const font = (px, w = 400) => { g.font = `${w} ${px}px ${FONT}`; };
   const width = (txt, px, w) => { font(px, w); return g.measureText(txt).width; };
   // largest size (down to a floor) at which a line fits
@@ -60,12 +66,17 @@ export async function drawCard(format, info, capture, { k = 2, full = false } = 
   let bands, paint;
   if (full) {
     // full bleed: the city is the picture, with a small name tag in one corner and the address in the other
-    const z = n => Math.round(n * (format === 'story' ? 1.7 : format === 'square' ? 1.25 : 1));
+    const z = n => Math.round(n * (scale || (format === 'story' ? 1.7 : format === 'square' ? 1.25 : 1)));
     const name = info.owner ? `${info.owner}/${info.repo}` : info.repo;
     const np = fit(name, z(30), W * 0.6), tagW = Math.max(width(name, np, 600), width(`built like ${info.phrase}`, z(20), 600)) + P * 2;
     const tagH = P * 2 + np + z(30), urlP = z(16), urlW = width(info.url, urlP, 600) + z(14) * 2, urlH = urlP + z(14) * 2;
     bands = { top: 0, bottom: 0, fill: format === 'story' ? 2.8 : 1.8 }; // how far past 'fits' it may zoom
-    paint = () => {
+    paint = date => {
+      if (date) { // films: the date ticks along in the top corner
+        const dp = z(26), dw = width('0000-00', dp, 600) + z(14) * 2, dh = dp + z(14) * 2;
+        panel(W - M - dw, M, dw, dh);
+        text(date, W - M - z(14), M + z(14) + dp * 0.85, dp, INK, 600, 'right');
+      }
       const x = M, y = H - M - tagH;
       panel(x, y, tagW, tagH);
       text(name, x + P, y + P + np * 0.9, np, INK, 600);
@@ -137,37 +148,136 @@ export async function drawCard(format, info, capture, { k = 2, full = false } = 
     };
   }
 
+  return { bands, paint };
+}
+
+// info: { owner, repo, phrase, reasons[], stats: [[n, word]…], years: [a, b], activity(n) → 0..1 bars, url }
+// capture(artW, artH, bands) → ImageData of the grown city framed inside the bands (fractions of the frame)
+export async function drawCard(format, info, capture, { k = 2, full = false } = {}) {
+  const { W, H } = FORMATS[format];
+  await fontsReady();
+  const out = document.createElement('canvas');
+  out.width = W * k; out.height = H * k;
+  const g = out.getContext('2d');
+  g.scale(k, k);
+  const { bands, paint } = layout(g, format, info, { W, H, full });
   // the city fills the card (its sky and ground are the background), framed between the panels
-  const art = capture(Math.round(W * k / 2), Math.round(H * k / 2), bands);
-  const tmp = document.createElement('canvas');
-  tmp.width = art.width; tmp.height = art.height;
-  tmp.getContext('2d').putImageData(art, 0, 0);
-  g.imageSmoothingEnabled = false;
-  g.drawImage(tmp, 0, 0, W, H);
+  blit(g, capture(Math.round(W * k / 2), Math.round(H * k / 2), bands), W, H);
   paint();
   return out;
 }
 
-// the share dialog: pick a shape, see the card, download it, copy it, or hand it to the phone's share sheet
-export function openShareDialog({ info, capture, link, filename }) {
+// art pixels → 2×2 blocks
+let tmp = null;
+function blit(g, art, W, H) {
+  tmp ??= document.createElement('canvas');
+  if (tmp.width !== art.width || tmp.height !== art.height) { tmp.width = art.width; tmp.height = art.height; }
+  tmp.getContext('2d').putImageData(art, 0, 0);
+  g.imageSmoothingEnabled = false;
+  g.drawImage(tmp, 0, 0, W, H);
+}
+
+// A film of the city growing, shot frame by frame off screen (so it's smooth however slow the machine):
+// kind 'gif' (12 fps, then a long look at the finished city) or 'mp4' (30 fps H.264 at 8 Mbps).
+// stage(artW, artH, bands) → { rewind(seconds), frame(u, dt) → { img, date }, end() }
+export async function filmCity(kind, format, info, stage, { progress = () => {}, cancelled = () => false } = {}) {
+  const f = FILM[format], gif = kind === 'gif';
+  const k = gif ? f.gif / Math.max(f.W, f.H) : 1;
+  const artW = Math.round(f.W * k / 2), artH = Math.round(f.H * k / 2), OW = artW * 2, OH = artH * 2;
+  await fontsReady();
+  const out = document.createElement('canvas');
+  out.width = OW; out.height = OH;
+  const g = out.getContext('2d', { willReadFrequently: gif });
+  g.scale(OW / f.W, OH / f.H);
+  const { bands, paint } = layout(g, format, info, { W: f.W, H: f.H, full: true, scale: f.scale });
+  const st = stage(artW, artH, bands);
+  const draw = ({ img, date }) => { blit(g, img, f.W, f.H); paint(date); };
+  const fps = gif ? 12 : 30, grow = gif ? 6 : 8, hold = gif ? 0 : 2, total = Math.round(fps * (grow + hold));
+  const tick = () => new Promise(r => setTimeout(r, 0));
+  try {
+    if (gif) {
+      // one palette for the whole film, taken from the finished city (plus a slot for "unchanged")
+      draw(st.frame(1, 0));
+      const palette = quantize(g.getImageData(0, 0, OW, OH).data, 255);
+      while (palette.length < 255) palette.push([0, 0, 0]);
+      palette.push([0, 0, 0]);
+      st.rewind(grow * 0.8);
+      const enc = GIFEncoder();
+      let prev = null;
+      for (let i = 0; i < total; i++) {
+        if (cancelled()) return null;
+        const u = Math.min(1, i / (total - 1) / 0.92); // the last few frames show the finished city
+        draw(st.frame(u, 1 / fps));
+        const idx = applyPalette(g.getImageData(0, 0, OW, OH).data, palette);
+        // pixels that didn't change since the last frame are left transparent: a much smaller file
+        const frame = prev ? idx.map((v, p) => v === prev[p] ? 255 : v) : idx;
+        enc.writeFrame(frame, OW, OH, { palette, delay: i === total - 1 ? 3000 : Math.round(1000 / fps), transparent: !!prev, transparentIndex: 255, dispose: 1 });
+        prev = idx;
+        progress(i + 1, total);
+        await tick();
+      }
+      enc.finish();
+      return new Blob([enc.bytes()], { type: 'image/gif' });
+    }
+    // H.264 plays everywhere; a browser without an H.264 encoder gets VP9 in the same MP4
+    const base = { width: OW, height: OH, bitrate: 8e6, framerate: fps };
+    let config = null, muxCodec = 'avc';
+    for (const [codec, mc] of [['avc1.640028', 'avc'], ['avc1.4d0028', 'avc'], ['avc1.42e028', 'avc'], ['vp09.00.40.08', 'vp9']]) {
+      if ((await VideoEncoder.isConfigSupported({ ...base, codec }).catch(() => ({})))?.supported) { config = { ...base, codec }; muxCodec = mc; break; }
+    }
+    if (!config) throw new Error("this browser can't encode video");
+    const muxer = new Muxer({ target: new ArrayBufferTarget(), video: { codec: muxCodec, width: OW, height: OH }, fastStart: 'in-memory' });
+    let failed = null;
+    const encoder = new VideoEncoder({ output: (chunk, meta) => muxer.addVideoChunk(chunk, meta), error: e => { failed = e; } });
+    encoder.configure(config);
+    st.rewind(grow * 0.8);
+    for (let i = 0; i < total; i++) {
+      if (cancelled() || failed) break;
+      const u = Math.min(1, i / (fps * grow));
+      draw(st.frame(u, 1 / fps));
+      const vf = new VideoFrame(out, { timestamp: Math.round(i * 1e6 / fps), duration: Math.round(1e6 / fps) });
+      encoder.encode(vf, { keyFrame: i % (fps * 2) === 0 });
+      vf.close();
+      progress(i + 1, total);
+      while (encoder.encodeQueueSize > 4) await new Promise(r => setTimeout(r, 5));
+      await tick();
+    }
+    if (failed) throw failed;
+    if (cancelled()) { encoder.close(); return null; }
+    await encoder.flush();
+    encoder.close();
+    muxer.finalize();
+    return new Blob([muxer.target.buffer], { type: 'video/mp4' });
+  } finally {
+    st.end();
+  }
+}
+
+// the share dialog: pick a shape and a kind (picture, GIF, video), see it, download it, copy it,
+// or hand it to the phone's share sheet
+const KINDS = { png: 'image', gif: 'GIF', mp4: 'video' };
+export function openShareDialog({ info, capture, stage, link, filename }) {
   document.getElementById('card-dialog')?.remove();
   const box = document.createElement('div');
   box.id = 'card-dialog';
   box.innerHTML = `<div class="card-panel" role="dialog" aria-modal="true" aria-label="Share this city">
     <div class="card-head"><b>share this city</b><button class="card-x" aria-label="Close">×</button></div>
+    <div class="card-kinds">${Object.entries(KINDS).map(([id, l]) => `<button data-k="${id}">${l}</button>`).join('')}</div>
     <div class="card-formats">${Object.entries(FORMATS).map(([id, f]) => `<button data-f="${id}">${id}<small>${f.label}</small></button>`).join('')}</div>
-    <div class="card-view"><span>drawing…</span><img alt="Share card preview"></div>
+    <div class="card-view"><span>drawing…</span><img alt="Share card preview"><video muted loop playsinline controls hidden></video></div>
     <div class="card-actions">
       <label class="card-hd"><input type="checkbox" data-o="full"> full bleed</label>
       <label class="card-hd"><input type="checkbox" data-o="hd"> extra sharp (3×)</label>
-      <button data-a="download">download PNG</button><button data-a="copy">copy image</button>
+      <button data-a="download">download</button><button data-a="copy">copy image</button>
       <button data-a="share" hidden>share…</button><button data-a="link">copy link</button>
     </div></div>`;
   document.body.append(box);
-  const $ = s => box.querySelector(s), img = $('img'), status = $('.card-view span');
-  let format = innerWidth < innerHeight ? 'story' : 'landscape', blob = null, job = 0;
-  const name = () => format + ($('[data-o=full]').checked ? '-full' : '');
-  const close = () => { box.remove(); removeEventListener('keydown', onKey, true); };
+  const $ = s => box.querySelector(s), img = $('img'), video = $('video'), status = $('.card-view span');
+  if (!canFilmVideo()) $('[data-k=mp4]').hidden = true;
+  let format = innerWidth < innerHeight ? 'story' : 'landscape', kind = 'png', blob = null, url = null, job = 0;
+  const ext = () => kind;
+  const name = () => `${filename}-${format}${kind === 'png' && $('[data-o=full]').checked ? '-full' : ''}.${ext()}`;
+  const close = () => { job++; box.remove(); removeEventListener('keydown', onKey, true); if (url) URL.revokeObjectURL(url); };
   const onKey = e => { if (e.key === 'Escape') close(); if (box.contains(e.target) || e.key === 'Escape') e.stopPropagation(); };
   addEventListener('keydown', onKey, true);
   box.onclick = e => { if (e.target === box) close(); };
@@ -177,30 +287,49 @@ export function openShareDialog({ info, capture, link, filename }) {
   async function render() {
     const mine = ++job;
     box.querySelectorAll('[data-f]').forEach(b => b.classList.toggle('on', b.dataset.f === format));
-    status.hidden = false; img.style.opacity = 0.35; blob = null;
-    await new Promise(r => setTimeout(r, 40)); // let "drawing…" show first
-    const canvas = await drawCard(format, info, capture, { k: $('[data-o=hd]').checked ? 3 : 2, full: $('[data-o=full]').checked });
-    const b = await new Promise(r => canvas.toBlob(r, 'image/png'));
-    if (mine !== job) return;
+    box.querySelectorAll('[data-k]').forEach(b => b.classList.toggle('on', b.dataset.k === kind));
+    box.querySelectorAll('.card-hd').forEach(l => { l.hidden = kind !== 'png'; });
+    $('[data-a=copy]').hidden = kind !== 'png';
+    status.hidden = false; status.textContent = kind === 'png' ? 'drawing…' : 'filming…';
+    img.style.opacity = video.style.opacity = 0.35; blob = null;
+    await new Promise(r => setTimeout(r, 40)); // let the status show first
+    let b;
+    try {
+      b = kind === 'png'
+        ? await drawCard(format, info, capture, { k: $('[data-o=hd]').checked ? 3 : 2, full: $('[data-o=full]').checked }).then(c => new Promise(r => c.toBlob(r, 'image/png')))
+        : await filmCity(kind === 'gif' ? 'gif' : 'mp4', format, info, stage, {
+          cancelled: () => mine !== job,
+          progress: (i, n) => { status.textContent = `filming… ${Math.round(i / n * 100)}%`; },
+        });
+    } catch (err) {
+      if (mine === job) status.textContent = `couldn't make that: ${err.message || err}`;
+      return;
+    }
+    if (mine !== job || !b) return;
     blob = b;
-    if (img.src) URL.revokeObjectURL(img.src);
-    img.src = URL.createObjectURL(b); img.style.opacity = 1; status.hidden = true;
-    const file = new File([b], `${filename}-${name()}.png`, { type: 'image/png' });
-    $('[data-a=share]').hidden = !navigator.canShare?.({ files: [file] });
+    if (url) URL.revokeObjectURL(url);
+    url = URL.createObjectURL(b);
+    const isVideo = kind === 'mp4';
+    img.hidden = isVideo; video.hidden = !isVideo;
+    if (isVideo) { video.src = url; video.play().catch(() => {}); } else { video.removeAttribute('src'); img.src = url; }
+    img.style.opacity = video.style.opacity = 1; status.hidden = true;
+    $('[data-a=download]').textContent = `download ${KINDS[kind] === 'image' ? 'PNG' : KINDS[kind]} · ${(b.size / 1e6).toFixed(1)} MB`;
+    $('[data-a=share]').hidden = !navigator.canShare?.({ files: [new File([b], name(), { type: b.type })] });
   }
   box.querySelectorAll('[data-f]').forEach(b => { b.onclick = () => { format = b.dataset.f; render(); }; });
+  box.querySelectorAll('[data-k]').forEach(b => { b.onclick = () => { kind = b.dataset.k; render(); }; });
   box.querySelectorAll('[data-o]').forEach(i => { i.onchange = render; });
   $('[data-a=download]').onclick = () => {
     if (!blob) return;
     const a = document.createElement('a');
-    a.href = img.src; a.download = `${filename}-${name()}.png`; a.click();
+    a.href = url; a.download = name(); a.click();
   };
   $('[data-a=copy]').onclick = async e => {
     try { await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]); flash(e.target, 'copied'); }
     catch { flash(e.target, "can't copy here"); }
   };
   $('[data-a=share]').onclick = async () => {
-    try { await navigator.share({ files: [new File([blob], `${filename}-${name()}.png`, { type: 'image/png' })], text: `${info.owner ? info.owner + '/' : ''}${info.repo} is built like ${info.phrase}`, url: link }); }
+    try { await navigator.share({ files: [new File([blob], name(), { type: blob.type })], text: `${info.owner ? info.owner + '/' : ''}${info.repo} is built like ${info.phrase}`, url: link }); }
     catch { /* cancelled */ }
   };
   $('[data-a=link]').onclick = async e => {

@@ -789,6 +789,7 @@ $('#share').onclick = async () => {
     link: shareLink,
     filename: `gitropolis-${owner ? owner + '-' : ''}${repo}`.replace(/[^\w.-]+/g, '-'),
     capture: captureCity,
+    stage: stageCity,
     info: {
       owner, repo,
       phrase: CITY_PHRASE[layout.kind] || layout.kind,
@@ -805,22 +806,35 @@ $('#share').onclick = async () => {
     },
   });
 };
-// the whole grown city, framed for a share card of artW × artH art pixels, without disturbing the view
-function captureCity(artW, artH, bands) {
+// Share cards and films: the city framed for artW × artH art pixels, rendered off screen. While a
+// stage is up the live view holds still; ending it puts the camera, the timeline and the flashes back.
+let staged = false;
+function stageCity(artW, artH, bands) {
   const keep = { l: camera.left, r: camera.right, zoom: camera.zoom, pos: camera.position.clone(), target: controls.target.clone(),
-    tl: shared.uTimeline.value, focus: shared.uFocus.value, hover: shared.uHover?.value, heat: heat.slice() };
+    tl: shared.uTimeline.value, focus: shared.uFocus.value, hover: shared.uHover?.value, heat: heat.slice(), playing };
+  staged = true; playing = false;
   camera.left = -ISO_H * artW / artH; camera.right = -camera.left;
   const fit = fitFrame(artW / artH, bands);
   aimPixel(fit.center, fit.zoom);
-  shared.uTimeline.value = 1; shared.uFocus.value = -1; if (shared.uHover) shared.uHover.value = -1;
-  heat.fill(0); buildings.geometry.attributes.aHeat.needsUpdate = true;
-  const img = pix.capture(artW, artH);
-  camera.left = keep.l; camera.right = keep.r; camera.zoom = keep.zoom; camera.updateProjectionMatrix();
-  camera.position.copy(keep.pos); controls.target.copy(keep.target); camera.lookAt(keep.target);
-  shared.uTimeline.value = keep.tl; shared.uFocus.value = keep.focus; if (shared.uHover) shared.uHover.value = keep.hover;
-  heat.set(keep.heat); buildings.geometry.attributes.aHeat.needsUpdate = true;
-  return img;
+  shared.uFocus.value = -1; if (shared.uHover) shared.uHover.value = -1;
+  const calm = () => { heat.fill(0); buildings.geometry.attributes.aHeat.needsUpdate = true; };
+  return {
+    // the finished city, no commit flashes
+    still() { setTimeline(1); calm(); return pix.capture(artW, artH); },
+    // a film: rewind, then each frame moves the history on to u (0..1) and lets dt seconds pass
+    rewind(seconds) { setTimeline(0); calm(); setFlashSeconds(seconds); },
+    frame(u, dt) { moveTimeline(u); tick(dt); return { img: pix.capture(artW, artH), date: fmtDate(data.start + u * span) }; },
+    end() {
+      camera.left = keep.l; camera.right = keep.r; camera.zoom = keep.zoom; camera.updateProjectionMatrix();
+      camera.position.copy(keep.pos); controls.target.copy(keep.target); camera.lookAt(keep.target);
+      setTimeline(keep.tl); shared.uFocus.value = keep.focus; if (shared.uHover) shared.uHover.value = keep.hover;
+      heat.set(keep.heat); buildings.geometry.attributes.aHeat.needsUpdate = true;
+      setFlashSeconds(INTRO_SECONDS / speed);
+      playing = keep.playing; staged = false; syncPlay();
+    },
+  };
 }
+const captureCity = (artW, artH, bands) => { const st = stageCity(artW, artH, bands); try { return st.still(); } finally { st.end(); } };
 
 function setTimeline(v) {
   shared.uTimeline.value = v;
@@ -961,6 +975,7 @@ if (!REC) {
   const clock = new THREE.Clock();
   renderer.setAnimationLoop(() => {
     const dt = Math.min(clock.getDelta(), 0.1);
+    if (staged) return; // a share film is being shot: hold the live view
     advance(dt);
     tick(dt);
     drawTrack();
