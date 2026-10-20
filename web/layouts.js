@@ -16,6 +16,12 @@ const circlePoly = (cx, cz, r, n = 40) => Array.from({ length: n }, (_, k) => {
   return [cx + Math.cos(t) * r, cz + Math.sin(t) * r];
 });
 
+// "packages/react-query-devtools" → "react-query-devtools"; very long names are cut
+function shortLabel(t) {
+  const s = t.replace(/^(packages|apps|libs|crates|modules|plugins|services|projects)\//, '');
+  return s.length > 22 ? s.slice(0, 21) + '…' : s;
+}
+
 export const CITY_KINDS = ['smalltown', 'manhattan', 'hongkong', 'tokyo', 'la', 'paris', 'venice', 'barcelona'];
 
 // ---------------------------------------------------------------- shared helpers
@@ -164,7 +170,6 @@ const PLANNERS = {
     const stations = new Set(ranked.slice(0, Math.max(1, Math.round(ranked.length * 0.015))).filter(i => ctx.inDeg[i] > 0));
     return {
       lots, blocks, labels, land: [rectPoly(-0.6, -0.6, W + 0.6, W + 0.6)],
-      rail: { stations: 10, closed: true, h: 1.55 },
       camera: { az: 35, el: 24, dist: 0.72 },
       height: (i, rel) => Math.min(0.32 + 0.95 * Math.sqrt(rel), 5) * (stations.has(i) ? 2.6 : 1),
     };
@@ -372,11 +377,22 @@ const PLANNERS = {
     const SIDE = S - 2 * CH * 0.75;
     const cap = SIDE * 4 * RD * 0.95;
     // one directory per block where possible: Cerdà would approve
+    // a directory big enough fills its own block (Cerdà would approve); small neighbouring directories
+    // share one, so a small repo isn't a grid of near-empty blocks
     const groups = [];
     for (const d of ds) {
       const byDir = new Map();
       for (const it of d.items) if (it.i !== ctx.hub) { const key = d.name + '/' + it.dir; if (!byDir.has(key)) byDir.set(key, []); byDir.get(key).push(it); }
-      for (const items of byDir.values()) for (const c of chunk(items, cap)) groups.push({ d, items: c });
+      let cur = [], used = 0;
+      const flush = () => { if (cur.length) groups.push({ d, items: cur }); cur = []; used = 0; };
+      for (const items of byDir.values()) {
+        const tot = sum(items.map(it => it.a));
+        if (tot >= cap * 0.6) { flush(); for (const c of chunk(items, cap)) groups.push({ d, items: c }); continue; }
+        if (used + tot > cap) flush();
+        cur.push(...items);
+        used += tot;
+      }
+      flush();
     }
     const K = groups.length + 1;
     const C = Math.ceil(Math.sqrt(K)), R = Math.ceil(K / C);
@@ -411,7 +427,6 @@ const PLANNERS = {
     const W = C * (S + ST), H = R * (S + ST);
     return {
       lots, blocks, labels, land: [rectPoly(-ST, -ST, W, H)],
-      rail: { stations: 6, closed: false, h: 2.3 },
       camera: { az: 45, el: 46, dist: 0.85 },
       height: (i, rel) => i === ctx.hub ? 9 : 1.45 + 0.2 * Math.tanh(Math.log(rel)),
     };
@@ -503,6 +518,7 @@ export function buildLayout(kind, { files, inDeg, SIZE, frontAz }) {
   const ctx = { files, inDeg, area, hub };
   const ds = districtsOf(files, area);
   const L = PLANNERS[kind](ds, ctx);
+  const areaOf = new Map(ds.map(d => [d.name, d.area]));
 
   // normalise into a SIZE-wide square centred on the origin
   const pts = [];
@@ -554,6 +570,7 @@ export function buildLayout(kind, { files, inDeg, SIZE, frontAz }) {
     bridges: (L.bridges || []).map(b => ({ a: P(b.a), b: P(b.b), w: b.w * s })),
     roads: (L.roads || []).map(r => ({ a: P(r.a), b: P(r.b), w: r.w * s })),
     hills: (L.hills || []).map(h => ({ x: (h.x - mx) * s, z: (h.z - mz) * s, r: h.r * s, h: h.h * s })),
-    labels: L.labels.map(l => ({ text: l.text, x: (l.x - mx) * s, z: (l.z - mz) * s })),
+    labels: L.labels.map(l => ({ text: shortLabel(l.text), weight: areaOf.get(l.text.replace(' (downtown)', '')) || 0, x: (l.x - mx) * s, z: (l.z - mz) * s }))
+      .sort((a, b) => b.weight - a.weight),
   };
 }

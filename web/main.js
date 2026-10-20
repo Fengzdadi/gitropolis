@@ -649,16 +649,31 @@ const labelEls = labelSource.map(n => {
   return { el, n, p };
 });
 const tmp = new THREE.Vector3();
+// labels arrive biggest district first; each is shown only if it doesn't collide with one already placed
+function placeLabels(boxes, reserved = []) {
+  const placed = [...reserved];
+  return boxes.map(b => {
+    if (!b) return false;
+    const hit = placed.some(o => Math.abs(b.x - o.x) * 2 < b.w + o.w + 8 && Math.abs(b.y - o.y) * 2 < b.h + o.h + 4);
+    if (!hit) placed.push(b);
+    return !hit;
+  });
+}
 function updateLabels() {
-  for (const { el, n, p } of labelEls) {
+  const boxes = labelEls.map(({ el, n, p }) => {
     tmp.copy(p).project(camera);
-    const visible = tmp.z < 1 && shared.uTimeline.value >= n.born;
-    el.style.display = visible ? '' : 'none';
-    if (!visible) continue;
-    el.style.left = `${(tmp.x * 0.5 + 0.5) * innerWidth}px`;
-    el.style.top = `${(-tmp.y * 0.5 + 0.5) * innerHeight}px`;
+    if (tmp.z >= 1 || shared.uTimeline.value < n.born) return null;
+    el.w ??= el.offsetWidth || n.data.name.length * 7;
+    return { x: (tmp.x * 0.5 + 0.5) * innerWidth, y: (-tmp.y * 0.5 + 0.5) * innerHeight, w: el.w, h: 16 };
+  });
+  const show = placeLabels(boxes);
+  labelEls.forEach(({ el, p }, k) => {
+    el.style.display = show[k] ? '' : 'none';
+    if (!show[k]) return;
+    el.style.left = `${boxes[k].x}px`;
+    el.style.top = `${boxes[k].y}px`;
     el.style.opacity = Math.max(0.15, Math.min(1, 1.6 - camera.position.distanceTo(p) / SIZE));
-  }
+  });
 }
 
 // ------------------------------------------------------------ hover + focus
@@ -848,12 +863,17 @@ async function record() {
     g.textAlign = 'center'; g.textBaseline = 'middle';
     g.font = `${ST.labelCase === 'upper' ? 500 : 400} ${Math.round((ST.labelCase === 'upper' ? 13 : 19) * S)}px ${ST.labelCase === 'upper' ? 'Inter, sans-serif' : ST.font}`;
     g.letterSpacing = ST.labelCase === 'upper' ? `${Math.round(3 * S)}px` : '0px';
-    for (const { n, p } of labelEls) {
+    const fontPx = Math.round((ST.labelCase === 'upper' ? 13 : 19) * S);
+    const boxes = labelEls.map(({ n, p }) => {
       v.copy(p).project(camera);
-      if (v.z > 1 || Math.abs(v.x) > 0.95 || Math.abs(v.y) > 0.95) continue;
+      if (v.z > 1 || Math.abs(v.x) > 0.95 || Math.abs(v.y) > 0.95) return null;
       const txt = ST.labelCase === 'upper' ? n.data.name.toUpperCase() : n.data.name;
-      g.fillText(txt, (v.x * 0.5 + 0.5) * REC.w, (-v.y * 0.5 + 0.5) * REC.h);
-    }
+      return { txt, x: (v.x * 0.5 + 0.5) * REC.w, y: (-v.y * 0.5 + 0.5) * REC.h, w: g.measureText(txt).width, h: fontPx };
+    });
+    // keep clear of the title block (and the date in films)
+    const reserved = [{ x: pad + 260 * S, y: pad + 110 * S, w: 560 * S, h: 260 * S }];
+    if (!REC.still) reserved.push({ x: REC.w - pad - 150 * S, y: pad + 50 * S, w: 340 * S, h: 120 * S });
+    placeLabels(boxes, reserved).forEach((ok, k) => { if (ok) g.fillText(boxes[k].txt, boxes[k].x, boxes[k].y); });
     g.letterSpacing = '0px';
     if (!REC.still) {
       // films: the date and commit count tick along in the top-right corner
