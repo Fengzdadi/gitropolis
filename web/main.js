@@ -11,7 +11,7 @@ import { buildLayout, CITY_KINDS } from './layouts.js';
 import { createPixelPipeline } from './pixel.js';
 import { PERF, HEAP, timed } from './perf.js';
 import { startWaiting } from './waiting.js';
-import { openShareDialog } from './card.js';
+import { openShareDialog, drawCard } from './card.js';
 
 const params = new URLSearchParams(location.search);
 // when filming, any error on the page goes straight back to the CLI (rather than a silent 90s wait);
@@ -783,9 +783,13 @@ $('#share').onclick = async () => {
     setTimeout(() => { $('#share').textContent = 'share'; }, 1800);
     return;
   }
+  openShareDialog(shareInfo());
+};
+// what a share card or film says about this city
+function shareInfo() {
   const [owner, repo] = route ? [route[1], route[2]] : data.name.includes('/') ? data.name.split('/').slice(-2) : ['', data.name];
   const year = t => new Date(t * 1000).getFullYear();
-  openShareDialog({
+  return {
     link: shareLink,
     filename: `gitropolis-${owner ? owner + '-' : ''}${repo}`.replace(/[^\w.-]+/g, '-'),
     capture: captureCity,
@@ -804,8 +808,8 @@ $('#share').onclick = async () => {
       },
       url: shareLink.replace(/^https:\/\//, ''),
     },
-  });
-};
+  };
+}
 // Share cards and films: the city framed for artW × artH art pixels, rendered off screen. While a
 // stage is up the live view holds still; ending it puts the camera, the timeline and the flashes back.
 let staged = false;
@@ -1228,6 +1232,14 @@ async function record() {
   }
   await report('/done', String(total));
   progress.textContent = 'DONE — you can close this tab';
+}
+
+// ?card=og: the hosted site's link previews. A headless browser opens the city in this mode and
+// takes the finished landscape card from window.__card (a PNG data URL).
+if (params.get('card') === 'og' && pix && layout) {
+  drawCard('landscape', shareInfo().info, captureCity, { k: 2 })
+    .then(c => { window.__card = c.toDataURL('image/png'); })
+    .catch(err => { window.__card = `error: ${err?.message || err}`; });
 }
 
 // poke at the city from the console with ?debug
