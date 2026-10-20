@@ -22,7 +22,7 @@
 <div id="labels"></div>
 <script type="module">
 import * as THREE from 'three';
-import { buildingGeometry, FORMS, ERAS, ROOFS } from './buildings.js';
+import { buildingGeometry, BASE_FORMS, LANDMARKS, ERAS, ROOFS, STYLES } from './buildings.js';
 
 // One scene, one orthographic iso camera, every building laid out on a grid.
 const W = innerWidth, H = innerHeight;
@@ -42,18 +42,22 @@ const rows = [];
 const sizes = { // representative footprints per form: [w, d, h]
   slab: [8, 6, 14], tower: [7, 7, 34], setback: [10, 10, 38], podium: [12, 10, 30],
   house: [6, 5, 5], shed: [12, 8, 5.5], plant: [12, 8, 20], hall: [14, 10, 8], frame: [8, 8, 17],
+  cityhall: [14, 10, 16], courthouse: [13, 11, 15], clocktower: [5, 5, 28], port: [18, 12, 9],
+  airport: [20, 13, 10], ruin: [10, 8, 10], site: [11, 9, 13], mega: [18, 16, 46],
 };
+const Q = new URLSearchParams(location.search), only = Q.get('only'), show = g => !only || only.split(',').includes(g);
+const group = (g, fn) => { if (show(g)) fn(); };
 // rows 1-3: every form x era
-ERAS.forEach((era, r) => rows.push({
+group('base', () => ERAS.forEach((era, r) => rows.push({
   label: era,
-  items: FORMS.map((form, i) => ({ spec: { form, era, seed: 7 + r * 3 + i, w: sizes[form][0], d: sizes[form][1], h: sizes[form][2] }, name: form })),
-}));
+  items: BASE_FORMS.map((form, i) => ({ spec: { form, era, seed: 7 + r * 3 + i, w: sizes[form][0], d: sizes[form][1], h: sizes[form][2] }, name: form })),
+})));
 // row 4: roofs on a slab / row 5: props on a tower
-rows.push({ label: 'roofs', items: ROOFS.map((roof, i) => ({ spec: { form: 'slab', era: i % 2 ? 'old' : 'mid', roof, seed: 3 + i, w: 8, d: 7, h: 14 }, name: roof })) });
+group('base', () => rows.push({ label: 'roofs', items: ROOFS.map((roof, i) => ({ spec: { form: 'slab', era: i % 2 ? 'old' : 'mid', roof, seed: 3 + i, w: 8, d: 7, h: 14 }, name: roof })) }));
 const PROPS = ['spire', 'antenna', 'crane', 'tank', 'ac'];
-rows.push({ label: 'props', items: PROPS.map((p, i) => ({ spec: { form: 'slab', era: ['old', 'mid', 'new'][i % 3], seed: 11 + i, w: 8, d: 7, h: 16, props: { [p]: true } }, name: p })) });
+group('base', () => rows.push({ label: 'props', items: PROPS.map((p, i) => ({ spec: { form: 'slab', era: ['old', 'mid', 'new'][i % 3], seed: 11 + i, w: 8, d: 7, h: 16, props: { [p]: true } }, name: p })) }));
 // row 6: scale + seed variety (tiny, huge, tiers)
-rows.push({ label: 'misc', items: [
+group('base', () => rows.push({ label: 'misc', items: [
   { spec: { form: 'setback', era: 'old', tiers: 2, seed: 1, w: 10, d: 10, h: 30 }, name: 'setback x2' },
   { spec: { form: 'setback', era: 'mid', tiers: 4, seed: 2, w: 10, d: 10, h: 42 }, name: 'setback x4' },
   { spec: { form: 'tower', era: 'new', seed: 5, w: 6, d: 6, h: 44, props: { spire: true } }, name: 'tower+spire' },
@@ -63,8 +67,32 @@ rows.push({ label: 'misc', items: [
   { spec: { form: 'plant', era: 'old', seed: 4, w: 12, d: 10, h: 20 }, name: 'plant (seed 4)' },
   { spec: { form: 'frame', era: 'mid', seed: 6, w: 10, d: 8, h: 22, props: { crane: true } }, name: 'frame+crane' },
   { spec: { form: 'house', era: 'old', roof: 'hip', seed: 8, w: 6, d: 6, h: 5 }, name: 'house hip' },
-] });
+] }));
 
+// style vernacular: 3 styles per row, each over slab / tower / setback / house at era mid
+const SF = ['slab', 'tower', 'setback', 'house'], styleItem = (style, form, era, seed) => ({
+  spec: { form, era, style, seed, w: sizes[form][0], d: sizes[form][1], h: sizes[form][2] }, name: `${style} ${form}`,
+});
+group('styles', () => { for (let r = 0; r < STYLES.length; r += 3) rows.push({ label: 'styles', items: STYLES.slice(r, r + 3).flatMap((st, k) => SF.map((f, i) => styleItem(st, f, 'mid', 21 + r + k * 4 + i))) }); });
+// one style across the three eras
+group('eras', () => rows.push({ label: 'rust x era', items: ERAS.flatMap((era, k) => SF.map((f, i) => styleItem(Q.get('era_style') || 'rust', f, era, 41 + k * 4 + i))) }));
+// landmarks, then the same landmarks in other vernaculars
+group('landmarks', () => {
+  const lm = (form, style, extra = {}, seed = 5) => ({ spec: { form, style, era: 'mid', seed, w: sizes[form][0], d: sizes[form][1], h: sizes[form][2], ...extra }, name: `${form}${style ? ' ' + style : ''}${extra.crown ? ' ' + extra.crown : ''}` });
+  rows.push({ label: 'landmarks', items: LANDMARKS.map((f, i) => lm(f, undefined, {}, 5 + i)) });
+  rows.push({ label: 'landmarks (styled)', items: [
+    lm('cityhall', 'go', { crown: 'tower' }, 3), lm('cityhall', 'ruby', { crown: 'dome', era: 'old' }, 4), lm('courthouse', 'c', {}, 6), lm('clocktower', 'python', { era: 'old' }, 7),
+    lm('port', 'ts', {}, 8), lm('airport', 'go', {}, 9), lm('ruin', 'rust', {}, 10), lm('mega', 'cpp', {}, 11), lm('site', 'js', {}, 12),
+  ] });
+});
+
+// ?f=courthouse,port keeps only those forms; ?s=rust,go keeps only those styles (for close inspection)
+for (const [k, key] of [['f', 'form'], ['s', 'style']]) {
+  const v = Q.get(k); if (!v) continue;
+  const keep = v.split(',');
+  rows.forEach(r => { r.items = r.items.filter(it => keep.includes(it.spec[key] || 'default')); });
+  for (let i = rows.length - 1; i >= 0; i--) if (!rows[i].items.length) rows.splice(i, 1);
+}
 const cols = Math.max(...rows.map(r => r.items.length));
 const labels = document.getElementById('labels');
 const counts = [];
@@ -85,7 +113,7 @@ const tmp = new THREE.Vector3();
 rows.forEach((row, r) => row.items.forEach((it, c) => {
   const g = buildingGeometry(it.spec);
   const tris = g.attributes.position.count / 3;
-  counts.push({ name: `${it.spec.form}/${it.spec.era}`, tris });
+  counts.push({ name: `${it.spec.form}/${it.spec.style || 'default'}/${it.spec.era}`, tris });
   const m = new THREE.Mesh(g, mat);
   holder.add(m);
   ground.scale.set(it.spec.w * 1.35, it.spec.d * 1.35, 1);
@@ -114,6 +142,8 @@ rows.forEach((row, r) => row.items.forEach((it, c) => {
   labels.appendChild(s);
 }));
 const t = counts.map(c => c.tris);
+const pre = document.createElement('pre'); pre.id = 'stats'; pre.hidden = true;
+pre.textContent = counts.map(c => c.name + ' ' + c.tris).join('\n'); document.body.appendChild(pre);
 window.__stats = { min: Math.min(...t), max: Math.max(...t), mean: t.reduce((a, b) => a + b, 0) / t.length, counts };
 </script>
 </body>

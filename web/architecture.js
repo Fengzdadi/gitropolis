@@ -5,6 +5,9 @@ import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 
 const PERIPHERY = /(^|\/)(tests?|__tests__|specs?|e2e|fixtures?|samples?|examples?|docs?|playgrounds?|templates?|benchmarks?)(\/|$)/;
 const ROOF_BY_CITY = { paris: 'mansard', smalltown: 'gable', la: 'flat', venice: 'hip', barcelona: 'flat' };
+// each language builds in its own vernacular
+const STYLE_BY_LANG = { rs: 'rust', c: 'c', cpp: 'cpp', go: 'go', py: 'python', js: 'js', ts: 'ts', java: 'java', kt: 'java', rb: 'ruby', php: 'php', sh: 'shell' };
+const CODE = new Set(Object.keys(STYLE_BY_LANG));
 
 export function buildingSpecs({ files, B, inDeg, unit, kind, t01 }) {
   const N = files.length;
@@ -18,16 +21,34 @@ export function buildingSpecs({ files, B, inDeg, unit, kind, t01 }) {
   const cranes = top(recentChurn, 0.015, 5);
   const locs = files.map(f => f.loc).sort((a, b) => a - b), medLoc = locs[N >> 1] || 1;
   const maxIn = Math.max(...inDeg);
+  // the city's own vernacular (for manifests, docs and other non-code buildings): its biggest language
+  const byLang = {};
+  for (const f of files) if (CODE.has(f.lang)) byLang[f.lang] = (byLang[f.lang] || 0) + f.loc;
+  const mainLang = Object.keys(byLang).sort((a, b) => byLang[b] - byLang[a])[0];
+  const cityStyle = STYLE_BY_LANG[mainLang] || 'default';
+  // one airport per city: the biggest deploy file
+  // only a handful of the very newest source files are building sites, or the whole city is scaffolding
+  const sites = new Set([...files.keys()].filter(i => (files[i].s || []).includes('new') && (files[i].a?.r || 'source') === 'source')
+    .sort((a, b) => files[b].born - files[a].born).slice(0, Math.max(2, Math.round(N * 0.01))));
+  const deploys = [...files.keys()].filter(i => files[i].a?.r === 'deploy').sort((a, b) => files[b].loc - files[a].loc);
 
   return files.map((f, i) => {
     const b = B[i], a = f.a || {};
     let role = a.r || (f.lang === 'cfg' ? 'manifest' : 'source');
-    // only a project's own manifests are power plants; the hundreds inside fixtures are just sheds
-    if (role === 'manifest' && (PERIPHERY.test(f.p) || f.p.split('/').length > 3)) role = 'config';
+    const nested = PERIPHERY.test(f.p) || f.p.split('/').length > 3;
+    // only a project's (or a package's) own manifests and lockfiles are infrastructure; the hundreds inside fixtures are sheds
+    if ((role === 'manifest' || role === 'lock') && nested) role = 'config';
+    if ((role === 'readme' || role === 'license' || role === 'changelog') && nested) role = 'docs';
+    if (role === 'deploy' && i !== deploys[0]) role = 'build';
     const slender = b.h > 2.4 * Math.min(b.w, b.d);
     let form;
     switch (role) {
       case 'manifest': form = 'plant'; break;
+      case 'readme': form = 'cityhall'; break;
+      case 'license': form = 'courthouse'; break;
+      case 'changelog': form = 'clocktower'; break;
+      case 'lock': form = 'port'; break;
+      case 'deploy': form = 'airport'; break;
       case 'build': case 'config': form = 'shed'; break;
       case 'index': form = 'hall'; break;
       case 'types': form = 'frame'; break;
@@ -41,11 +62,20 @@ export function buildingSpecs({ files, B, inDeg, unit, kind, t01 }) {
     }
     // the city's landmark is always a tower, whatever kind of file it is
     const hub = inDeg[i] === maxIn && maxIn > 0;
-    if (hub) form = (a.c || 0) >= 2 ? 'setback' : 'tower';
+    const status = new Set(f.s || []);
+    if (status.has('giant') && role === 'source') form = 'mega';
+    else if (hub) form = (a.c || 0) >= 2 ? 'setback' : 'tower';
+    else if (status.has('dead')) form = 'ruin';
+    else if (sites.has(i)) form = 'site';
     const era = bornRank[i] < 0.34 ? 'old' : bornRank[i] < 0.67 ? 'mid' : 'new';
-    const h = form === 'house' ? Math.min(b.h, unit * 1.1) : form === 'shed' || form === 'hall' || form === 'plant' ? Math.min(b.h, unit * 1.4) : b.h;
+    const LOW = { house: 1.1, shed: 1.4, hall: 1.4, plant: 1.4, cityhall: 1.8, courthouse: 1.4, port: 0.6, airport: 0.9 };
+    let h = LOW[form] ? Math.min(b.h, unit * LOW[form]) : b.h;
+    if (form === 'clocktower') h = Math.max(b.h, unit * 2.6);
+    if (form === 'ruin') h *= 0.6;
+    if (form === 'site') h *= 0.35;
     return {
       w: b.w, d: b.d, h, form, era, seed: i * 7919 + 13,
+      style: STYLE_BY_LANG[f.lang] || cityStyle,
       tiers: Math.min(4, Math.max(2, a.c || 3)),
       roof: form === 'house' ? (ROOF_BY_CITY[kind] === 'mansard' ? 'mansard' : 'gable') : ROOF_BY_CITY[kind],
       props: { spire: spires.has(i) || hub, antenna: antennas.has(i) && !spires.has(i), crane: cranes.has(i), tank: kind === 'manhattan' && era !== 'new' && i % 5 === 0, ac: era === 'mid' && i % 3 === 0 },

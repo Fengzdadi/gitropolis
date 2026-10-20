@@ -1,6 +1,7 @@
 // Which city is this repo? Turn the scanned blueprint into a handful of metrics, score each
 // city archetype from them, and explain the winner in plain words. Same repo → same city.
 
+const NONCODE = new Set(['cfg', 'doc', 'lock']);
 const YEAR = 365.25 * 86400;
 const TEST_RE = /(^|\/)(tests?|__tests__|specs?|e2e|testing)(\/|$)|\.(test|spec)\.[a-z]+$|_test\.(go|py|rs)$|(^|\/)test_[^/]+\.py$/;
 const GROUP_RE = /^(packages|apps|libs|crates|modules|plugins|services|projects)\/[^/]+/;
@@ -15,8 +16,8 @@ const pct = x => `${Math.round(x * 100)}%`;
 
 export function cityMetrics(city, now = Date.now() / 1000) {
   const all = city.files;
-  // manifests / build files ('cfg') are buildings in the city but not part of the codebase being judged
-  const codeIdx = all.map((f, i) => f.lang === 'cfg' ? -1 : i).filter(i => i >= 0);
+  // manifests / build files / docs / lockfiles ('cfg', 'doc', 'lock') are buildings in the city but not part of the codebase being judged
+  const codeIdx = all.map((f, i) => NONCODE.has(f.lang) ? -1 : i).filter(i => i >= 0);
   const coreIdx = codeIdx.filter(i => !NONCORE_RE.test(all[i].p));
   // re-index imports onto the core subset (fall back to everything for tiny / test-only repos)
   const useCore = coreIdx.length >= 20;
@@ -102,7 +103,7 @@ export function cityMetrics(city, now = Date.now() / 1000) {
   const cfgOnly = codeIdx.length < all.length;
   const start = cfgOnly && codeIdx.length ? Math.min(...codeIdx.map(i => all[i].born)) : city.start;
   const end = cfgOnly && codeIdx.length ? Math.max(...codeIdx.map(i => all[i].last)) : city.end;
-  const commits = cfgOnly ? city.commits.filter(c => { for (let k = 1; k < c.length; k++) if (all[c[k]].lang !== 'cfg') return true; return false; }) : city.commits;
+  const commits = cfgOnly ? city.commits.filter(c => { for (let k = 1; k < c.length; k++) if (!NONCODE.has(all[c[k]].lang)) return true; return false; }) : city.commits;
   const span = Math.max(1, end - start);
   const recentWindow = 90 * 86400;
   const recentCommits = commits.filter(c => c[0] > end - recentWindow).length;

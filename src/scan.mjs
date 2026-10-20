@@ -5,7 +5,7 @@ import { readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
 import readline from 'node:readline';
 import { classify } from './classify.mjs';
-import { fileAnatomy } from './anatomy.mjs';
+import { fileAnatomy, docRole, LOCKFILE } from './anatomy.mjs';
 
 const LANGS = {
   js: 'js', jsx: 'js', mjs: 'js', cjs: 'js', ts: 'ts', tsx: 'ts', mts: 'ts', cts: 'ts',
@@ -15,10 +15,22 @@ const LANGS = {
   css: 'css', scss: 'css', less: 'css', html: 'html', sh: 'sh',
 };
 // non-code files that still matter in the city: dependency manifests and build/CI definitions
-const CFG_FILE = /(^|\/)(package\.json|Cargo\.toml|pyproject\.toml|setup\.cfg|go\.mod|Gemfile|pom\.xml|build\.gradle(\.kts)?|requirements[^/]*\.txt|Dockerfile[^/]*|Makefile|tsconfig[^/]*\.json)$|^\.github\/workflows\/[^/]+\.ya?ml$/;
+const CFG_FILE = /(^|\/)(package\.json|Cargo\.toml|pyproject\.toml|setup\.cfg|go\.mod|Gemfile|pom\.xml|build\.gradle(\.kts)?|requirements[^/]*\.txt|Dockerfile[^/]*|docker-compose[^/]*\.ya?ml|compose\.ya?ml|fly\.toml|vercel\.json|netlify\.toml|Procfile|Makefile|tsconfig[^/]*\.json)$|^\.github\/workflows\/[^/]+\.ya?ml$/;
 const SKIP_DIR = /(^|\/)(node_modules|vendor|third_party|deps|dist|build|out|\.next|target|__pycache__|\.git)\//;
 const SKIP_FILE = /(\.min\.(js|css)|\.bundle\.js|\.d\.ts)$/;
 const MAX_BYTES = 1_000_000;
+// buildings that are landmarks, not code: they never decide the city and never join the import graph
+const NONCODE = new Set(['cfg', 'doc', 'lock']);
+const DAY = 86400, YEAR = 365.25 * DAY;
+// only these languages get import edges, so only they can honestly be called "unimported"
+const LINKED = new Set(['js', 'ts', 'py', 'go', 'rs', 'c', 'cpp']);
+const ENTRY = /(^|\/)((main|index|cli|app|server)\.[^/]+|__main__\.py|mod\.rs|lib\.rs)$|(^|\/)(bin|cmd)\//;
+// not reached by imports on purpose: samples / fixtures / generated apps, framework file conventions, test setup
+const LOOSE = /(^|\/)(__\w*fixtures?__|fixtures?|examples?|templates?|integrations?|playgrounds?|e2e)\/|(^|\/)(layout|page|route|loading|error|middleware|test-setup|setup|conftest)\.[^/]+$/;
+const STR_REF = /['"`]([\w@.\/-]*[\w-]\.(?:[cm]?[jt]sx?|py|rs|go))['"`]/g; // 'x.cjs' passed as a string: loaders, workers, test harnesses
+const SRC_REF = /[\w@.\/-]+\.(?:[cm]?[jt]sx?|py|rs|go|c|h|cc|cpp|hpp|vue|svelte)\b/g;
+
+const stemOf = p => p.slice(p.lastIndexOf('/') + 1).replace(/\.[^.]*$/, '');
 
 function git(repo, args) {
   return execFileSync('git', ['-C', repo, ...args], { encoding: 'utf8', maxBuffer: 1 << 30 });
@@ -31,26 +43,36 @@ export async function scanRepo(repo, { maxCommits = 20000 } = {}) {
   const listed = git(root, ['ls-files', '-z']).split('\0').filter(Boolean);
 
   const files = [];
+  const refs = new Set();
   const index = new Map(); // path -> idx
   const hardwareFiles = listed.filter(p => /\.(v|sv|svh|vhd|vhdl)$/i.test(p)).length;
   for (const p of listed) {
     const ext = p.slice(p.lastIndexOf('.') + 1).toLowerCase();
-    const lang = CFG_FILE.test(p) ? 'cfg' : LANGS[ext];
+    const base = p.slice(p.lastIndexOf('/') + 1);
+    const lang = LOCKFILE.test(p) ? 'lock' : CFG_FILE.test(p) ? 'cfg' : docRole(base) ? 'doc' : LANGS[ext];
     if (!lang || SKIP_DIR.test(p) || SKIP_FILE.test(p)) continue;
-    let text;
+    let text, loc = 0;
     try {
       const full = path.join(root, p);
-      if (statSync(full).size > MAX_BYTES) continue;
-      text = readFileSync(full, 'utf8');
+      const size = statSync(full).size;
+      if (size > MAX_BYTES) {
+        // a huge lockfile is still a landmark: estimate its lines instead of reading it
+        if (lang !== 'lock') continue;
+        loc = Math.round(size / 40); text = '';
+      } else if (base === 'bun.lockb') { loc = Math.round(size / 40); text = ''; } // binary
+      else text = readFileSync(full, 'utf8');
     } catch { continue; }
-    let loc = 0;
-    for (const line of text.split('\n')) if (line.trim()) loc++;
+    // manifests, scripts and docs often name entry files (package.json exports, Makefile, README): keep their stems
+    // (stems, because exports point at built `x.js` while the source is `x.ts`)
+    if (text && (lang === 'cfg' || lang === 'doc')) for (const m of text.matchAll(SRC_REF)) refs.add(stemOf(m[0]));
+    else if (LINKED.has(lang) && text.includes('.')) for (const m of text.matchAll(STR_REF)) refs.add(stemOf(m[1]));
+    if (!loc) for (const line of text.split('\n')) if (line.trim()) loc++;
     if (!loc) continue;
     index.set(p, files.length);
     files.push({ p, lang, loc, a: fileAnatomy(p, text, lang), text, imp: new Set(), churn: 0, born: 0, last: 0 });
   }
 
-  resolveImports(root, files, index, listed);
+  const tails = resolveImports(root, files, index, listed);
 
   // ---- git history: one pass over `git log --numstat`, oldest first, following renames
   // so a file moved into src/ keeps the birthday of its original path.
@@ -94,6 +116,7 @@ export async function scanRepo(repo, { maxCommits = 20000 } = {}) {
   const end = touched.length ? touched[touched.length - 1].t : 0;
   for (const f of files) { if (!f.born) f.born = f.last = start; }
 
+  const status = fileStatus(files, start, end, tails, refs);
   const edges = files.reduce((n, f) => n + f.imp.size, 0);
   const city = {
     name: path.basename(root),
@@ -101,13 +124,44 @@ export async function scanRepo(repo, { maxCommits = 20000 } = {}) {
     scanMs: Date.now() - t0,
     start, end,
     stats: { files: files.length, loc: files.reduce((n, f) => n + f.loc, 0), edges, commits: touched.length },
-    files: files.map(f => ({ p: f.p, lang: f.lang, loc: f.loc, imp: [...f.imp], a: f.a, churn: f.churn, born: f.born, last: f.last })),
+    files: files.map(f => ({ p: f.p, lang: f.lang, loc: f.loc, imp: [...f.imp], a: f.a, churn: f.churn, born: f.born, last: f.last, ...(status.get(f) && { s: status.get(f) }) })),
     // compact: [time, fileIdx, fileIdx, ...]; skip giant sweeping commits (formatting, renames)
     commits: touched.filter(c => c.f.length < 200).map(c => [c.t, ...c.f]),
     extras: { hardwareFiles },
   };
   city.identity = classify(city);
   return city;
+}
+
+// Per-file status flags, once history is known. Each is deliberately conservative:
+// a wrong "dead" label on a living file is worse than a missed one.
+function fileStatus(files, start, end, tails, refs) {
+  const out = new Map();
+  const add = (f, s) => { if (!out.has(f)) out.set(f, []); out.get(f).push(s); };
+  const inDeg = new Array(files.length).fill(0);
+  for (const f of files) for (const j of f.imp) inDeg[j]++;
+  // go imports link a whole package (to its biggest file), so a package counts as used if any file in it is
+  const goUsed = new Set();
+  files.forEach((f, i) => { if (f.lang === 'go' && inDeg[i]) goUsed.add(path.posix.dirname(f.p)); });
+
+  const span = end - start, win = Math.max(span * 0.02, 21 * DAY);
+  const code = files.filter(f => !NONCODE.has(f.lang));
+  const locs = code.map(f => f.loc).sort((a, b) => a - b);
+  const giantMin = Math.max(2000, 8 * (locs[locs.length >> 1] || 0));
+  const giants = code.filter(f => f.loc >= giantMin).sort((a, b) => b.loc - a.loc).slice(0, Math.max(1, Math.floor(code.length * 0.01)));
+
+  files.forEach((f, i) => {
+    const base = f.p.slice(f.p.lastIndexOf('/') + 1);
+    const stem = base.replace(/\.[^.]*$/, '');
+    if (f.a.r === 'source' && LINKED.has(f.lang) && !inDeg[i] && !ENTRY.test(f.p) && !LOOSE.test(f.p) && !refs.has(stem)
+        && (f.lang !== 'c' && f.lang !== 'cpp' || f.p.endsWith('.h') || f.p.endsWith('.hpp')) // .c files are compiled, not included
+        && !(f.lang === 'go' && goUsed.has(path.posix.dirname(f.p)))
+        && !(tails.has(stem) || tails.has(path.posix.basename(path.posix.dirname(f.p)) + '/' + stem)) // aliased imports (`@/x/foo`) we could not resolve
+        && (f.imp.size || f.loc >= 30) && end - f.last > 2 * YEAR) add(f, 'dead');
+    if (end - f.born <= win) add(f, 'new');
+    if (giants.includes(f)) add(f, 'giant');
+  });
+  return out;
 }
 
 // numstat rename forms: "a.py => b.py" and "src/{old => new}/x.py" (either side of the braces may be empty)
@@ -153,10 +207,11 @@ function workspacePackages(root, listed) {
 function resolveImports(root, files, index, listed) {
   const ws = workspacePackages(root, listed);
   const jsNames = [...ws.js.keys()].sort((a, b) => b.length - a.length);
+  const tails = new Set(); // last segment of bare (aliased / unresolved) JS specifiers: proof something imports a file
   const addEdge = (f, target) => {
     const j = index.get(target);
     // manifests are buildings but never import targets (`import pkg from './package.json'`)
-    if (j !== undefined && files[j] !== f && files[j].lang !== 'cfg') f.imp.add(j);
+    if (j !== undefined && files[j] !== f && !NONCODE.has(files[j].lang)) f.imp.add(j);
   };
 
   // python module index: dotted path -> idx, also with a leading "src/" or package root stripped
@@ -190,7 +245,11 @@ function resolveImports(root, files, index, listed) {
         if (!spec.startsWith('.')) {
           // bare import of a sibling workspace package: pkg → its src/index, pkg/sub → src/sub or sub
           const name = jsNames.find(n => spec === n || spec.startsWith(n + '/'));
-          if (name === undefined) continue;
+          if (name === undefined) {
+            const segs = spec.replace(/\.[^./]*$/, '').split('/');
+            tails.add(segs[segs.length - 1]); tails.add(segs.slice(-2).join('/'));
+            continue;
+          }
           const dir = ws.js.get(name), sub = spec.slice(name.length + 1);
           const bases = sub ? [dir + 'src/' + sub, dir + sub] : [dir + 'src/index', dir + 'index', dir + 'src/main', dir + 'lib/index'];
           outer: for (const b of bases) for (const ext of JS_EXT) if (index.has(b + ext)) { addEdge(f, b + ext); break outer; }
@@ -280,4 +339,5 @@ function resolveImports(root, files, index, listed) {
     }
     f.text = null;
   }
+  return tails;
 }

@@ -96,7 +96,7 @@ for (const l of leaves) {
 // city planners (lit styles only): ?city=auto picks the repo's own archetype, ?city=classic keeps the treemap
 const CITY = params.get('city') || 'auto';
 const cityKind = NEON || CITY === 'classic' ? null : CITY === 'auto' ? data.identity?.city : CITY;
-const layout = cityKind && CITY_KINDS.includes(cityKind) ? buildLayout(cityKind, { files, inDeg, SIZE }) : null;
+const layout = cityKind && CITY_KINDS.includes(cityKind) ? buildLayout(cityKind, { files, inDeg, SIZE, frontAz: PIXEL ? 45 : undefined }) : null;
 if (layout) {
   unit = layout.unit;
   plateStep = unit * 0.06;

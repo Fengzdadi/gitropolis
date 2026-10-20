@@ -454,7 +454,46 @@ const PLANNERS = {
 };
 
 // ---------------------------------------------------------------- entry point
-export function buildLayout(kind, { files, inDeg, SIZE }) {
+// civic landmarks move to where they belong: the city hall faces the camera with the courthouse and
+// clock tower beside it; the port and the airport sit out at the edge. Each swaps lots with an
+// ordinary file of a similar size, so nobody ends up squeezed.
+function placeLandmarks(lots, files, inDeg, frontAz) {
+  const root = r => files.findIndex(f => f.a?.r === r && !f.p.includes('/'));
+  const hub = inDeg.indexOf(Math.max(...inDeg));
+  const marks = new Set([hub]);
+  const live = [...lots.keys()].filter(i => lots[i] && lots[i].w > 0.01);
+  if (live.length < 12) return;
+  const area = i => lots[i].w * lots[i].d;
+  const cx = live.reduce((s, i) => s + lots[i].x, 0) / live.length, cz = live.reduce((s, i) => s + lots[i].z, 0) / live.length;
+  const ext = Math.max(...live.map(i => Math.hypot(lots[i].x - cx, lots[i].z - cz)));
+  const dist = (i, [x, z]) => Math.hypot(lots[i].x - x, lots[i].z - z);
+  const pick = (i, score) => {
+    const cands = live.filter(j => !marks.has(j) && j !== i && area(j) <= area(i) * 2.5 && area(j) >= area(i) * 0.4);
+    if (!cands.length) return;
+    const j = cands.reduce((b, j) => score(j) < score(b) ? j : b);
+    [lots[i], lots[j]] = [lots[j], lots[i]];
+  };
+  const A = (frontAz ?? 45) * Math.PI / 180;
+  const front = [cx + Math.cos(A) * ext * 0.4, cz + Math.sin(A) * ext * 0.4];
+  const plan = [
+    ['readme', i => dist(i, front)],
+    ['license', i => dist(i, front) + 0.15 * ext],
+    ['changelog', i => dist(i, front) + 0.15 * ext],
+    ['lock', i => -dist(i, [cx, cz])],
+    ['deploy', i => -dist(i, [cx, cz]) - 0.5 * dist(i, front)],
+  ];
+  let anchor = front;
+  for (const [role, score] of plan) {
+    const i = root(role);
+    if (i < 0 || !lots[i] || marks.has(i)) continue;
+    const s = role === 'license' || role === 'changelog' ? (j => dist(j, anchor)) : score;
+    pick(i, s);
+    marks.add(i);
+    if (role === 'readme') anchor = [lots[i].x, lots[i].z];
+  }
+}
+
+export function buildLayout(kind, { files, inDeg, SIZE, frontAz }) {
   const N = files.length;
   const v = files.map(f => Math.sqrt(f.loc) + 3);
   const vs = [...v].sort((a, b) => a - b), medV = vs[N >> 1] || 1;
@@ -478,6 +517,7 @@ export function buildLayout(kind, { files, inDeg, SIZE }) {
   const P = ([x, z]) => [(x - mx) * s, (z - mz) * s];
   const lots = new Array(N);
   for (const l of L.lots) lots[l.i] = { x: (l.x - mx) * s, z: (l.z - mz) * s, w: l.w * s, d: l.d * s, rot: l.rot || 0 };
+  placeLandmarks(lots, files, inDeg, frontAz ?? L.camera?.az);
   const districtOf = L.districtOf || (() => null);
   const heights = files.map((f, i) => L.height(i, f.loc / medLoc, districtOf(i)) * s);
 

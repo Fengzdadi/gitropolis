@@ -25,9 +25,21 @@ export const PALETTE = {
   green:    ['#66a550', '#3f7d3e'],
   water:    ['#3f7ab4', '#86b9de'],
   ground:   ['#dccfa4', '#a6a28c', '#8aa569'],
+  // vernacular (spec.style) additions
+  corten:   ['#c0662c', '#8f4a26', '#5e3626', '#e0893a'], // weathering steel: orange, brown, heavily rusted, fresh bright
+  raw:      ['#9a978d'],                         // board-marked concrete
+  primary:  ['#3a5fa8'],                         // modernist blue / corporate blue
+  pop:      ['#d9739a', '#7b5ea7'],              // postmodern pink, purple
+  beige:    ['#d6c9a8', '#b3a583'],              // office-park beige, shadow beige
+  ruby:     ['#a3303f', '#74222f', '#efe2bd'],   // Victorian red brick, dark brick, cream stone
+  wood:     ['#b98b5a'],                         // plywood / timber additions
+  tin:      ['#7f948f'],                         // corrugated sheet
 };
 
-export const FORMS = ['slab', 'tower', 'setback', 'podium', 'house', 'shed', 'plant', 'hall', 'frame'];
+export const BASE_FORMS = ['slab', 'tower', 'setback', 'podium', 'house', 'shed', 'plant', 'hall', 'frame'];
+export const LANDMARKS = ['cityhall', 'courthouse', 'clocktower', 'port', 'airport', 'ruin', 'site', 'mega'];
+export const FORMS = [...BASE_FORMS, ...LANDMARKS];
+export const STYLES = ['rust', 'c', 'cpp', 'go', 'python', 'js', 'ts', 'java', 'ruby', 'php', 'shell', 'default'];
 export const ERAS = ['old', 'mid', 'new'];
 export const ROOFS = ['flat', 'gable', 'hip', 'mansard', 'spire', 'dome'];
 export const PARTS = { wall: 0, roof: 1, trim: 2, glass: 3, accent: 4, podium: 5 };
@@ -173,6 +185,10 @@ function makeStyle(spec, rng) {
     S.pitch = pick('metal', 1); S.slate = pick('metal', 1);
     S.spireC = pick('glass', 2); S.domeC = pick('glass', 3);
   }
+  S.win = pick('glass', 2);                       // default window colour
+  S.style = STYLES.includes(spec.style) ? spec.style : 'default';
+  S.nb = 1;                                       // blocks in this building (styled detail thins out as it grows)
+  if (S.style !== 'default') applyStyle(S, shade);
   return S;
 }
 
@@ -181,6 +197,7 @@ function makeStyle(spec, rng) {
 // usable top rect so roofs/props/upper tiers can sit on it.
 //   o: cx cz w d y0 y1, ground (base storey), wallPart/wallCol, top, fins
 function block(M, S, o) {
+  if (S.style !== 'default') return styleBlock(M, S, o);
   const { cx, cz, w, d, y0, y1 } = o;
   const x0 = cx - w / 2, x1 = cx + w / 2, z0 = cz - d / 2, z1 = cz + d / 2;
   const u = Math.min(w, d), H = y1 - y0, e = u * 0.05;
@@ -254,6 +271,415 @@ function block(M, S, o) {
     }
   }
   return out;
+}
+
+// ------------------------------------------------------------ vernacular (spec.style)
+// Style = the regional language of a building: materials, roof preference and a
+// couple of ornaments. It never changes the form; era still decides how old and
+// weathered the materials are (each style defines an old / mid / new variant).
+function applyStyle(S, shade) {
+  const R = S.pick, o = S.era === 'old' ? 0 : S.era === 'mid' ? 1 : 2, by = (...a) => a[o];
+  const set = (wall, trim, base, flat, pitch, slate) => {
+    S.wall = shade(wall); S.trim = trim; S.base = base; S.ground = base; S.solid = S.wall;
+    S.flat = flat; S.pitch = pitch; S.slate = slate;
+  };
+  S.win = S.dark;
+  switch (S.style) {
+    case 'rust':
+      set(by(R('corten', 2), R('corten', 0), R('corten', 3)), by(R('metal', 1), R('metal', 1), S.dark),
+        R('metal', 1), R('metal', 1), R('corten', 1), R('corten', 2));
+      S.spireC = R('metal', 1); S.domeC = R('corten', 1); S.steel = R('metal', 1);
+      break;
+    case 'c': case 'cpp':
+      set(by(R('concrete', 2), R('raw', 0), R('concrete', 1)), by(R('raw', 0), R('concrete', 0), R('concrete', 3)),
+        R('concrete', 2), R('concrete', 1), R('concrete', 2), R('concrete', 2));
+      S.spireC = S.domeC = R('concrete', 1);
+      break;
+    case 'go':
+      set(by(R('concrete', 3), S.white, S.white), by(R('concrete', 2), R('concrete', 2), R('metal', 1)),
+        R('concrete', 2), R('concrete', 0), R('metal', 1), R('metal', 1));
+      S.accent = [R('accent', 1), R('accent', 0), R('primary', 0)][Math.floor(S.rng() * 3)]; // one primary colour
+      S.win = by(R('glass', 2), R('glass', 2), R('glass', 1));
+      S.spireC = S.domeC = R('metal', 1);
+      break;
+    case 'python':
+      set(by(R('brick', 1), R('brick', 0), R('brick', 0)), S.white, by(R('stone', 2), R('stone', 2), R('concrete', 2)),
+        R('concrete', 2), R('roof', 0), R('roof', 2));
+      S.win = by(S.dark, R('glass', 2), R('glass', 2));
+      break;
+    case 'js': {
+      const pools = [
+        [R('brick', 2), R('roof', 3), R('accent', 0), R('stone', 0)],
+        [R('pop', 0), R('accent', 0), R('roof', 3), R('accent', 1), R('pop', 1)],
+        [R('pop', 0), R('glass', 0), R('accent', 0), R('pop', 1), R('roof', 3), S.white],
+      ];
+      S.pool = pools[o];
+      const pk = () => S.pool[Math.floor(S.rng() * S.pool.length)];
+      set(pk(), pk(), by(R('stone', 2), R('concrete', 2), R('metal', 1)), R('concrete', 1), pk(), R('roof', 2));
+      S.js0 = 0; S.win = S.dark;
+      break;
+    }
+    case 'ts':
+      set(by(R('concrete', 2), R('glass', 1), R('glass', 0)), by(R('concrete', 1), R('metal', 2), S.white),
+        R('metal', 1), R('metal', 0), R('metal', 1), R('metal', 1));
+      S.win = R('glass', by(1, 1, 0)); S.spireC = R('glass', 2); S.domeC = R('glass', 3);
+      break;
+    case 'java':
+      set(by(R('beige', 1), R('beige', 0), R('beige', 0)), by(R('stone', 2), R('beige', 1), R('concrete', 3)),
+        R('beige', 1), R('concrete', 2), R('roof', 1), R('roof', 2));
+      S.win = R('glass', by(2, 2, 1));
+      break;
+    case 'ruby':
+      set(by(R('ruby', 1), R('ruby', 0), R('ruby', 0)), R('ruby', 2), by(R('stone', 1), R('ruby', 2), R('ruby', 2)),
+        R('concrete', 2), R('roof', 2), R('roof', 2));
+      S.spireC = R('roof', 2); S.domeC = R('roof', 3);
+      break;
+    case 'php': {
+      S.pool = [R('wood'), R('tin'), R('beige', 0), S.white, R('pop', 0), R('green', 0), R('accent', 0)];
+      set(by(R('wood'), R('beige', 0), R('tin')), R('stone', 0), R('stone', 2), R('metal', 0), R('roof', 1), R('roof', 2));
+      break;
+    }
+    case 'shell':
+      set(by(R('metal', 1), R('tin'), R('metal', 2)), by(R('metal', 0), R('metal', 2), S.white),
+        R('concrete', 2), R('metal', 1), R('metal', 1), R('metal', 1));
+      S.win = R('glass', 0);
+      break;
+  }
+}
+
+const STYLE_ROOF = {
+  rust: { _: 'flat', house: 'gable' }, c: { _: 'flat' }, cpp: { _: 'flat' }, go: { _: 'flat' },
+  python: { _: 'flat', house: 'gable' }, js: { _: 'flat', house: 'hip' }, ts: { _: 'flat' },
+  java: { _: 'flat', house: 'hip' }, ruby: { _: 'mansard', house: 'gable', shed: 'flat', plant: 'flat', frame: 'flat', hall: 'default' },
+  php: { _: 'flat', house: 'gable' }, shell: { _: 'flat', house: 'gable', slab: 'gable' },
+};
+
+const eps = g => Math.max(g.u * 0.012, 0.004);
+const lo = (g, f) => f ? g.z0 : g.x0, hi = (g, f) => f ? g.z1 : g.x1;
+const rectG = (cx, cz, w, d) => ({ x0: cx - w / 2, x1: cx + w / 2, z0: cz - d / 2, z1: cz + d / 2, u: Math.min(w, d) });
+const floorsFor = (g, ya, yb, k, cap) => clamp(Math.round((yb - ya) / (g.u * k)), 1, cap);
+
+// Flat quad laid on a visible face. f=0: the +z face (a..b along x), f=1: the +x face (a..b along z).
+function put(M, g, f, a, b, ya, yb, off, part, col) {
+  if (f === 0) { const z = g.z1 + off; M.quad([a, ya, z], [b, ya, z], [b, yb, z], [a, yb, z], part, col); }
+  else { const x = g.x1 + off; M.quad([x, ya, b], [x, ya, a], [x, yb, a], [x, yb, b], part, col); }
+}
+// Box standing proud of a visible face (only the faces the camera can see).
+function ledge(M, g, f, a, b, ya, yb, out, side, top) {
+  if (f === 0) M.box(a, b, ya, yb, g.z1, g.z1 + out, side, top, ['nx', 'nz']);
+  else M.box(g.x1, g.x1 + out, ya, yb, a, b, side, top, ['nx', 'nz', 'pz']);
+}
+function band(M, g, ya, yb, out, side, top) {
+  ledge(M, g, 0, g.x0 - out, g.x1 + out, ya, yb, out, side, top);
+  ledge(M, g, 1, g.z0 - out, g.z1, ya, yb, out, side, top);
+}
+// Grid / ribbon of flat window quads on both visible faces.
+function windows(M, g, W) {
+  const n = W.n, fh = (W.yb - W.ya) / n, off = W.off ?? eps(g);
+  for (let f = 0; f < 2; f++) {
+    const a0 = lo(g, f), span = hi(g, f) - a0;
+    const nc = W.ribbon ? 1 : clamp(Math.round(span / W.bay), 1, W.maxC || 4), bw = span / nc;
+    for (let j = W.from || 0; j < n; j++) {
+      const ya = W.ya + j * fh + fh * (W.y0 ?? (1 - W.wh) / 2), yb = ya + fh * W.wh;
+      for (let i = 0; i < nc; i++) {
+        const ww = (W.ribbon ? W.rib : W.ww) * bw, c = a0 + bw * (i + 0.5);
+        if (W.frame) {
+          const px = ww * W.frame[1], py = fh * W.frame[1] * 0.6;
+          put(M, g, f, c - ww / 2 - px, c + ww / 2 + px, ya - py, yb + py, off * 0.5, TRIM, W.frame[0]);
+        }
+        put(M, g, f, c - ww / 2, c + ww / 2, ya, yb, off, W.part ?? GLASS, W.colFn ? W.colFn(i, j, f) : W.col);
+      }
+    }
+  }
+}
+// Stack of shrinking brick bands standing on a wall top: the stepped gable.
+function steppedGable(M, cx, zf, W, y0, H, thick, wallC, trimC, n = 4) {
+  const sh = H / n;
+  for (let i = 0; i < n; i++) {
+    const hw = W / 2 * (1 - i / n * 0.8);
+    M.box(cx - hw, cx + hw, y0 + i * sh, y0 + (i + 1) * sh, zf - thick, zf, [WALL, wallC], [TRIM, trimC], ['nx', 'nz']);
+  }
+}
+
+const plinth = (M, g, hh, ext, side, top) => {
+  if (g.grounded && hh > 0) M.box(g.x0 - ext, g.x1 + ext, g.y0, g.y0 + hh, g.z0 - ext, g.z1 + ext, side, top);
+};
+const walls = (M, g, ya, yb, wall) => M.box(g.x0, g.x1, ya, yb, g.z0, g.z1, [g.wallPart ?? wall[0], g.wallCol ?? wall[1]], null, ['top']);
+const capSlab = (M, g, ya, yb, ext, side, top) => M.box(g.x0 - ext, g.x1 + ext, ya, yb, g.z0 - ext, g.z1 + ext, side, top);
+const done = (g, y, ex, extra) => ({ cx: g.cx, cz: g.cz, w: g.w, d: g.d, y, ex: ex || 0, flat: true, ...extra });
+
+const STY = {};
+
+// weathering-steel industrial: exposed girder frame, small dark openings, rust patches when old
+STY.rust = (M, S, g) => {
+  const { y0, H, u, e } = g, lod = S.nb, hs = g.last ? Math.min(u * 0.4, H * 0.16) : 0, Y1 = g.y1 - hs;
+  const gh = g.grounded ? Math.min(H * 0.09, u * 0.28) : 0, lip = Math.min(u * 0.08, H * 0.07);
+  const steel = [TRIM, S.trim], ya = y0 + gh, yb = Y1 - lip, t = Math.max(u * 0.055, 1e-3), out = e * 0.9;
+  plinth(M, g, gh, e * 0.8, [POD, S.base], steel);
+  walls(M, g, ya, yb, [WALL, S.wall]);
+  capSlab(M, g, yb, Y1, e * 0.8, steel, [ROOF, S.flat]);
+  const n = floorsFor(g, ya, yb, 0.6, lod > 1 ? 3 : 4), fh = (yb - ya) / n;
+  if (S.era === 'old' && lod === 1) { // rust blotches
+    const pc = S.pick('corten', 1);
+    for (let f = 0; f < 2; f++) for (let k = 0; k < 2; k++) {
+      const a = lo(g, f) + (hi(g, f) - lo(g, f)) * (0.1 + S.rng() * 0.6), ww = u * (0.12 + S.rng() * 0.2);
+      const ys = ya + (yb - ya) * S.rng() * 0.6;
+      put(M, g, f, a, a + ww, ys, ys + (yb - ya) * (0.15 + S.rng() * 0.25), eps(g) * 0.4, WALL, pc);
+    }
+  }
+  windows(M, g, { ya, yb, n, bay: u * 0.55, maxC: 3, ww: 0.3, wh: 0.28, col: S.win, part: GLASS });
+  for (let f = 0; f < 2; f++) { // exposed columns
+    const a0 = lo(g, f), span = hi(g, f) - a0, nc = clamp(Math.round(span / (u * 0.55)), 1, lod > 1 ? 2 : 3);
+    for (let k = 0; k <= nc; k++) {
+      if (f && k === nc) continue;
+      const a = clamp(a0 + span * k / nc, a0 + t / 2, a0 + span - t / 2);
+      ledge(M, g, f, a - t / 2, a + t / 2, ya, yb, out, steel, steel);
+    }
+  }
+  for (let j = 1; j < n; j++) band(M, g, ya + j * fh - t * 0.4, ya + j * fh + t * 0.4, out * 1.2, steel, steel); // girders
+  if (g.last) { // flue stack
+    const r = u * 0.055;
+    M.loft(g.x0 + u * 0.17, g.z0 + u * 0.17, [[Y1, r, r], [Y1 + hs, r * 0.85, r * 0.85]], 5, [TRIM, S.steel], { cap: [TRIM, S.dark] });
+  }
+  return done(g, Y1, e * 0.8);
+};
+
+// brutalist concrete: chunky slabs, deep dark recesses; cpp = the same family, busier
+function brutal(M, S, g, busy) {
+  const { y0, H, u, e } = g, lod = S.nb, hs = g.last ? Math.min(u * 0.22, H * 0.1) : 0, Y1 = g.y1 - hs;
+  const gh = g.grounded ? Math.min(H * 0.13, u * 0.4) : 0, ts = Math.min(u * 0.16, H * 0.11), oh = e * 2, sl = [TRIM, S.trim];
+  const ya = y0 + gh, yb = Y1 - ts;
+  plinth(M, g, gh, e * 1.4, [POD, S.base], sl);
+  if (busy && gh > 0) M.box(g.x0 - e * 2.4, g.x1 + e * 2.4, y0, y0 + gh * 0.4, g.z0 - e * 2.4, g.z1 + e * 2.4, [POD, S.base], sl);
+  walls(M, g, ya, yb, [WALL, S.wall]);
+  capSlab(M, g, yb, Y1, oh, sl, [ROOF, S.flat]);
+  if (busy) { // second, inset crown slab: layered
+    M.box(g.x0 + e, g.x1 - e, Y1, Y1 + ts * 0.5, g.z0 + e, g.z1 - e, [WALL, S.wall], [ROOF, S.flat]);
+  }
+  const n = floorsFor(g, ya, yb, 0.62, lod > 1 ? 3 : 4), fh = (yb - ya) / n, st = Math.min(fh * 0.16, u * 0.07);
+  for (let j = 1; j < n; j++) band(M, g, ya + j * fh - st / 2, ya + j * fh + st / 2, e * 1.5, sl, sl);
+  windows(M, g, { ya, yb, n, bay: u * 0.5, maxC: 3, ww: 0.5, wh: 0.5, y0: 0.14, col: S.win, part: GLASS });
+  if (busy && lod === 1 && n > 1) { // protruding boxes, each with a blue-glazed face
+    const blue = S.pick('primary', 0), cream = S.pick('concrete', 3);
+    for (let f = 0; f < 2; f++) {
+      const a0 = lo(g, f), span = hi(g, f) - a0, bw = span * 0.28, a = a0 + span * (f ? 0.18 : 0.58), j = f ? 1 : 2;
+      const yy = ya + clamp(j, 1, n - 1) * fh + st, out = u * 0.14;
+      ledge(M, g, f, a, a + bw, yy, yy + fh * 0.72, out, [TRIM, cream], [TRIM, cream]);
+      put(M, f ? { ...g, x1: g.x1 + out } : { ...g, z1: g.z1 + out }, f, a + bw * 0.12, a + bw * 0.88, yy + fh * 0.12, yy + fh * 0.6, eps(g), GLASS, blue);
+    }
+  }
+  if (g.last) { // mechanical penthouse
+    const bw = g.w * 0.42, bd = g.d * 0.4, bx = g.cx - g.w * 0.12, bz = g.cz - g.d * 0.1;
+    M.box(bx - bw / 2, bx + bw / 2, Y1, Y1 + hs * 0.65, bz - bd / 2, bz + bd / 2, [WALL, S.wall], [ROOF, S.flat]);
+    if (busy) M.box(bx - bw * 0.22, bx + bw * 0.22, Y1 + hs * 0.65, Y1 + hs, bz - bd * 0.22, bz + bd * 0.22, [TRIM, S.trim], [ROOF, S.flat]);
+  }
+  return done(g, Y1, oh);
+}
+STY.c = (M, S, g) => brutal(M, S, g, false);
+STY.cpp = (M, S, g) => brutal(M, S, g, true);
+
+// Bauhaus: white boxes, thin flat slab roofs, ribbon windows, one primary-colour stair tower
+STY.go = (M, S, g) => {
+  const { y0, H, u, e } = g, lod = S.nb;
+  const gh = g.grounded ? Math.min(H * 0.05, u * 0.12) : 0, ts = Math.min(u * 0.05, H * 0.04), oh = e * 1.3;
+  if (gh > 0) M.box(g.x0 + e, g.x1 - e, y0, y0 + gh, g.z0 + e, g.z1 - e, [POD, S.base], [TRIM, S.base]);
+  const ya = y0 + gh, yb = g.y1 - ts;
+  walls(M, g, ya, yb, [WALL, S.wall]);
+  capSlab(M, g, yb, g.y1, oh, [TRIM, S.white], [ROOF, S.flat]);
+  const n = floorsFor(g, ya, yb, 0.5, 8);
+  windows(M, g, { ya, yb, n, ribbon: true, rib: 0.86, wh: 0.44, col: S.win, part: GLASS });
+  if (g.last) {
+    const sw = Math.min(g.w * 0.15, u * 0.2), ax = g.x0 + g.w * 0.12, out = e * 2.2;
+    ledge(M, g, 0, ax, ax + sw, ya, g.y1, out, [ACC, S.accent], [ACC, S.accent]);
+    put(M, { ...g, z1: g.z1 + out }, 0, ax + sw * 0.28, ax + sw * 0.72, ya + (yb - ya) * 0.06, yb - (yb - ya) * 0.04, eps(g), GLASS, S.win);
+  }
+  return done(g, g.y1, oh);
+};
+
+// Dutch canal house: brick, white-framed tall windows, stepped gable with a hoist beam
+STY.python = (M, S, g) => {
+  const { y0, H, u, e } = g, lod = S.nb, gab = g.last ? Math.min(u * 0.42, H * 0.2) : 0, Yt = g.y1 - gab;
+  const gh = g.grounded ? Math.min(H * 0.06, u * 0.15) : 0, ch = Math.min(u * 0.09, H * 0.05), wt = [TRIM, S.trim];
+  const ya = y0 + gh, yb = Yt - ch;
+  plinth(M, g, gh, e * 0.5, [POD, S.base], wt);
+  walls(M, g, ya, yb, [WALL, S.wall]);
+  capSlab(M, g, yb, Yt, e * 1.1, wt, [ROOF, S.flat]);
+  const n = floorsFor(g, ya, yb, 0.62, lod > 1 ? 3 : 3);
+  windows(M, g, { ya, yb, n, bay: u * 0.38, maxC: 2, ww: 0.4, wh: 0.62, col: S.win, part: GLASS, frame: [S.trim, 0.24] });
+  if (lod === 1 && n > 1) band(M, g, ya + (yb - ya) * 0.5 - e * 0.25, ya + (yb - ya) * 0.5 + e * 0.25, e * 0.5, wt, wt);
+  if (g.last) {
+    const zf = g.z1 + e * 1.1;
+    steppedGable(M, g.cx, zf, g.w * 0.9, Yt, gab, e * 1.6, S.wall, S.trim);
+    M.box(g.cx - e * 0.35, g.cx + e * 0.35, Yt + gab - e * 1.2, Yt + gab - e * 0.4, zf, zf + e * 3, wt, wt); // hoist beam
+  }
+  return done(g, Yt, e * 1.1);
+};
+
+// postmodern eclectic: every block its own colours, playful bay, rooftop signboard
+STY.js = (M, S, g) => {
+  const { y0, H, u, e } = g, lod = S.nb, pool = S.pool, rng = S.rng, pk = () => pool[Math.floor(rng() * pool.length)];
+  const wallC = S.js0++ === 0 ? S.wall : pk(), trimC = pk(), capC = pk(), sg = g.last ? Math.min(u * 0.34, H * 0.2) : 0, Y1 = g.y1 - sg;
+  const gh = g.grounded ? Math.min(H * 0.08, u * 0.22) : 0, ch = Math.min(u * 0.1, H * 0.06);
+  const ya = y0 + gh, yb = Y1 - ch;
+  plinth(M, g, gh, e * 0.8, [POD, pk()], [TRIM, trimC]);
+  walls(M, g, ya, yb, [WALL, wallC]);
+  capSlab(M, g, yb, Y1, e * 1.4, [TRIM, capC], [ROOF, capC]);
+  const n = floorsFor(g, ya, yb, 0.55, lod > 1 ? 2 : 3), fh = (yb - ya) / n, wc = [S.win, S.white, pk(), S.win];
+  windows(M, g, { ya, yb, n, bay: u * 0.42, maxC: 3, ww: 0.3 + rng() * 0.25, wh: 0.3 + rng() * 0.25, colFn: () => wc[Math.floor(rng() * 4)], part: GLASS, frame: lod === 1 ? [trimC, 0.18] : null });
+  if (lod === 1 || g.last) { // mismatched bay
+    const f = rng() < 0.5 ? 0 : 1, a0 = lo(g, f), span = hi(g, f) - a0, bw = span * 0.3, a = a0 + span * (0.1 + rng() * 0.45), bc = pk();
+    const by = ya + (n > 1 ? fh : 0), bh = fh * 0.85, out = u * 0.12;
+    ledge(M, g, f, a, a + bw, by, by + bh, out, [WALL, bc], [ROOF, pk()]);
+    put(M, f ? { ...g, x1: g.x1 + out } : { ...g, z1: g.z1 + out }, f, a + bw * 0.2, a + bw * 0.8, by + bh * 0.25, by + bh * 0.75, eps(g), GLASS, S.win);
+  }
+  if (g.last) { // signboard on posts
+    const bw = g.w * 0.55, bx = g.cx + (rng() - 0.5) * g.w * 0.3, bz = g.cz - g.d * 0.05, post = sg * 0.28, bc = rng() < 0.5 ? S.accent : S.pick('pop', 0);
+    for (const sx of [-1, 1]) M.box(bx + sx * bw * 0.38 - e * 0.3, bx + sx * bw * 0.38 + e * 0.3, Y1, Y1 + post, bz - e * 0.3, bz + e * 0.3, [TRIM, S.steel], null, ['nx', 'nz', 'top']);
+    M.box(bx - bw / 2, bx + bw / 2, Y1 + post, g.y1, bz, bz + e * 0.9, [ACC, bc], [ACC, bc], ['nx', 'nz']);
+    const sy = Y1 + post + (g.y1 - Y1 - post) * 0.3, sh = (g.y1 - Y1 - post) * 0.4, zf = bz + e * 0.9 + eps(g);
+    M.quad([bx - bw * 0.36, sy, zf], [bx + bw * 0.36, sy, zf], [bx + bw * 0.36, sy + sh, zf], [bx - bw * 0.36, sy + sh, zf], ACC, S.white);
+  }
+  return done(g, Y1, e * 1.4);
+};
+
+// disciplined corporate modern: glass curtain wall, regular mullion grid, neat logo plate
+STY.ts = (M, S, g) => {
+  const { y0, H, u, e } = g, lod = S.nb, sg = g.last ? Math.min(u * 0.16, H * 0.09) : 0, Y1 = g.y1 - sg;
+  const gh = g.grounded ? Math.min(H * 0.08, u * 0.25) : 0, ts = Math.min(u * 0.05, H * 0.035), glass = S.era !== 'old';
+  const ya = y0 + gh, yb = Y1 - ts, tr = [TRIM, S.trim];
+  plinth(M, g, gh, e * 0.5, [POD, S.base], tr);
+  walls(M, g, ya, yb, [glass ? GLASS : WALL, S.wall]);
+  capSlab(M, g, yb, Y1, e * 0.6, tr, [ROOF, S.flat]);
+  const n = floorsFor(g, ya, yb, 0.4, 8), fh = (yb - ya) / n, t = u * 0.022, sp = fh * 0.12, o2 = eps(g) * 1.3;
+  if (!glass) windows(M, g, { ya, yb, n, bay: u * 0.42, maxC: 4, ww: 0.78, wh: 0.62, col: S.win, part: GLASS });
+  for (let f = 0; f < 2; f++) {
+    const a0 = lo(g, f), span = hi(g, f) - a0, nc = clamp(Math.round(span / (u * 0.42)), 2, 5);
+    for (let k = 0; k <= nc; k++) {
+      const a = clamp(a0 + span * k / nc, a0 + t / 2, a0 + span - t / 2);
+      put(M, g, f, a - t / 2, a + t / 2, ya, yb, o2, TRIM, S.trim);
+    }
+    for (let j = 0; j <= n; j++) {
+      const y = ya + j * fh;
+      put(M, g, f, a0, a0 + span, Math.max(y - sp / 2, ya), Math.min(y + sp / 2, yb), o2 * 1.2, TRIM, S.trim);
+    }
+  }
+  if (g.last) { // logo plate
+    const bw = g.w * 0.3, bx = g.cx - g.w * 0.15, bz = g.cz + g.d * 0.3, bc = S.pick('primary', 0);
+    M.box(bx - bw / 2, bx + bw / 2, Y1, g.y1, bz, bz + e * 0.7, [ACC, bc], [ACC, bc], ['nx', 'nz']);
+    const zf = bz + e * 0.7 + eps(g);
+    M.quad([bx - bw * 0.3, Y1 + sg * 0.4, zf], [bx + bw * 0.3, Y1 + sg * 0.4, zf], [bx + bw * 0.3, Y1 + sg * 0.6, zf], [bx - bw * 0.3, Y1 + sg * 0.6, zf], ACC, S.white);
+  }
+  return done(g, Y1, e * 0.6);
+};
+
+// enterprise office park: big beige blocks, identical ribbon bands, identical rooftop units
+STY.java = (M, S, g) => {
+  const { y0, H, u, e } = g, lod = S.nb, hs = g.last ? Math.min(u * 0.2, H * 0.08) : 0, Y1 = g.y1 - hs;
+  const gh = g.grounded ? Math.min(H * 0.07, u * 0.2) : 0, ts = Math.min(u * 0.09, H * 0.05), tr = [TRIM, S.trim];
+  const ya = y0 + gh, yb = Y1 - ts;
+  plinth(M, g, gh, e * 0.5, [POD, S.base], tr);
+  walls(M, g, ya, yb, [WALL, S.wall]);
+  capSlab(M, g, yb, Y1, e * 0.9, tr, [ROOF, S.flat]);
+  const n = floorsFor(g, ya, yb, 0.42, 8), fh = (yb - ya) / n, t = u * 0.02, o2 = eps(g) * 1.3;
+  windows(M, g, { ya, yb, n, ribbon: true, rib: 0.92, wh: 0.5, col: S.win, part: GLASS });
+  for (let f = 0; f < 2; f++) { // identical pane dividers
+    const a0 = lo(g, f), span = hi(g, f) - a0, nc = clamp(Math.round(span / (u * 0.34)), 2, 5);
+    for (let k = 1; k < nc; k++) put(M, g, f, a0 + span * k / nc - t / 2, a0 + span * k / nc + t / 2, ya, yb, o2, TRIM, S.trim);
+  }
+  if (g.last) {
+    const bw = g.w * 0.17, bd = g.d * 0.2;
+    for (let k = -1; k <= 1; k++) M.box(g.cx + k * g.w * 0.26 - bw / 2, g.cx + k * g.w * 0.26 + bw / 2, Y1, Y1 + hs * 0.8, g.cz - g.d * 0.15 - bd / 2, g.cz - g.d * 0.15 + bd / 2, tr, [ROOF, S.flat]);
+  }
+  return done(g, Y1, e * 0.9);
+};
+
+// refined Victorian: ruby brick, cream quoins + lintels, bracketed cornice
+STY.ruby = (M, S, g) => {
+  const { y0, H, u, e } = g, lod = S.nb, cream = [TRIM, S.trim], gh = g.grounded ? Math.min(H * 0.08, u * 0.22) : 0, ch = Math.min(u * 0.12, H * 0.07);
+  const ya = y0 + gh, yb = g.y1 - ch;
+  plinth(M, g, gh, e * 0.6, [POD, S.base], cream);
+  walls(M, g, ya, yb, [WALL, S.wall]);
+  capSlab(M, g, yb, yb + ch * 0.6, e * 0.8, cream, null);
+  capSlab(M, g, yb + ch * 0.6, g.y1, e * 1.6, cream, [ROOF, S.flat]);
+  const n = floorsFor(g, ya, yb, 0.6, 3);
+  windows(M, g, { ya, yb, n, bay: u * 0.4, maxC: 2, ww: 0.4, wh: 0.62, col: S.win, part: GLASS, frame: [S.trim, 0.22] });
+  const q = u * 0.07;
+  ledge(M, g, 0, g.x0, g.x0 + q, ya, yb, e * 0.4, cream, null); ledge(M, g, 0, g.x1 - q, g.x1, ya, yb, e * 0.4, cream, null);
+  ledge(M, g, 1, g.z0, g.z0 + q, ya, yb, e * 0.4, cream, null); ledge(M, g, 1, g.z1 - q, g.z1, ya, yb, e * 0.4, cream, null);
+  if (lod === 1) { // cornice brackets
+    const dk = [TRIM, S.pick('ruby', 1)];
+    for (let f = 0; f < 2; f++) {
+      const a0 = lo(g, f), span = hi(g, f) - a0, nb = clamp(Math.round(span / (u * 0.22)), 3, 5), bw = u * 0.045;
+      for (let k = 0; k < nb; k++) { const a = a0 + span * (k + 0.5) / nb; ledge(M, g, f, a - bw / 2, a + bw / 2, yb - ch * 0.3, yb + ch * 0.6, e * 1.1, dk, dk); }
+    }
+  }
+  return done(g, g.y1, e * 1.6);
+};
+
+// informal self-built: additions on additions, mismatched colours, a bolted-on extra floor
+STY.php = (M, S, g) => {
+  const { y0, H, u, e } = g, lod = S.nb, rng = S.rng, pool = S.pool, pk = () => pool[Math.floor(rng() * pool.length)];
+  const ef = g.last && H > u * 0.7 ? Math.min(H * 0.24, u * 0.4) : 0, Yb = g.y1 - ef, annex = g.grounded && g.last && lod === 1;
+  const aw = annex ? g.w * 0.24 : 0, mg = { ...g, x1: g.x1 - aw, w: g.w - aw, cx: g.cx - aw / 2 };
+  const gh = g.grounded ? Math.min(H * 0.07, u * 0.18) : 0, ya = y0 + gh, yb = Yb - e * 0.5, tin = S.pick('metal', 0);
+  plinth(M, mg, gh, e * 0.4, [POD, S.base], [TRIM, S.trim]);
+  walls(M, mg, ya, yb, [WALL, S.wall]);
+  capSlab(M, mg, yb, Yb, e * 0.6, [TRIM, S.trim], [ROOF, tin]);
+  const n = floorsFor(g, ya, yb, 0.55, lod > 1 ? 2 : 3), fh = (yb - ya) / n, wc = [S.win, S.white, S.win, pk()];
+  windows(M, mg, { ya, yb, n, bay: u * 0.4, maxC: 3, ww: 0.28 + rng() * 0.25, wh: 0.3 + rng() * 0.3, colFn: () => wc[Math.floor(rng() * 4)], part: GLASS });
+  if (lod === 1 && n > 1) { // exterior stair
+    const sz = mg.z1 + e * 1.2, sx = mg.x0 + g.w * 0.1;
+    M.strut([sx, ya, sz], [sx + g.w * 0.34, ya + (yb - ya) * 0.55, sz], e * 0.55, TRIM, S.pick('wood'));
+  }
+  if (annex) { // lean-to on the side
+    const ah = H * 0.42, ac = pk(), z0 = g.z0 + g.d * 0.28;
+    M.boxH(mg.x1, g.x1, z0, g.z1, y0, [ah, ah * 0.62, ah, ah * 0.62], [WALL, ac], [ROOF, tin]);
+    put(M, g, 0, mg.x1 + aw * 0.2, mg.x1 + aw * 0.7, y0 + ah * 0.3, y0 + ah * 0.6, eps(g), GLASS, S.win);
+    put(M, g, 1, z0 + g.d * 0.12, z0 + g.d * 0.4, y0 + ah * 0.0, y0 + ah * 0.55, eps(g), TRIM, S.dark);
+  }
+  if (ef > 0) { // the bolted-on floor, shoved off to one side
+    const ew = g.w * 0.62, ed = g.d * 0.58, ex = mg.cx - g.w * 0.1, ez = g.cz - g.d * 0.12, c = pk(), ec = pk();
+    M.box(ex - ew / 2, ex + ew / 2, Yb, g.y1 - ef * 0.28, ez - ed / 2, ez + ed / 2, [WALL, c], null, ['top']);
+    M.boxH(ex - ew / 2 - e, ex + ew / 2 + e, ez - ed / 2 - e, ez + ed / 2 + e, g.y1 - ef * 0.28, [g.y1, g.y1, g.y1 - ef * 0.2, g.y1 - ef * 0.2], [TRIM, ec], [ROOF, tin]);
+    const eg = rectG(ex, ez, ew, ed);
+    put(M, eg, 0, ex - ew * 0.3, ex + ew * 0.1, Yb + ef * 0.15, Yb + ef * 0.5, eps(g), GLASS, S.win);
+    put(M, eg, 1, ez - ed * 0.25, ez + ed * 0.2, Yb + ef * 0.15, Yb + ef * 0.5, eps(g), GLASS, S.win);
+    return { cx: ex, cz: ez, w: ew * 0.2, d: ed * 0.2, y: g.y1, ex: 0, flat: false };
+  }
+  return done(mg, Yb, e * 0.6);
+};
+
+// corrugated-metal shed: ribbed sheeting, roller door, clerestory strip, roof vent
+STY.shell = (M, S, g) => {
+  const { y0, H, u, e } = g, lod = S.nb, hs = g.last ? Math.min(u * 0.22, H * 0.1) : 0, Y1 = g.y1 - hs;
+  const gh = g.grounded ? Math.min(H * 0.07, u * 0.18) : 0, ch = Math.min(u * 0.06, H * 0.05), tr = [TRIM, S.trim];
+  const ya = y0 + gh, yb = Y1 - ch, o1 = eps(g) * 0.6;
+  plinth(M, g, gh, e * 0.4, [POD, S.base], tr);
+  walls(M, g, ya, yb, [WALL, S.wall]);
+  capSlab(M, g, yb, Y1, e * 0.7, tr, [ROOF, S.flat]);
+  for (let f = 0; f < 2; f++) { // corrugation ribs
+    const a0 = lo(g, f), span = hi(g, f) - a0, nr = clamp(Math.round(span / (u * 0.13)), 4, lod > 1 ? 6 : 10), rw = span / nr;
+    for (let i = 1; i < nr; i += 2) put(M, g, f, a0 + rw * i, a0 + rw * (i + 1), ya, yb, o1, WALL, S.trim);
+  }
+  windows(M, g, { ya, yb, n: 1, ribbon: true, rib: 0.8, wh: 0.14, y0: 0.76, col: S.win, part: GLASS });
+  if (g.grounded) {
+    const a0 = g.x0, span = g.w, dh = Math.min(H * 0.55, u * 0.5);
+    put(M, g, 0, a0 + span * 0.12, a0 + span * 0.48, ya, ya + dh, eps(g) * 1.2, TRIM, S.dark);
+    put(M, g, 0, a0 + span * 0.2, a0 + span * 0.4, ya + dh * 0.3, ya + dh * 0.75, eps(g) * 1.6, TRIM, S.pick('corten', 1)); // faded paint patch
+  }
+  if (g.last) {
+    const r = u * 0.06;
+    M.loft(g.cx + g.w * 0.22, g.cz - g.d * 0.15, [[Y1, r, r], [Y1 + hs * 0.8, r * 0.8, r * 0.8]], 6, [TRIM, S.steel], { cap: [TRIM, S.dark] });
+  }
+  return done(g, Y1, e * 0.7);
+};
+
+function styleBlock(M, S, o) {
+  const { cx, cz, w, d, y0, y1 } = o;
+  const g = { cx, cz, w, d, y0, y1, x0: cx - w / 2, x1: cx + w / 2, z0: cz - d / 2, z1: cz + d / 2, u: Math.min(w, d), H: y1 - y0,
+    grounded: o.ground !== false, last: !!o.last, wallPart: o.wallPart, wallCol: o.wallCol };
+  g.e = g.u * 0.05;
+  return STY[S.style](M, S, g);
 }
 
 // ------------------------------------------------------------ roofs
@@ -403,7 +829,7 @@ function addProps(M, S, T) {
 // ------------------------------------------------------------ forms
 function buildSlab(M, S) {
   const rt = S.roof, rise = planRoof(rt, S.w, S.d, S.h, 0.25);
-  const r = block(M, S, { cx: 0, cz: 0, w: S.w, d: S.d, y0: 0, y1: S.h - rise, top: topFor(S, rt) });
+  const r = block(M, S, { cx: 0, cz: 0, w: S.w, d: S.d, y0: 0, y1: S.h - rise, top: topFor(S, rt), last: true });
   return roofOn(M, S, r, rt, rise);
 }
 
@@ -413,9 +839,10 @@ function buildTower(M, S) {
   const ph = Math.min(h * 0.1, u * 0.7), sw = w * 0.78, sd = d * 0.78, cw = w * 0.46, cd = d * 0.46;
   const lh = Math.min(h * 0.05, u * 0.45), rise = planRoof(rt, cw, cd, h, 0.26);
   const sh = h - lh - rise;
+  S.nb = 3;
   block(M, S, { cx: 0, cz: 0, w, d, y0: 0, y1: ph, top: 'flat' });
   block(M, S, { cx: 0, cz: 0, w: sw, d: sd, y0: ph, y1: sh, ground: false, top: 'flat' });
-  const r = block(M, S, { cx: 0, cz: 0, w: cw, d: cd, y0: sh, y1: sh + lh, ground: false, top: topFor(S, rt) });
+  const r = block(M, S, { cx: 0, cz: 0, w: cw, d: cd, y0: sh, y1: sh + lh, ground: false, top: topFor(S, rt), last: true });
   return roofOn(M, S, r, rt, rise);
 }
 
@@ -424,12 +851,13 @@ function buildSetback(M, S) {
   const k = (0.62 / n) * (0.9 + S.rng() * 0.2);
   const sc = Array.from({ length: n }, (_, i) => Math.max(1 - i * k, 0.28));
   const wts = [1, 0.8, 0.66, 0.56].slice(0, n), ws = wts.reduce((a, b) => a + b, 0);
+  S.nb = n;
   const tw = S.w * sc[n - 1], td = S.d * sc[n - 1];
   const rise = planRoof(rt, tw, td, S.h, 0.24), avail = S.h - rise;
   let y = 0, r;
   for (let i = 0; i < n; i++) {
     const hi = avail * wts[i] / ws;
-    r = block(M, S, { cx: 0, cz: 0, w: S.w * sc[i], d: S.d * sc[i], y0: y, y1: y + hi, ground: i === 0, top: i === n - 1 ? topFor(S, rt) : 'flat' });
+    r = block(M, S, { cx: 0, cz: 0, w: S.w * sc[i], d: S.d * sc[i], y0: y, y1: y + hi, ground: i === 0, top: i === n - 1 ? topFor(S, rt) : 'flat', last: i === n - 1 });
     y += hi;
   }
   return roofOn(M, S, r, rt, rise);
@@ -438,6 +866,7 @@ function buildSetback(M, S) {
 function buildPodium(M, S) {
   const { w, d, h, u } = S, rt = S.roof;
   const ph = Math.min(h * 0.26, u * 0.55);
+  S.nb = 2;
   const fw = w * (0.5 + S.rng() * 0.15), fd = d * (0.5 + S.rng() * 0.15);
   const ox = (S.rng() - 0.5) * (w - fw) * 0.8, oz = -S.rng() * (d - fd) * 0.45;
   block(M, S, { cx: 0, cz: 0, w, d, y0: 0, y1: ph, wallPart: POD, wallCol: S.era === 'new' ? S.base : S.era === 'old' ? S.base : S.ground, top: 'flat', fins: false });
@@ -445,7 +874,7 @@ function buildPodium(M, S) {
   const cw = w * 0.3, cx = clamp(ox * 0.5, -w * 0.2, w * 0.2);
   M.box(cx - cw / 2, cx + cw / 2, ph * 0.5, ph * 0.58, d / 2, d / 2 + u * 0.1, [ACC, S.accent], [ACC, S.accent]);
   const rise = planRoof(rt, fw, fd, h - ph, 0.26);
-  const r = block(M, S, { cx: ox, cz: oz, w: fw, d: fd, y0: ph, y1: h - rise, ground: false, top: topFor(S, rt) });
+  const r = block(M, S, { cx: ox, cz: oz, w: fw, d: fd, y0: ph, y1: h - rise, ground: false, top: topFor(S, rt), last: true });
   return roofOn(M, S, r, rt, rise);
 }
 
@@ -472,9 +901,12 @@ function buildHouse(M, S) {
   M.box(dx - dw / 2, dx + dw / 2, ph, ph + dh, d / 2, d / 2 + e * 0.6, [TRIM, rgb(S.P.accent[1])], [TRIM, S.trim]);
   M.box(dx - dw * 0.8, dx + dw * 0.8, ph + dh, ph + dh + e * 0.8, d / 2, d / 2 + e * 3, [TRIM, S.trim], [TRIM, S.trim]);
   if (S.era === 'new') M.box(-dx - w * 0.17, -dx + w * 0.17, wallH * 0.22, wallH * 0.82, d / 2, d / 2 + e * 0.5, [GLASS, rgb(S.P.glass[0])], null, ['top']);
-  const T = roofOn(M, S, r, rt, rise);
+  if (S.style !== 'default') houseStyle(M, S, { w, d, u, e, ph, wallH, dx });
+  const pz = S.style === 'python';
+  const T = roofOn(M, S, r, rt, rise, pz ? 'z' : undefined);
+  if (pz && rt === 'gable') steppedGable(M, 0, d / 2 + r.ex + e * 0.5, w + 2 * r.ex, wallH, rise, e * 1.4, S.wall, S.trim);
   if (rt === 'gable') { // brick chimney sitting on the ridge
-    const ax = w >= d ? 'x' : 'z', cs = u * 0.1, off = (S.rng() < 0.5 ? -1 : 1) * (ax === 'x' ? w : d) * 0.27;
+    const ax = pz ? 'z' : w >= d ? 'x' : 'z', cs = u * 0.1, off = (S.rng() < 0.5 ? -1 : 1) * (ax === 'x' ? w : d) * 0.27;
     const cx = ax === 'x' ? off : 0, cz = ax === 'x' ? 0 : off, br = rgb(S.P.brick[1]);
     M.box(cx - cs, cx + cs, wallH + rise * 0.5, wallH + rise + cs * 1.7, cz - cs, cz + cs, [WALL, br], [TRIM, S.trim]);
   }
@@ -529,7 +961,7 @@ function buildPlant(M, S) {
   const R = Math.min(w * 0.24, d * (towers === 2 ? 0.24 : 0.4));
   const bw = cooling ? w - R * 2.1 : w, bcx = cooling ? -w / 2 + bw / 2 : 0;
   const rise = planRoof(rt, bw, d, bh, 0.5);
-  const r = block(M, S, { cx: bcx, cz: 0, w: bw, d, y0: 0, y1: bh - rise, top: 'flat', wallPart: WALL, wallCol: S.era === 'new' ? S.solid : S.wall, fins: false });
+  const r = block(M, S, { cx: bcx, cz: 0, w: bw, d, y0: 0, y1: bh - rise, top: 'flat', last: true, wallPart: WALL, wallCol: S.era === 'new' ? S.solid : S.wall, fins: false });
   const T = roofOn(M, S, r, rt, rise);
   const conc = S.era === 'old' ? S.P.stone[2] : S.era === 'mid' ? S.P.concrete[0] : S.P.concrete[3];
   const concC = rgb(conc), red = rgb(S.P.accent[1]), white = S.white;
@@ -575,7 +1007,7 @@ function buildHall(M, S) {
   const y0 = st * 2, back = -d / 2 + ins * 2, front = d / 2 - ins * 2;
   const bw = w * 0.92, bd = d * 0.72, bcz = back + bd / 2, zf = back + bd;
   const rise = planRoof(rt, bw, bd, h, 0.3), top = h - rise, bH = top - y0;
-  const r = block(M, S, { cx: 0, cz: bcz, w: bw, d: bd, y0, y1: top, ground: false, top: topFor(S, rt) });
+  const r = block(M, S, { cx: 0, cz: bcz, w: bw, d: bd, y0, y1: top, ground: false, top: topFor(S, rt), last: true });
   const pw = w * 0.5, yc = y0 + bH * 0.76, et = bH * 0.12;
   const n = clamp(Math.round(pw / (bH * 0.5)) + 1, 4, 8), colH = yc - y0;
   const cr = Math.min(pw / (n * 2.6), colH * 0.08), zc = front - cr * 1.6;
@@ -636,8 +1068,374 @@ function buildFrame(M, S) {
   return { cx: 0, cz: 0, w: w - cw * 2, d: d - cw * 2, y: h, flat: true };
 }
 
-const BUILDERS = { slab: buildSlab, tower: buildTower, setback: buildSetback, podium: buildPodium, house: buildHouse, shed: buildShed, plant: buildPlant, hall: buildHall, frame: buildFrame };
+// ------------------------------------------------------------ house: style hooks
+function houseStyle(M, S, k) {
+  const { w, d, u, ph, wallH, dx } = k, g = rectG(0, 0, w, d), off = Math.max(u * 0.012, 0.004);
+  const y0 = ph + (wallH - ph) * 0.35, y1 = ph + (wallH - ph) * 0.8, ww = Math.min(w * 0.15, u * 0.15);
+  const framed = S.style === 'python' || S.style === 'ruby' || S.style === 'js' || S.style === 'java';
+  const wc = S.style === 'js' ? S.pick('accent', 0) : S.win;
+  if (S.era !== 'new') {
+    if (framed) put(M, g, 0, -dx - ww * 1.3, -dx + ww * 1.3, y0 - (y1 - y0) * 0.15, y1 + (y1 - y0) * 0.15, off * 0.5, TRIM, S.trim);
+    put(M, g, 0, -dx - ww, -dx + ww, y0, y1, off, GLASS, wc);
+  }
+  if (framed) put(M, g, 1, -ww * 1.3, ww * 1.3, y0 - (y1 - y0) * 0.15, y1 + (y1 - y0) * 0.15, off * 0.5, TRIM, S.trim);
+  put(M, g, 1, -ww, ww, y0, y1, off, GLASS, wc);
+}
 
+// ------------------------------------------------------------ landmarks
+// windows for landmarks built in the default style (styled blocks already carry their own)
+function lwin(M, S, g, ya, yb, n, o = {}) {
+  if (S.style !== 'default') return;
+  windows(M, g, { ya, yb, n, bay: g.u * 0.4, maxC: 3, ww: 0.42, wh: 0.6, col: S.win, part: GLASS, frame: [S.trim, 0.2], ...o });
+}
+
+function flagProp(M, S, x, y, z, H) {
+  M.strut([x, y, z], [x, y + H, z], H * 0.035, TRIM, S.alu);
+  const fw = H * 0.5, fh = H * 0.28, yt = y + H, c = rgb(S.P.accent[1]);
+  M.quad([x, yt - fh, z], [x + fw, yt - fh * 0.9, z], [x + fw, yt - fh * 0.1, z], [x, yt, z], ACC, c);
+  M.quad([x, yt, z], [x + fw, yt - fh * 0.1, z], [x + fw, yt - fh * 0.9, z], [x, yt - fh, z], ACC, c);
+}
+
+function clockFace(M, S, g, yc, r) {
+  const o1 = Math.max(r * 0.05, 0.004);
+  for (let f = 0; f < 2; f++) {
+    const a = (lo(g, f) + hi(g, f)) / 2;
+    put(M, g, f, a - r, a + r, yc - r, yc + r, o1, ACC, S.dark);
+    put(M, g, f, a - r * 0.82, a + r * 0.82, yc - r * 0.82, yc + r * 0.82, o1 * 2, ACC, S.white);
+    put(M, g, f, a - r * 0.07, a + r * 0.07, yc, yc + r * 0.62, o1 * 3, ACC, S.dark);
+    put(M, g, f, a, a + r * 0.5, yc - r * 0.07, yc + r * 0.07, o1 * 3, ACC, S.dark);
+  }
+}
+
+// README: the front door. Stepped base, wings, a projecting pavilion and a clock tower or dome.
+function buildCityhall(M, S) {
+  const { w, d, h, u } = S, st = Math.min(h * 0.05, u * 0.08), ins = u * 0.03;
+  S.nb = 3;
+  const crown = S.spec.crown === 'dome' || S.spec.crown === 'tower' ? S.spec.crown : (S.rng() < 0.5 ? 'tower' : 'dome');
+  M.box(-w / 2, w / 2, 0, st, -d / 2, d / 2, [POD, S.base], [TRIM, S.trim]);
+  M.box(-w / 2 + ins, w / 2 - ins, st, st * 2, -d / 2 + ins, d / 2 - ins, [POD, S.base], [TRIM, S.trim]);
+  const y0 = st * 2, back = -d / 2 + ins * 2, fr = d / 2 - ins * 2, wd = (fr - back) * 0.76;
+  const hw = (h - y0) * 0.34, yp = y0 + (h - y0) * 0.6, cw = w * 0.36, cd = fr - back, ccz = back + cd / 2;
+  block(M, S, { cx: 0, cz: back + wd / 2, w: w * 0.94, d: wd, y0, y1: y0 + hw, ground: false });
+  lwin(M, S, rectG(0, back + wd / 2, w * 0.94, wd), y0 + hw * 0.12, y0 + hw * 0.9, 2, { maxC: 5, frame: null, bay: u * 0.34 });
+  block(M, S, { cx: 0, cz: ccz, w: cw, d: cd, y0, y1: yp, ground: false });
+  lwin(M, S, rectG(0, ccz, cw, cd), y0 + (yp - y0) * 0.5, yp - (yp - y0) * 0.06, 1, { maxC: 2, ww: 0.3 });
+  const pg = rectG(0, ccz, cw, cd), dh = (yp - y0) * 0.4;
+  put(M, pg, 0, -cw * 0.13, cw * 0.13, y0, y0 + dh, Math.max(u * 0.02, 0.01), TRIM, S.dark);
+  ledge(M, pg, 0, -cw * 0.3, cw * 0.3, y0 + dh * 1.05, y0 + dh * 1.22, u * 0.09, [ACC, S.accent], [ACC, S.accent]);
+  const flagH = Math.min(u * 0.22, h * 0.1);
+  if (crown === 'tower') {
+    const tw = cw * 0.62, tz = ccz - cd * 0.12, rise = Math.min(tw * 1.1, (h - yp) * 0.4), tTop = h - rise - flagH;
+    const tb = block(M, S, { cx: 0, cz: tz, w: tw, d: tw, y0: yp, y1: tTop, ground: false });
+    clockFace(M, S, rectG(0, tz, tw, tw), yp + (tTop - yp) * 0.56, tw * 0.3);
+    roofOn(M, S, { cx: 0, cz: tz, w: tw, d: tw, y: tTop, ex: tb.ex, flat: true }, S.era === 'new' ? 'spire' : 'hip', rise);
+    flagProp(M, S, 0, tTop + rise, tz, flagH);
+  } else {
+    const dw = cw * 0.74, tz = ccz - cd * 0.1, drum = (h - yp) * 0.26, rise = Math.min(h - yp - drum - flagH, dw * 0.66);
+    const tb = block(M, S, { cx: 0, cz: tz, w: dw, d: dw, y0: yp, y1: yp + drum, ground: false });
+    roofOn(M, S, { cx: 0, cz: tz, w: dw, d: dw, y: yp + drum, ex: tb.ex, flat: true }, 'dome', rise);
+    flagProp(M, S, 0, yp + drum + rise, tz, flagH);
+  }
+  return null;
+}
+
+// LICENSE: temple front. Wide stepped approach, full-height colonnade, deep pediment.
+function buildCourthouse(M, S) {
+  const { w, d, h, u } = S;
+  S.nb = 2;
+  const ph = Math.min(h * 0.1, u * 0.2), sd = d * 0.36, zs = d / 2 - sd, pw = w * 0.62, sw = pw * 1.3, H1 = h - ph;
+  const colH = H1 * 0.6, et = H1 * 0.1, prise = Math.min(pw * 0.22, H1 * 0.26), nst = 3, dt = sd / nst;
+  M.box(-w / 2, w / 2, 0, ph, -d / 2, zs, [POD, S.base], [TRIM, S.trim]);
+  for (let k = 0; k < nst; k++) M.box(-sw / 2, sw / 2, 0, ph * (nst - k) / nst, zs + k * dt, zs + (k + 1) * dt, [POD, S.base], [TRIM, S.trim], ['nz']);
+  block(M, S, { cx: 0, cz: (zs - d / 2) / 2, w: w * 0.94, d: zs + d / 2, y0: ph, y1: ph + H1 * 0.76, ground: false, last: true });
+  lwin(M, S, rectG(0, (zs - d / 2) / 2, w * 0.94, zs + d / 2), ph + H1 * 0.1, ph + H1 * 0.7, 2, { maxC: 3, ww: 0.36 });
+  const n = 6, cr = Math.min(pw / (n * 2.5), colH * 0.09), zc = zs + dt * 0.5, yc = ph + colH;
+  for (let i = 0; i < n; i++) {
+    const x = -pw / 2 + cr + (pw - 2 * cr) * i / (n - 1);
+    M.loft(x, zc, [[ph, cr * 1.15, cr * 1.15], [yc, cr * 0.9, cr * 0.9]], 6, [TRIM, S.trim]);
+  }
+  const ew = pw + cr * 5, ez0 = zs, ez1 = zs + dt * 0.95;
+  M.box(-ew / 2, ew / 2, yc, yc + et, ez0, ez1, [TRIM, S.trim], [TRIM, S.trim]);
+  gable(M, 0, (ez0 + ez1) / 2, ew, ez1 - ez0, yc + et, prise, 0, 'z', S.pitch, TRIM, S.base);
+  return null;
+}
+
+// CHANGELOG: archive tower with a big clock face (accent part) and a needle spire.
+function buildClocktower(M, S) {
+  const { w, d, h, u } = S;
+  S.nb = 4;
+  const ph = h * 0.11, s1 = h * 0.54, s2 = h * 0.76, s3 = h * 0.83, fin = h * 0.05;
+  block(M, S, { cx: 0, cz: 0, w, d, y0: 0, y1: ph });
+  const sw = w * 0.64, sdp = d * 0.64;
+  block(M, S, { cx: 0, cz: 0, w: sw, d: sdp, y0: ph, y1: s1, ground: false });
+  const sg = rectG(0, 0, sw, sdp), o = Math.max(u * 0.012, 0.004);
+  for (let f = 0; f < 2; f++) { // arrow slits
+    const a = (lo(sg, f) + hi(sg, f)) / 2, sp = (hi(sg, f) - lo(sg, f)) * 0.22;
+    for (const k of [-1, 1]) put(M, sg, f, a + k * sp - sw * 0.03, a + k * sp + sw * 0.03, ph + (s1 - ph) * 0.2, ph + (s1 - ph) * 0.65, o, TRIM, S.dark);
+  }
+  const cw = w * 0.78, cdp = d * 0.78;
+  block(M, S, { cx: 0, cz: 0, w: cw, d: cdp, y0: s1, y1: s2, ground: false });
+  clockFace(M, S, rectG(0, 0, cw, cdp), (s1 + s2) / 2, Math.min(cw * 0.34, (s2 - s1) * 0.42));
+  const bw = w * 0.56, bd = d * 0.56;
+  const bf = block(M, S, { cx: 0, cz: 0, w: bw, d: bd, y0: s2, y1: s3, ground: false });
+  const bg = rectG(0, 0, bw, bd);
+  for (let f = 0; f < 2; f++) {
+    const a = (lo(bg, f) + hi(bg, f)) / 2, sp = (hi(bg, f) - lo(bg, f)) * 0.22;
+    for (const k of [-1, 1]) put(M, bg, f, a + k * sp - bw * 0.07, a + k * sp + bw * 0.07, s2 + (s3 - s2) * 0.15, s2 + (s3 - s2) * 0.8, o * 1.5, TRIM, S.dark);
+  }
+  const rise = h - s3 - fin;
+  roofOn(M, S, { cx: 0, cz: 0, w: bw, d: bd, y: s3, ex: bf.ex, flat: true }, 'spire', rise);
+  M.strut([0, h - fin, 0], [0, h, 0], u * 0.02, ACC, rgb(S.P.accent[0]));
+  return null;
+}
+
+const CONTAINERS = [['accent', 1], ['accent', 0], ['primary', 0], ['green', 1], ['corten', 0], ['accent', 2], ['roof', 3], ['corten', 1], ['concrete', 2], ['ruby', 0]];
+const flatQuad = (M, xa, xb, za, zb, y, part, col) => M.quad([xa, y, zb], [xb, y, zb], [xb, y, za], [xa, y, za], part, col);
+
+// lockfile: container terminal with stacked boxes, a quay and a gantry crane.
+function buildPort(M, S) {
+  const { w, d, h, u } = S, rng = S.rng;
+  const pa = Math.min(h * 0.05, u * 0.04), qz = d / 2 - d * 0.2, conc = rgb(S.P.concrete[1]);
+  M.box(-w / 2, w / 2, 0, pa, -d / 2, qz, [POD, rgb(S.P.concrete[2])], [POD, conc]);
+  M.box(-w / 2, w / 2, 0, pa * 0.4, qz, d / 2, [POD, rgb(S.P.concrete[2])], [POD, rgb(S.P.water[0])]);
+  for (const k of [0.3, 0.62, 0.86]) { // wave glints
+    const z = qz + (d / 2 - qz) * k, x = -w / 2 + w * (0.15 + rng() * 0.5);
+    flatQuad(M, x, x + w * 0.12, z - u * 0.012, z + u * 0.012, pa * 0.4 + 0.004, POD, rgb(S.P.water[1]));
+  }
+  const Hc = clamp(h * 0.13, 0.25, u * 0.1), Wc = Hc * 0.95, Lc = Hc * 2.4, cols = CONTAINERS.map(([r, i]) => rgb(S.P[r][i]));
+  const nc = clamp(Math.floor(w * 0.9 / (Lc * 1.1)), 2, 7), z0r = -d / 2 + Wc * 0.8, zEnd = qz - d * 0.3;
+  const nr = clamp(Math.floor((zEnd - z0r) / (Wc * 1.15)), 1, 4), maxLv = clamp(Math.floor(h * 0.7 / Hc), 1, 3);
+  for (let i = 0; i < nc; i++) for (let r = 0; r < nr; r++) {
+    if (rng() < 0.1) continue;
+    const x = -w * 0.45 + (i + 0.5) * (w * 0.9 / nc), z = z0r + Wc * 0.5 + r * Wc * 1.15;
+    const lv = 1 + Math.floor(rng() * (maxLv - (r === nr - 1 && maxLv > 1 ? 1 : 0)));
+    for (let l = 0; l < lv; l++) {
+      const c = cols[Math.floor(rng() * cols.length)];
+      M.box(x - Lc / 2, x + Lc / 2, pa + l * Hc, pa + (l + 1) * Hc, z - Wc / 2, z + Wc / 2, [WALL, c], [WALL, c], ['nx', 'nz']);
+    }
+  }
+  // gantry crane at the quay edge
+  const cc = rgb(S.P.accent[rng() < 0.5 ? 0 : 1]), xc = w * 0.2 * (rng() < 0.5 ? -1 : 1), t = Math.max(u * 0.03, 0.05), Hg = h;
+  const gx = Lc * 1.0, zl = qz - u * 0.22, zf = qz - u * 0.03, ztip = d / 2 - u * 0.03, zbk = zl - u * 0.1;
+  for (const sx of [-1, 1]) for (const z of [zl, zf]) M.box(xc + sx * gx - t / 2, xc + sx * gx + t / 2, pa, Hg, z - t / 2, z + t / 2, [ACC, cc], null, ['nx', 'nz', 'top']);
+  for (const z of [zl, zf]) M.box(xc - gx - t / 2, xc + gx + t / 2, Hg - t, Hg, z - t / 2, z + t / 2, [ACC, cc], [ACC, cc], ['nx', 'nz']);
+  for (const sx of [-1, 1]) M.box(xc + sx * gx - t / 2, xc + sx * gx + t / 2, Hg, Hg + t * 0.8, zbk, ztip, [ACC, cc], [ACC, cc], ['nx', 'nz']);
+  const apex = [xc, Hg + u * 0.17, (zl + zf) / 2];
+  M.strut(apex, [xc, Hg + t * 0.4, ztip], t * 0.35, TRIM, S.steel);
+  M.strut(apex, [xc, Hg + t * 0.4, zbk], t * 0.35, TRIM, S.steel);
+  for (const sx of [-1, 1]) M.strut(apex, [xc + sx * gx, Hg, (zl + zf) / 2], t * 0.5, ACC, cc);
+  const zt = qz - Wc * 0.2, hy = pa + Hc * 2.3, hc = cols[Math.floor(rng() * cols.length)];
+  M.box(xc - t, xc + t, Hg + t * 0.8, Hg + t * 1.6, zt - t, zt + t, [TRIM, S.dark], [TRIM, S.dark]);
+  M.strut([xc, Hg + t * 0.8, zt], [xc, hy + Hc, zt], t * 0.18, TRIM, S.steel);
+  M.box(xc - Lc / 2, xc + Lc / 2, hy, hy + Hc, zt - Wc / 2, zt + Wc / 2, [WALL, hc], [WALL, hc], ['nx', 'nz']);
+  return null;
+}
+
+// deploy: control tower, curved-roof hangar, terminal, runway with markings and a little plane.
+function buildAirport(M, S) {
+  const { w, d, h, u } = S, rng = S.rng;
+  S.nb = 2;
+  const pa = Math.min(h * 0.04, u * 0.04), ap = rgb(S.P.concrete[1]), asp = rgb(S.P.metal[1]), wh = S.white;
+  M.box(-w / 2, w / 2, 0, pa, -d / 2, d / 2, [POD, rgb(S.P.concrete[2])], [POD, ap]);
+  const rz0 = d / 2 - d * 0.3, rz1 = d / 2 - d * 0.04, rx0 = -w / 2 + w * 0.02, rx1 = w / 2 - w * 0.02, ry = pa + Math.max(u * 0.008, 0.012);
+  M.box(rx0, rx1, pa, ry, rz0, rz1, [POD, asp], [POD, asp], ['nx', 'nz']);
+  const my = ry + 0.004, rl = rx1 - rx0, rw = rz1 - rz0, rc = (rz0 + rz1) / 2;
+  for (let k = 0; k < 6; k++) { const xa = rx0 + rl * (0.2 + k * 0.12); flatQuad(M, xa, xa + rl * 0.07, rc - rw * 0.025, rc + rw * 0.025, my, POD, wh); }
+  for (const sd of [0, 1]) for (let k = 0; k < 4; k++) { // threshold bars
+    const xa = sd ? rx1 - rl * 0.07 : rx0 + rl * 0.02, zc = rz0 + rw * (0.2 + k * 0.2);
+    flatQuad(M, xa, xa + rl * 0.05, zc - rw * 0.03, zc + rw * 0.03, my, POD, wh);
+  }
+  // hangar: barrel vault, axis along z so the arch faces the camera
+  const hw = w * 0.3, hdp = d * 0.4, hh = h * 0.5, wl = hh * 0.4, rx = hw / 2, ry2 = hh - wl, ns = 6;
+  const hx = -w / 2 + w * 0.07 + rx, hz = -d / 2 + d * 0.07, hz1 = hz + hdp;
+  const pts = [[-rx, 0], [-rx, wl]];
+  for (let k = 1; k < ns; k++) { const a = Math.PI - Math.PI * k / ns; pts.push([rx * Math.cos(a), wl + ry2 * Math.sin(a)]); }
+  pts.push([rx, wl], [rx, 0]);
+  const inside = [hx, pa + wl * 0.6, (hz + hz1) / 2], hc = [rgb(S.P.metal[2]), rgb(S.P.metal[0])];
+  for (let i = 0; i < pts.length - 1; i++) {
+    const p = pts[i], q = pts[i + 1], c = hc[i & 1];
+    M.quad([hx + p[0], pa + p[1], hz], [hx + q[0], pa + q[1], hz], [hx + q[0], pa + q[1], hz1], [hx + p[0], pa + p[1], hz1], ROOF, c, inside);
+    M.tri([hx, pa, hz1], [hx + p[0], pa + p[1], hz1], [hx + q[0], pa + q[1], hz1], WALL, hc[0], inside);
+  }
+  const hg = { x1: hx + rx, z1: hz1, x0: hx - rx, z0: hz, u };
+  put(M, hg, 0, hx - rx * 0.6, hx + rx * 0.6, pa, pa + wl * 1.35, Math.max(u * 0.01, 0.006), TRIM, S.dark);
+  // terminal + tower on the right
+  const tx = w * 0.17, tz = -d / 2 + d * 0.2, tw = w * 0.42, td = d * 0.24, th = h * 0.26;
+  block(M, S, { cx: tx, cz: tz, w: tw, d: td, y0: pa, y1: pa + th, ground: false, last: true });
+  const tg = rectG(tx, tz, tw, td);
+  if (S.style === 'default') windows(M, tg, { ya: pa + th * 0.18, yb: pa + th * 0.8, n: 1, ribbon: true, rib: 0.84, wh: 0.5, col: S.win, part: GLASS });
+  const kx = tx + tw / 2 - u * 0.1, kz = tz + td * 0.1, ks = u * 0.055, kh = h * 0.72, cabH = h * 0.1, cab = ks * 1.9;
+  M.box(kx - ks, kx + ks, pa, kh, kz - ks, kz + ks, [WALL, wh], null, ['top']);
+  band(M, rectG(kx, kz, ks * 2, ks * 2), pa + kh * 0.45, pa + kh * 0.5, ks * 0.25, [ACC, S.accent], [ACC, S.accent]);
+  M.box(kx - cab, kx + cab, kh, kh + cabH, kz - cab, kz + cab, [GLASS, rgb(S.P.glass[0])], null, ['top']);
+  M.box(kx - cab * 1.2, kx + cab * 1.2, kh + cabH, kh + cabH * 1.25, kz - cab * 1.2, kz + cab * 1.2, [ACC, S.accent], [ACC, S.accent]);
+  M.strut([kx, kh + cabH * 1.25, kz], [kx, h, kz], ks * 0.2, TRIM, S.alu);
+  // plane on the apron, nose to +x
+  const px = -w * 0.05, pz = rz0 - d * 0.1, L = w * 0.2, pw = u * 0.075, py = pa + pw * 0.3;
+  M.box(px - L / 2, px + L / 2, py, py + pw, pz - pw / 2, pz + pw / 2, [ACC, wh], [ACC, wh]);
+  M.box(px + L / 2, px + L / 2 + pw * 0.5, py + pw * 0.15, py + pw * 0.85, pz - pw * 0.3, pz + pw * 0.3, [ACC, wh], [ACC, wh], ['nx']);
+  M.box(px - L * 0.05, px + L * 0.2, py + pw * 0.4, py + pw * 0.55, pz - L * 0.5, pz + L * 0.5, [ACC, S.alu], [ACC, S.alu]);
+  M.box(px - L / 2, px - L * 0.32, py + pw, py + pw * 2.2, pz - pw * 0.08, pz + pw * 0.08, [ACC, S.accent], [ACC, S.accent]);
+  return null;
+}
+
+// dead code: broken walls, holes, rubble, weeds.
+function buildRuin(M, S) {
+  const { w, d, h, u } = S, rng = S.rng, t = Math.max(u * 0.07, 0.05), sl = Math.max(u * 0.03, 0.02);
+  const wc = [WALL, S.wall], tc = [TRIM, S.trim], eg = Math.max(u * 0.012, 0.006), dk = S.dark;
+  M.box(-w / 2, w / 2, 0, sl, -d / 2, d / 2, [POD, S.base], [POD, rgb(S.P.concrete[2])]);
+  const pat = (a) => a.map(v => clamp(v * (0.85 + rng() * 0.3), 0.12, 1) * h);
+  const tops = [], z0 = -d / 2 + t, z1 = d / 2 - t;
+  // a wall run: columns with flat or slanted broken tops, one window hole where it stands tall
+  const run = (n, P, fn) => {
+    for (let i = 0; i < n; i++) {
+      const Pa = P[i], Pb = P[Math.min(i + 1, n - 1)], slant = rng() < 0.4, ha = Pa, hb = slant ? (Pa + Pb) / 2 : Pa;
+      fn(i, ha, hb, Math.min(ha, hb) > h * 0.62 && i % 2 === 1);
+    }
+  };
+  const PF = pat([0.62, 0.95, 0.3, 0.2, 0.55, 1.0]);
+  run(6, PF, (i, ha, hb, hole) => {
+    const xa = -w / 2 + w * i / 6, xb = xa + w / 6, zf = d / 2 - t;
+    if (hole) {
+      M.box(xa, xb, sl, h * 0.2, zf, d / 2, wc, tc);
+      M.boxH(xa, xb, zf, d / 2, h * 0.46, [ha, hb, ha, hb], wc, tc);
+    } else M.boxH(xa, xb, zf, d / 2, sl, [ha, hb, ha, hb], wc, tc);
+    tops.push([(xa + xb) / 2, Math.max(ha, hb), d / 2 - t / 2]);
+  });
+  const PR = pat([0.3, 0.55, 0.85, 0.95]);
+  run(4, PR, (i, ha, hb, hole) => {
+    const za = z0 + (z1 - z0) * i / 4, zb = za + (z1 - z0) / 4;
+    if (hole) {
+      M.box(w / 2 - t, w / 2, sl, h * 0.2, za, zb, wc, tc);
+      M.boxH(w / 2 - t, w / 2, za, zb, h * 0.46, [ha, ha, hb, hb], wc, tc);
+    } else M.boxH(w / 2 - t, w / 2, za, zb, sl, [ha, ha, hb, hb], wc, tc);
+    tops.push([w / 2 - t / 2, Math.max(ha, hb), (za + zb) / 2]);
+  });
+  for (let i = 0; i < 2; i++) { // left wall: nearly gone
+    const za = z0 + (z1 - z0) * i / 2, a = h * (0.08 + rng() * 0.2);
+    M.box(-w / 2, -w / 2 + t, sl, a, za, za + (z1 - z0) / 2, wc, tc);
+  }
+  const PB = pat([0.5, 0.78, 0.6]); // back wall: its inner face is what you see through the broken front
+  for (let i = 0; i < 3; i++) M.box(-w / 2 + w * i / 3, -w / 2 + w * (i + 1) / 3, sl, PB[i], -d / 2, -d / 2 + t, wc, tc, ['nz', 'nx']);
+  const bg = { z1: -d / 2 + t, x1: 0, u };
+  for (const i of [1, 2]) if (PB[i] > h * 0.5) { const a = -w / 2 + w * (i + 0.5) / 3; put(M, bg, 0, a - w * 0.045, a + w * 0.045, h * 0.22, h * 0.42, eg, GLASS, dk); }
+  // collapsed heap + loose blocks where the front gave way
+  M.taper(-w * 0.1, d * 0.28, w * 0.34, d * 0.2, w * 0.12, d * 0.07, sl, sl + h * 0.14, wc, tc);
+  const bits = [S.wall, S.trim, S.pick('concrete', 2)];
+  for (let k = 0; k < 6; k++) {
+    const s2 = u * (0.04 + rng() * 0.05), x = -w * 0.4 + rng() * w * 0.5, z = -d * 0.05 + rng() * d * 0.4, c = bits[k % 3];
+    M.box(x - s2, x + s2, sl, sl + s2 * (0.8 + rng()), z - s2 * 0.8, z + s2 * 0.8, [WALL, c], [TRIM, c], ['nx', 'nz']);
+  }
+  const rust = rgb(S.P.corten[1]), tall = tops.slice().sort((a, b) => b[1] - a[1]);
+  for (let k = 0; k < 2; k++) { // bent rebar
+    const [x, y, z] = tall[k], dx = (rng() - 0.5) * u * 0.1;
+    M.strut([x, y, z], [x + dx, y + u * 0.12, z - u * 0.02], u * 0.012, TRIM, rust);
+  }
+  // charred rafters leaning in from the right wall
+  const wood = rgb(S.P.wood[0]);
+  M.strut([w / 2 - t, h * 0.6, 0], [w * 0.12, sl, -d * 0.12], u * 0.025, TRIM, rgb(S.P.accent[3]));
+  M.strut([w / 2 - t, h * 0.5, d * 0.2], [w * 0.2, sl, d * 0.05], u * 0.02, TRIM, wood);
+  const gr = [rgb(S.P.green[0]), rgb(S.P.green[1])];
+  const tuft = (x, y, z, r, hh, k) => M.loft(x, z, [[y, r, r], [y + hh, 0, 0]], 3, [ROOF, gr[k & 1]]);
+  for (let k = 0; k < 5; k++) { const [x, y, z] = tops[(k * 2 + 1) % tops.length]; tuft(x, y, z, u * 0.04, u * 0.1, k); }
+  for (let k = 0; k < 4; k++) tuft(-w * 0.4 + rng() * w * 0.7, sl, -d * 0.3 + rng() * d * 0.55, u * 0.04, u * (0.07 + rng() * 0.05), k + 1);
+  const gv = { z1: d / 2, x1: w / 2, u }; // ivy strips on the front wall
+  for (let k = 0; k < 3; k++) {
+    const a = w * (0.3 + k * 0.22) - w / 2, hh = Math.min(h * (0.25 + rng() * 0.3), PF[Math.min(5, Math.floor((a + w / 2) / (w / 6)))] * 0.9);
+    put(M, gv, 0, a, a + u * 0.05, sl, sl + hh, eg, ROOF, gr[k & 1]);
+  }
+  return null;
+}
+
+// brand-new file: foundation, half-built frame, scaffolding, tower crane, materials.
+function buildSite(M, S) {
+  const { w, d, h, u } = S, rng = S.rng, sh = Math.max(u * 0.03, 0.04);
+  const conc = rgb(S.P.concrete[0]), conc2 = rgb(S.P.concrete[1]), wood = rgb(S.P.wood[0]);
+  M.box(-w / 2, w / 2, 0, sh, -d / 2, d / 2, [POD, rgb(S.P.concrete[2])], [POD, conc2]);
+  const bw = w * 0.6, bd = d * 0.54, bx = -w * 0.14, bz = -d * 0.16, fh = h / 3.5, c = Math.max(u * 0.045, 0.05);
+  const x0 = bx - bw / 2, x1 = bx + bw / 2, z0 = bz - bd / 2, z1 = bz + bd / 2;
+  const colH = [[3.4, 3.4, 2.5], [3.4, 2.6, 2.0]]; // front row, back row (floors reached)
+  for (let r = 0; r < 2; r++) for (let i = 0; i < 3; i++) {
+    const x = x0 + c / 2 + (bw - c) * i / 2, z = r ? z0 + c / 2 : z1 - c / 2, top = sh + fh * colH[r][i];
+    M.box(x - c / 2, x + c / 2, sh, top, z - c / 2, z + c / 2, [TRIM, conc], [TRIM, conc], ['nx', 'nz']);
+    if (colH[r][i] < 3) M.strut([x, top, z], [x + c * 0.2, top + fh * 0.3, z], c * 0.14, TRIM, rgb(S.P.corten[1])); // rebar
+  }
+  M.box(x0, x1, sh + fh - c, sh + fh, z0, z1, [TRIM, conc], [TRIM, conc]);                 // first slab
+  M.box(x0, x1, sh + fh * 2 - c, sh + fh * 2, z0, z0 + bd * 0.7, [TRIM, conc], [TRIM, conc]); // second slab, unfinished
+  const bk = rgb(S.P.brick[0]);
+  M.box(x0 + c, x1 - c, sh, sh + fh * 0.5, z1 - c * 0.8, z1, [WALL, bk], [TRIM, conc2], ['nx', 'nz']); // half-height brick wall
+  // scaffolding on the front face
+  const sg = z1 + c * 1.4, st = c * 0.4, alu = S.alu, ps = [x0, x0 + bw * 0.5, x1];
+  for (const x of ps) M.box(x - st / 2, x + st / 2, sh, sh + fh * 2.7, sg - st / 2, sg + st / 2, [TRIM, alu], null, ['nx', 'nz']);
+  for (const k of [1, 2]) {
+    const y = sh + fh * k * 0.95;
+    M.box(x0, x1, y - st, y, sg - c * 0.9, sg + c * 0.6, [TRIM, wood], [TRIM, wood], ['nx', 'nz']);
+  }
+  M.strut([x0, sh, sg], [x0 + bw * 0.5, sh + fh * 1.9, sg], st * 0.7, TRIM, alu);
+  const sy = sh + fh * 1.95, nt = rgb(S.P.green[1]);
+  M.quad([x0, sy, sg + c * 0.7], [x1, sy, sg + c * 0.7], [x1, sy + fh * 0.7, sg + c * 0.7], [x0, sy + fh * 0.7, sg + c * 0.7], WALL, nt);
+  // tower crane, back right
+  const kx = x1 + u * 0.1, kz = bz - bd * 0.2, t = Math.max(u * 0.035, 0.05), Hm = h * 0.98, Lj = u * 0.7;
+  M.box(kx - t * 1.4, kx + t * 1.4, sh, sh + t, kz - t * 1.4, kz + t * 1.4, [POD, conc2], [TRIM, conc]);
+  M.strut([kx, sh + t, kz], [kx, Hm * 0.93, kz], t, ACC, rgb(S.P.accent[0]));
+  M.strut([kx - Lj * 0.3, Hm * 0.93, kz], [kx + Lj, Hm * 0.93, kz], t * 0.7, ACC, rgb(S.P.accent[0]), true);
+  M.box(kx - Lj * 0.3 - t, kx - Lj * 0.3 + t, Hm * 0.93 - t * 1.5, Hm * 0.93 - t * 0.2, kz - t, kz + t, [TRIM, conc2], [TRIM, conc]);
+  M.strut([kx, Hm * 0.93, kz], [kx, Hm, kz], t * 0.6, ACC, rgb(S.P.accent[0]));
+  M.strut([kx + Lj * 0.7, Hm * 0.93, kz], [kx + Lj * 0.7, Hm * 0.55, kz], t * 0.15, TRIM, S.steel);
+  M.box(kx + Lj * 0.7 - t * 0.6, kx + Lj * 0.7 + t * 0.6, Hm * 0.55 - t, Hm * 0.55, kz - t * 0.6, kz + t * 0.6, [ACC, rgb(S.P.accent[1])], [ACC, rgb(S.P.accent[1])]);
+  // yard: brick pallets, sand, pipes, cabin, cones
+  const yx = w * 0.18, yz = d * 0.3;
+  M.box(yx - u * 0.12, yx + u * 0.05, sh, sh + u * 0.07, yz - u * 0.05, yz + u * 0.05, [WALL, bk], [TRIM, S.pick('wood')], ['nx', 'nz']);
+  M.box(yx - u * 0.05, yx + u * 0.12, sh, sh + u * 0.05, yz + u * 0.07, yz + u * 0.15, [WALL, bk], [TRIM, S.pick('wood')], ['nx', 'nz']);
+  M.taper(-w * 0.35, d * 0.34, u * 0.26, u * 0.2, u * 0.05, u * 0.04, sh, sh + u * 0.13, [WALL, rgb(S.P.ground[0])]);
+  M.box(w * 0.3, w * 0.46, sh, sh + u * 0.1, -d * 0.4, -d * 0.4 + u * 0.14, [WALL, rgb(S.P.accent[0])], [ROOF, rgb(S.P.accent[0])], ['nx', 'nz']);
+  M.box(w * 0.3 - 0.01, w * 0.46, sh, sh + u * 0.04, d * 0.05, d * 0.05 + u * 0.05, [WALL, S.steel], [TRIM, S.alu], ['nx', 'nz']);
+  const cone = rgb(S.P.corten[0]);
+  for (let k = 0; k < 3; k++) M.loft(-w * 0.1 + k * u * 0.14, d * 0.44, [[sh, u * 0.025, u * 0.025], [sh + u * 0.06, 0, 0]], 3, [ACC, cone]);
+  return null;
+}
+
+// giant file: layered, cantilevered megastructure covered in greebles.
+function buildMega(M, S) {
+  const { w, d, h, u } = S;
+  S.nb = 4;
+  const y1 = h * 0.3, y2 = h * 0.55, y3 = h * 0.78, y4 = h * 0.93;
+  const mid = { cx: -w * 0.07, cz: d * 0.05, w: w * 0.76, d: d * 0.7 }, up = { cx: w * 0.12, cz: -d * 0.08, w: w * 0.5, d: d * 0.52 }, cr = { cx: w * 0.2, cz: -d * 0.12, w: w * 0.22, d: d * 0.24 };
+  block(M, S, { cx: 0, cz: 0, w, d, y0: 0, y1 });
+  block(M, S, { ...mid, y0: y1, y1: y2, ground: false });
+  block(M, S, { ...up, y0: y2, y1: y3, ground: false });
+  block(M, S, { ...cr, y0: y3, y1: y4, ground: false, last: true });
+  const e = u * 0.05, steel = [TRIM, S.steel], dark = [TRIM, S.dark];
+  // lumps on the base roof
+  M.box(w * 0.3, w * 0.48, y1, y1 + h * 0.1, d * 0.12, d * 0.4, [WALL, S.wall], [ROOF, S.flat]);
+  M.box(-w * 0.48, -w * 0.3, y1, y1 + h * 0.07, -d * 0.4, -d * 0.1, [WALL, S.wall], [ROOF, S.flat]);
+  // pipework down the side of the middle mass
+  const mx1 = mid.cx + mid.w / 2, pr = u * 0.022;
+  for (const k of [0.2, 0.45, 0.7]) M.loft(mx1 + pr * 1.5, mid.cz - mid.d / 2 + mid.d * k, [[y1, pr, pr], [y2 + h * 0.03, pr, pr]], 5, steel);
+  M.box(mx1, mx1 + pr * 5, y2 - h * 0.04, y2 - h * 0.01, mid.cz - mid.d * 0.35, mid.cz + mid.d * 0.25, steel, steel, ['nx', 'nz']);
+  // vent grille + hazard stripe on the base
+  const bg = { z1: d / 2, x1: w / 2, u }, gx = -w * 0.3;
+  for (let k = 0; k < 4; k++) put(M, bg, 0, gx, gx + w * 0.26, y1 * (0.3 + k * 0.14), y1 * (0.3 + k * 0.14) + y1 * 0.07, Math.max(u * 0.01, 0.006), TRIM, S.dark);
+  for (let k = 0; k < 6; k++) {
+    const a = -w * 0.5 + w * (0.05 + k * 0.16), c = k & 1 ? rgb(S.P.accent[0]) : S.dark;
+    put(M, bg, 0, a, a + w * 0.08, y1 * 0.06, y1 * 0.16, Math.max(u * 0.01, 0.006), ACC, c);
+  }
+  // exhaust stacks + beacon
+  for (const [x, z, hk, rk] of [[up.cx - up.w * 0.25, up.cz + up.d * 0.1, 0.1, 1], [up.cx - up.w * 0.05, up.cz + up.d * 0.25, 0.06, 0.8]]) {
+    const r = u * 0.045 * rk;
+    M.loft(x, z, [[y3, r * 1.15, r * 1.15], [y3 + h * hk, r, r]], 6, steel, { cap: dark });
+  }
+  const r = u * 0.014;
+  M.strut([cr.cx, y4, cr.cz], [cr.cx, y4 + h * 0.05, cr.cz], r, TRIM, S.alu);
+  M.box(cr.cx - r, cr.cx + r, y4 + h * 0.05, y4 + h * 0.05 + r * 2.2, cr.cz - r, cr.cz + r, [ACC, rgb(S.P.accent[1])], [ACC, rgb(S.P.accent[1])]);
+  acProp(M, S, w * 0.1, y1, d * 0.28, u * 0.9);
+  return null;
+}
+
+const BUILDERS = { slab: buildSlab, tower: buildTower, setback: buildSetback, podium: buildPodium, house: buildHouse, shed: buildShed, plant: buildPlant, hall: buildHall, frame: buildFrame,
+  cityhall: buildCityhall, courthouse: buildCourthouse, clocktower: buildClocktower, port: buildPort, airport: buildAirport, ruin: buildRuin, site: buildSite, mega: buildMega };
+
+const FLAT = { old: 'flat', mid: 'flat', new: 'flat' };
 const DEFAULT_ROOF = {
   slab:    { old: 'mansard', mid: 'flat', new: 'flat' },
   tower:   { old: 'hip', mid: 'flat', new: 'spire' },
@@ -648,18 +1446,23 @@ const DEFAULT_ROOF = {
   plant:   { old: 'flat', mid: 'flat', new: 'flat' },
   hall:    { old: 'dome', mid: 'flat', new: 'flat' },
   frame:   { old: 'flat', mid: 'flat', new: 'flat' },
+  cityhall: FLAT, courthouse: FLAT, clocktower: FLAT, port: FLAT, airport: FLAT, ruin: FLAT, site: FLAT, mega: FLAT,
 };
+// landmarks that ignore the era: a ruin is always weathered, a building site is always raw
+const FORCE_ERA = { ruin: 'old', site: 'mid' };
 
 // ------------------------------------------------------------ public API
 export function buildingGeometry(spec = {}) {
   const form = BUILDERS[spec.form] ? spec.form : 'slab';
   const rng = mulberry32((spec.seed | 0) * 2654435761 + 12345);
-  const S = makeStyle(spec, rng);
+  const S = makeStyle(FORCE_ERA[form] ? { ...spec, era: FORCE_ERA[form] } : spec, rng);
   const w = Math.max(+spec.w || 4, 1e-3), d = Math.max(+spec.d || 4, 1e-3), h = Math.max(+spec.h || 8, 1e-3);
   const props = spec.props || {};
   Object.assign(S, { spec, form, w, d, h, u: Math.min(w, d), props });
   // old slabs alternate between mansard and a flat cornice so a street isn't all roofs
   S.roof = ROOFS.includes(spec.roof) ? spec.roof : (form === 'slab' && S.era === 'old' && rng() < 0.5 ? 'flat' : DEFAULT_ROOF[form][S.era]);
+  const sr = STYLE_ROOF[S.style];
+  if (sr && !ROOFS.includes(spec.roof)) { const v = sr[form] ?? sr._; if (v && v !== 'default') S.roof = v; }
   S.needsDeck = !!(props.tank || props.ac || props.crane);
   const M = new Builder();
   const T = BUILDERS[form](M, S);

@@ -114,12 +114,27 @@ const INDEX_JS = /(^|\/)index\.[cm]?[jt]sx?$/;
 const MANIFEST = /(^|\/)(package\.json|Cargo\.toml|pyproject\.toml|setup\.cfg|go\.mod|Gemfile|pom\.xml|build\.gradle(\.kts)?|requirements[^/]*\.txt)$/;
 const REEX = /^export\s+(?:type\s+)?(?:\*(?:\s+as\s+[\w$]+)?|\{[^}]*\})\s*from\s*['"][^'"]+['"]/gm;
 
+// landmark docs by basename; the extension must not be a code one (LICENSE.js, README.ts are code)
+const DOC_RE = [[/^readme(?:[._-][\w.-]*)?$/i, 'readme'], [/^(?:license|licence|copying)(?:[._-][\w.-]*)?$/i, 'license'], [/^(?:changelog|changes|history)(?:[._-][\w.-]*)?$/i, 'changelog']];
+const DOC_EXT = /(?:^[^.]*|\.(?:md|markdown|txt|rst|adoc|org|text))$/i;
+export function docRole(base) {
+  if (!DOC_EXT.test(base)) return null;
+  for (const [re, r] of DOC_RE) if (re.test(base)) return r;
+  return null;
+}
+export const LOCKFILE = /(^|\/)(package-lock\.json|yarn\.lock|pnpm-lock\.yaml|bun\.lockb|Cargo\.lock|poetry\.lock|uv\.lock|Pipfile\.lock|go\.sum|Gemfile\.lock|composer\.lock)$/;
+const DEPLOY_FILE = /(^|\/)(Dockerfile[^/]*|docker-compose[^/]*\.ya?ml|compose\.ya?ml|fly\.toml|vercel\.json|netlify\.toml|Procfile)$/;
+
 const names = s => s.replace(/#.*/, '').split(',').filter(n => /\w/.test(n)).length;
 
 export function fileAnatomy(p, text, lang) {
   const base = p.slice(p.lastIndexOf('/') + 1);
+  if (lang === 'doc') return { c: 0, f: 0, lf: 0, x: 0, r: docRole(base) };
+  if (lang === 'lock') return { c: 0, f: 0, lf: 0, x: 0, r: 'lock' };
   if (lang === 'cfg') {
-    const r = MANIFEST.test(p) ? 'manifest' : /^tsconfig/.test(base) ? 'config' : 'build';
+    // deploy: containers / hosting descriptors, and CI workflows that ship something
+    const deploy = DEPLOY_FILE.test(p) || (p.startsWith('.github/workflows/') && /release|deploy|publish/i.test(base + '\n' + text));
+    const r = deploy ? 'deploy' : MANIFEST.test(p) ? 'manifest' : /^tsconfig/.test(base) ? 'config' : 'build';
     return { c: 0, f: 0, lf: 0, x: 0, r };
   }
   let c = 0, f = 0, x = 0, lf = 0;
