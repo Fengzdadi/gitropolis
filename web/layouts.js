@@ -461,7 +461,6 @@ const PLANNERS = {
     const span = Math.max(4, ...lots.map(l => Math.abs(l.x) + l.w / 2)) + 1.2;
     return {
       lots, blocks, labels, roads: [{ a: [-span, 0], b: [span, 0], w: 1.3 }], ground: 'land',
-      decor: [{ x: 0, z: -2.4 - 0.6, w: 0.5, d: 0.5, h: 4.4 }], // the church steeple
       camera: { az: 62, el: 26, dist: 0.55 },
       height: (i, rel) => i === ctx.hub ? 2.4 : Math.min(0.35 + 0.25 * Math.pow(rel, 0.4), 0.9),
     };

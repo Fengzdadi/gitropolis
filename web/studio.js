@@ -9,6 +9,7 @@ import { buildingSpecs, buildCityMesh } from './architecture.js';
 import { addGroundDetail } from './surfaces.js';
 import { buildStreets, buildTraffic } from './streets.js';
 import { timed } from './perf.js';
+import { buildTrees } from './trees.js';
 
 export const STYLES = {
   maquette: {
@@ -197,7 +198,9 @@ export function buildStudio(ctx) {
   const traffic = streets ? timed('traffic', () => buildTraffic({ streets, unit: layout.unit })) : null;
   if (traffic) scene.add(traffic.mesh);
   // the field's lookup tables were only needed to plan routes; the GPU keeps its own copy of the texture
-  if (streets) { streets.drivable = streets.navigable = null; streets.lanes = streets.boats = null; streets.texture.onUpdate = () => { streets.texture.image.data = null; }; }
+  const trees = S.pixel && layout ? timed('trees', () => buildTrees({ layout, B, streets, unit: layout.unit, plateStep })) : null;
+  if (trees) scene.add(trees);
+  if (streets) { streets.drivable = streets.navigable = null; streets.curbs = null; streets.lanes = streets.boats = null; streets.texture.onUpdate = () => { streets.texture.image.data = null; }; }
   const roadY = layout?.groundIsWater ? plateStep * 0.8 + 0.05 : 0.05;
 
   // ---- district plinths (classic treemap only)

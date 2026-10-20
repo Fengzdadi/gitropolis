@@ -110,7 +110,7 @@ export function buildStreets({ layout, B, files, inDeg, SIZE, t01 }) {
 
   // --- lanes: every block is circled by a lane halfway between its kerb and the street's centre line,
   // so the two blocks either side of a street give it traffic in both directions
-  const lanes = [];
+  const lanes = [], curbs = [];
   blocks.forEach((b, id) => {
     if (b.type === 'park') return;
     const poly = b.poly;
@@ -138,6 +138,8 @@ export function buildStreets({ layout, B, files, inDeg, SIZE, t01 }) {
     const half = gaps[Math.floor(gaps.length * 0.3)];
     if (half < 1.5) return; // alleys too narrow for a car
     lanes.push({ pts: offset(poly, out, half * tex * 0.5), lane: half * tex * 0.5, weight: 0.15 + 0.85 * Math.sqrt(weight[id] / maxW), born: born[id] });
+    // a line just off the kerb, where street trees go
+    curbs.push({ pts: offset(poly, out, half * tex * 0.2), half: half * tex });
   });
 
   // --- boats: loops out on the water around each island
@@ -153,7 +155,7 @@ export function buildStreets({ layout, B, files, inDeg, SIZE, t01 }) {
   const at = (x, z) => sample(x, z);
   const drivable = (x, z) => { const p = at(x, z); return p >= 0 && label[p] < 0 && !wet[p] && D[p] <= maxHalf + 1; };
   const navigable = (x, z) => { const p = at(x, z); return p >= 0 && wet[p] === 1; };
-  return { texture, min: new THREE.Vector2(x0, x0), size: S, texel: tex, maxHalf, lanes, boats, drivable, navigable };
+  return { texture, min: new THREE.Vector2(x0, x0), size: S, texel: tex, maxHalf, lanes, curbs, boats, drivable, navigable };
 }
 
 // push a polygon outward by `d` (mitred corners, clamped so sharp corners don't spike)

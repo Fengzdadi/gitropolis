@@ -10,6 +10,13 @@ const ROOF_BY_CITY = { paris: 'mansard', smalltown: 'gable', la: 'flat', venice:
 const STYLE_BY_LANG = { rs: 'rust', c: 'c', cpp: 'cpp', go: 'go', py: 'python', js: 'js', ts: 'ts', java: 'java', kt: 'java', rb: 'ruby', php: 'php', sh: 'shell' };
 const CODE = new Set(Object.keys(STYLE_BY_LANG));
 
+// district paint: language picks the material, the district picks the colour it's painted, so each
+// neighbourhood reads as one (strongly in a small town, as a hint of roof colour elsewhere)
+const ROOF_PAINT = ['#b5523b', '#3f5f7a', '#4f7a3a', '#c9902f', '#6e4a6e', '#2f7a72', '#8a3b30', '#4a4458'];
+const WALL_PAINT = ['#f2e3c6', '#cfe0ea', '#d6ebd3', '#f4e2a1', '#d9d4ea', '#f0cfcf', '#e6d2b5', '#f2efe9'];
+const DISTRICT_RE = /^(packages|apps|libs|crates|modules|plugins|services|projects)\/[^/]+/;
+const districtKey = p => (DISTRICT_RE.exec(p) || [p.includes('/') ? p.split('/')[0] : '·'])[0];
+
 export function buildingSpecs({ files, B, inDeg, unit, kind, t01 }) {
   const N = files.length;
   const rank = (vals) => { const order = [...vals.keys()].sort((a, b) => vals[a] - vals[b]); const r = new Array(N); order.forEach((i, k) => { r[i] = k / Math.max(1, N - 1); }); return r; };
@@ -31,6 +38,11 @@ export function buildingSpecs({ files, B, inDeg, unit, kind, t01 }) {
   // only a handful of the very newest source files are building sites, or the whole city is scaffolding
   const sites = new Set([...files.keys()].filter(i => (files[i].s || []).includes('new') && (files[i].a?.r || 'source') === 'source')
     .sort((a, b) => files[b].born - files[a].born).slice(0, Math.max(2, Math.round(N * 0.01))));
+  // districts ranked by size get palette slots in order, so the biggest ones get the most distinct colours
+  const dSize = new Map();
+  for (const f of files) dSize.set(districtKey(f.p), (dSize.get(districtKey(f.p)) || 0) + f.loc);
+  const dSlot = new Map([...dSize].sort((a, b) => b[1] - a[1]).map(([k], n) => [k, n]));
+  const town = kind === 'smalltown';
   const deploys = [...files.keys()].filter(i => files[i].a?.r === 'deploy').sort((a, b) => files[b].loc - files[a].loc);
 
   return files.map((f, i) => {
@@ -65,10 +77,10 @@ export function buildingSpecs({ files, B, inDeg, unit, kind, t01 }) {
     const hub = inDeg[i] === maxIn && maxIn > 0;
     const status = new Set(f.s || []);
     if (status.has('giant') && role === 'source') form = 'mega';
-    else if (hub) form = (a.c || 0) >= 2 ? 'setback' : 'tower';
+    else if (hub) form = town ? 'clocktower' : (a.c || 0) >= 2 ? 'setback' : 'tower';
     else if (status.has('dead')) form = 'ruin';
     else if (sites.has(i)) form = 'site';
-    const era = bornRank[i] < 0.34 ? 'old' : bornRank[i] < 0.67 ? 'mid' : 'new';
+    const era = town && hub ? 'old' : bornRank[i] < 0.34 ? 'old' : bornRank[i] < 0.67 ? 'mid' : 'new';
     const LOW = { house: 1.1, shed: 1.4, hall: 1.4, plant: 1.4, cityhall: 1.8, courthouse: 1.4, port: 0.6, airport: 0.9 };
     let h = LOW[form] ? Math.min(b.h, unit * LOW[form]) : b.h;
     if (form === 'clocktower') h = Math.max(b.h, unit * 2.6);
@@ -76,12 +88,36 @@ export function buildingSpecs({ files, B, inDeg, unit, kind, t01 }) {
     if (form === 'site') h *= 0.35;
     return {
       w: b.w, d: b.d, h, form, era, seed: i * 7919 + 13,
-      style: STYLE_BY_LANG[f.lang] || cityStyle,
+      // a small town's clock tower is old stone whatever the code is written in
+      style: town && hub ? 'default' : STYLE_BY_LANG[f.lang] || cityStyle,
       tiers: Math.min(4, Math.max(2, a.c || 3)),
-      roof: form === 'house' ? (ROOF_BY_CITY[kind] === 'mansard' ? 'mansard' : 'gable') : ROOF_BY_CITY[kind],
+      roof: form === 'house' ? (ROOF_BY_CITY[kind] === 'mansard' ? 'mansard' : town && (i * 2654435761 >>> 0) % 3 === 0 ? 'hip' : 'gable') : ROOF_BY_CITY[kind],
+      tint: (() => {
+        const slot = dSlot.get(districtKey(f.p)) || 0;
+        // in a small town, alternate between two wall colours within a district so a street isn't uniform
+        return town
+          ? { roof: ROOF_PAINT[slot % 8], roofMix: 0.85, wall: WALL_PAINT[(slot + (i % 3 === 0 ? 3 : 0)) % 8], wallMix: 0.7 }
+          : { roof: ROOF_PAINT[slot % 8], roofMix: 0.3 };
+      })(),
       props: { spire: spires.has(i) || hub, antenna: antennas.has(i) && !spires.has(i), crane: cranes.has(i), tank: kind === 'manhattan' && era !== 'new' && i % 5 === 0, ac: era === 'mid' && i % 3 === 0 },
     };
   });
+}
+
+// repaint roofs (and walls) towards the district colour, keeping each part's shading variation
+const _roof = new THREE.Color(), _wall = new THREE.Color(), _c = new THREE.Color();
+function paint(g, t) {
+  const col = g.attributes.color, part = g.attributes.part;
+  if (!col || !part) return;
+  _roof.set(t.roof);
+  if (t.wall) _wall.set(t.wall);
+  for (let k = 0; k < col.count; k++) {
+    const p = part.getX(k);
+    if (p === 1) _c.fromBufferAttribute(col, k).lerp(_roof, t.roofMix);
+    else if (p === 0 && t.wall) _c.fromBufferAttribute(col, k).lerp(_wall, t.wallMix);
+    else continue;
+    col.setXYZ(k, _c.r, _c.g, _c.b);
+  }
 }
 
 // one merged mesh for the whole city; per-vertex building id, base height and birth time
@@ -92,6 +128,7 @@ export function buildCityMesh({ buildingGeometry, specs, B, files, t01, shared, 
     if (B[i].w < 0.01) return;
     let g = buildingGeometry(spec);
     if (g.index) g = g.toNonIndexed();
+    if (spec.tint) paint(g, spec.tint);
     g.rotateY(B[i].rot || 0).translate(B[i].x, B[i].y, B[i].z);
     const n = g.attributes.position.count;
     const meta = new Float32Array(n * 3);
