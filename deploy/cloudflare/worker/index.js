@@ -13,6 +13,7 @@ export class Scanner extends Container {
 const NAME = /^[A-Za-z0-9_.-]{1,100}$/;
 const POOL = 3;               // scanners; one repo always goes to the same one, so it's scanned once
 const MAX_KB = 600_000;       // GitHub's repo size (pack size, KB): bigger repos are turned away
+const SCANNER = 2;            // bump when the scanner changes what it finds: cities are cached per version
 const json = (status, body, headers = {}) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json', ...headers } });
 
 // default branch, its head commit and the repo's size, from GitHub (cached for ten minutes)
@@ -42,7 +43,7 @@ async function city(owner, repo, req, env, ctx) {
   try { info = await lookup(owner, repo, env, ctx); } catch (err) { return json(502, { error: err.message }); }
   if (info.missing || info.private) return json(404, { error: `github.com/${owner}/${repo} isn't a public repository` });
   if (info.size > MAX_KB) return json(413, { error: `${info.full} is too big to scan here (${Math.round(info.size / 1000)} MB) — run npx gitropolis on your own copy` });
-  const key = `cities/${info.full.toLowerCase()}/${info.sha}.json`;
+  const key = `cities/v${SCANNER}/${info.full.toLowerCase()}/${info.sha}.json`;
   const hit = await env.CITIES.get(key);
   const headers = { 'cache-control': 'public, max-age=300', 'x-city-commit': info.sha };
   if (hit) return new Response(hit.body, { headers: { 'content-type': 'application/json', 'x-city-cache': 'hit', ...headers } });
