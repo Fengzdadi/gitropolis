@@ -30,6 +30,8 @@ const [w, h] = flag('--size', '1920x1080').split('x').map(Number);
 const maxMB = +flag('--max-mb', 9.5); // GitHub README uploads cap at 10 MB
 const headed = bool('--headed');
 const style = flag('--style', 'maquette');
+const pxOpt = flag('--pixel'); // pixel style: size of one art pixel (default 2)
+const zoomOpt = flag('--zoom'); // close-up factor (pixel style)
 const cityOpt = flag('--city', 'auto'); // auto | classic | smalltown | manhattan | hongkong | tokyo | la | paris | venice | barcelona
 const still = flag('--still');
 const shot = flag('--shot', 'hero');
@@ -124,12 +126,12 @@ const server = createServer(async (req, res) => {
 server.listen(port, () => {
   const link = `http://localhost:${port}`;
   if (!rec) {
-    const view = `${link}/?style=${style}&city=${cityOpt}`;
+    const view = `${link}/?style=${style}&city=${cityOpt}${pxOpt ? `&px=${pxOpt}` : ''}${zoomOpt ? `&zoom=${zoomOpt}` : ''}`;
     console.log(`  city open at ${cyan(view)}`);
     if (!noOpen) openBrowser(view);
     return;
   }
-  const recUrl = `${link}/?record=1&w=${w}&h=${h}&fps=${fps}&dur=${duration}&style=${style}&city=${cityOpt}` +
+  const recUrl = `${link}/?record=1&w=${w}&h=${h}&fps=${fps}&dur=${duration}&style=${style}&city=${cityOpt}${pxOpt ? `&px=${pxOpt}` : ''}${zoomOpt ? `&zoom=${zoomOpt}` : ''}` +
     (still ? `&still=1&shot=${shot}${noHud ? '&hud=0' : ''}` : '');
   console.log(still ? `  photographing ${style} / ${shot} at ${w}x${h} …` : `  filming ${duration}s at ${w}x${h}@${fps}fps …`);
   // a browser that never sends a frame (GPU trouble, blocked CDN) shouldn't hang the CLI forever

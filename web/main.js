@@ -15,6 +15,9 @@ const params = new URLSearchParams(location.search);
 const STYLE = params.get('style') || 'neon';
 const NEON = STYLE === 'neon';
 const PIXEL = STYLE === 'pixel';
+// art-pixel size in screen pixels, and how far to zoom in (close-ups frame the city's landmark)
+const PIXEL_SIZE = Math.max(1, Math.round(+params.get('px') || 2));
+const ZOOM = +params.get('zoom') || 1;
 const data = await fetch(params.get('data') || 'city.json').then(r => r.json());
 const files = data.files;
 const N = files.length;
@@ -151,7 +154,10 @@ controls.addEventListener('start', () => { controls.autoRotate = false; });
 // each planned city has its own establishing shot: azimuth, elevation, distance (× SIZE) and a target
 function planCamera({ az, el, dist, target }) {
   // pixel art keeps the classic 2:1 isometric angle for every city; the city's framing becomes zoom
-  if (PIXEL) { camera.zoom = 0.9 / dist; camera.updateProjectionMatrix(); az = 45; el = 30; }
+  if (PIXEL) {
+    camera.zoom = 0.9 / dist * ZOOM; camera.updateProjectionMatrix(); az = 45; el = 30;
+    if (ZOOM > 1.5) { const h = B[inDeg.indexOf(Math.max(...inDeg))]; target = [h.x, h.z]; }
+  }
   const A = THREE.MathUtils.degToRad(az), E = THREE.MathUtils.degToRad(el);
   const t = new THREE.Vector3(target[0], unit * 0.5, target[1]);
   camera.position.set(Math.cos(E) * Math.cos(A), Math.sin(E), Math.cos(E) * Math.sin(A)).multiplyScalar(SIZE * 1.25 * dist).add(t);
@@ -547,7 +553,7 @@ composer.addPass(new ShaderPass({
 const bloom = new UnrealBloomPass(new THREE.Vector2(viewW(), viewH()), 0.7, 0.45, 0.75);
 composer.addPass(bloom);
 studio?.setupPost(bloom);
-const pix = PIXEL ? createPixelPipeline(renderer, scene, camera, { pixel: 3 }) : null;
+const pix = PIXEL ? createPixelPipeline(renderer, scene, camera, { pixel: PIXEL_SIZE }) : null;
 const renderFrame = () => pix ? pix.render() : composer.render();
 composer.addPass(new OutputPass());
 
