@@ -6,6 +6,7 @@ import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { buildingGeometry } from './buildings.js';
 import { buildingSpecs, buildCityMesh } from './architecture.js';
+import { addGroundDetail } from './surfaces.js';
 
 export const STYLES = {
   maquette: {
@@ -61,22 +62,24 @@ function slab(polys, base, depth) {
   return geos.length ? mergeGeometries(geos) : null;
 }
 
-function buildTerrain(scene, layout, S, plateStep) {
+function buildTerrain(scene, layout, S, plateStep, shared) {
   const mat = color => S.flat ? new THREE.MeshBasicMaterial({ color })
     : new THREE.MeshStandardMaterial({ color, roughness: 0.95, flatShading: true });
-  const add = (geo, color) => {
+  const add = (geo, color, surface) => {
     if (!geo) return;
-    const mesh = new THREE.Mesh(geo, mat(color));
+    const m = mat(color);
+    if (S.pixel && surface) addGroundDetail(m, surface, { unit: layout.unit, shared });
+    const mesh = new THREE.Mesh(geo, m);
     mesh.receiveShadow = mesh.castShadow = !S.flat;
     scene.add(mesh);
   };
   const landTop = layout.groundIsWater ? plateStep * 0.8 : 0;
-  if (layout.groundIsWater) add(slab([...layout.land, ...layout.shore], 0, landTop), S.land);
-  if (layout.water.length) add(slab(layout.water, 0, plateStep * 0.05), S.water);
+  if (layout.groundIsWater) add(slab([...layout.land, ...layout.shore], 0, landTop), S.land, 'grass');
+  if (layout.water.length) add(slab(layout.water, 0, plateStep * 0.05), S.water, 'water');
   const colors = { block: S.plate, park: S.park, plaza: S.plaza, lawn: S.lawn };
   for (const type of Object.keys(colors)) {
     const polys = layout.blocks.filter(b => b.type === type).map(b => b.poly);
-    add(slab(polys, landTop, type === 'park' ? plateStep * 1.4 : plateStep), colors[type]);
+    add(slab(polys, landTop, type === 'park' ? plateStep * 1.4 : plateStep), colors[type], { block: 'paving', plaza: 'paving', park: 'grass', lawn: 'grass' }[type]);
   }
   if (S.flat) {
     // plan: hairline outline around every block
@@ -175,12 +178,13 @@ export function buildStudio(ctx) {
   const groundColor = !layout ? S.ground : { water: S.water, land: S.land, road: S.road }[layout.ground];
   const groundMat = S.flat ? new THREE.MeshBasicMaterial({ color: groundColor })
     : new THREE.MeshStandardMaterial({ color: groundColor, roughness: layout?.groundIsWater ? 0.35 : 1 });
+  if (S.pixel && layout) addGroundDetail(groundMat, { water: 'water', land: 'grass' }[layout.ground], { unit: layout.unit, shared });
   const ground = new THREE.Mesh(new THREE.PlaneGeometry(SIZE * 14, SIZE * 14).rotateX(-Math.PI / 2), groundMat);
   ground.receiveShadow = true;
   scene.add(ground);
 
   // ---- city terrain from a planner: land, raised blocks, parks, plazas, bridges, hills
-  if (layout) buildTerrain(scene, layout, S, plateStep);
+  if (layout) buildTerrain(scene, layout, S, plateStep, shared);
 
   // ---- district plinths (classic treemap only)
   if (!layout) {
@@ -294,7 +298,7 @@ export function buildStudio(ctx) {
   // pixel style: real architecture per file; the box mesh stays as an invisible picking proxy
   if (S.pixel && layout) {
     const specs = buildingSpecs({ files, B, inDeg, unit, kind: layout.kind, t01 });
-    scene.add(buildCityMesh({ buildingGeometry, specs, B, files, t01, shared }));
+    scene.add(buildCityMesh({ buildingGeometry, specs, B, files, t01, shared, unit }));
     mesh.material.visible = false;
     mesh.castShadow = false;
   }

@@ -2,6 +2,7 @@
 // age picks the era, the busiest files get spires and the most-edited ones keep a crane on site.
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
+import { addFacadeDetail } from './surfaces.js';
 
 const PERIPHERY = /(^|\/)(tests?|__tests__|specs?|e2e|fixtures?|samples?|examples?|docs?|playgrounds?|templates?|benchmarks?)(\/|$)/;
 const ROOF_BY_CITY = { paris: 'mansard', smalltown: 'gable', la: 'flat', venice: 'hip', barcelona: 'flat' };
@@ -85,7 +86,7 @@ export function buildingSpecs({ files, B, inDeg, unit, kind, t01 }) {
 
 // one merged mesh for the whole city; per-vertex building id, base height and birth time
 // let a shader grow every building from the ground when the timeline reaches it
-export function buildCityMesh({ buildingGeometry, specs, B, files, t01, shared, castShadow = true }) {
+export function buildCityMesh({ buildingGeometry, specs, B, files, t01, shared, unit, castShadow = true }) {
   const geos = [];
   specs.forEach((spec, i) => {
     if (B[i].w < 0.01) return;
@@ -112,6 +113,7 @@ export function buildCityMesh({ buildingGeometry, specs, B, files, t01, shared, 
       .replace('#include <common>', '#include <common>\nattribute vec3 aMeta; uniform float uTimeline;')
       .replace('#include <begin_vertex>', `#include <begin_vertex>\n${grow}`);
   };
+  addFacadeDetail(mat, { unit, shared });
   const depth = new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking });
   depth.onBeforeCompile = sh => {
     sh.uniforms.uTimeline = shared.uTimeline;
