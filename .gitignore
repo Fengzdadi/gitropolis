@@ -7,3 +7,4 @@ city.json
 *.mp4
 *.gif
 demo/
+.claude/

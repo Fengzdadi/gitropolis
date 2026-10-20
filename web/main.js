@@ -4,9 +4,14 @@ import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
+import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
 import { hierarchy, treemap, treemapSquarify } from 'd3-hierarchy';
+import { buildStudio } from './studio.js';
 
 const params = new URLSearchParams(location.search);
+// neon (original) | maquette | plan | nocturne
+const STYLE = params.get('style') || 'neon';
+const NEON = STYLE === 'neon';
 const data = await fetch(params.get('data') || 'city.json').then(r => r.json());
 const files = data.files;
 const N = files.length;
@@ -90,6 +95,7 @@ for (const l of leaves) {
 const REC = params.get('record') ? {
   w: +params.get('w') || 1920, h: +params.get('h') || 1080,
   fps: +params.get('fps') || 30, dur: +params.get('dur') || 20,
+  still: !!params.get('still'), shot: params.get('shot') || 'hero', hud: params.get('hud') !== '0',
 } : null;
 const viewW = () => REC ? REC.w : innerWidth;
 const viewH = () => REC ? REC.h : innerHeight;
@@ -146,7 +152,7 @@ const GLSL_COMMON = /* glsl */`
 `;
 
 // ---- sky dome: horizon glow
-{
+if (NEON) {
   const geo = new THREE.SphereGeometry(SIZE * 8, 32, 16);
   const mat = new THREE.ShaderMaterial({
     side: THREE.BackSide, depthWrite: false,
@@ -163,7 +169,7 @@ const GLSL_COMMON = /* glsl */`
 }
 
 // ---- ground grid
-{
+if (NEON) {
   const geo = new THREE.PlaneGeometry(SIZE * 16, SIZE * 16).rotateX(-Math.PI / 2);
   const mat = new THREE.ShaderMaterial({
     uniforms: { ...shared, uCell: { value: unit * 2 } },
@@ -185,7 +191,7 @@ const GLSL_COMMON = /* glsl */`
 const districts = [];
 root.each(n => { if (n.depth >= 1 && n.children) districts.push(n); });
 for (const n of districts) n.born = Math.min(...n.leaves().map(l => l.data.i !== undefined ? B[l.data.i].born : 1));
-{
+if (NEON) {
   const geo = new THREE.BoxGeometry(1, 1, 1).translate(0, 0.5, 0);
   const hue = new Float32Array(districts.length * 3);
   const mat = new THREE.ShaderMaterial({
@@ -232,7 +238,15 @@ for (const n of districts) n.born = Math.min(...n.leaves().map(l => l.data.i !==
 // ---- buildings (one instanced mesh, one draw call)
 const heat = new Float32Array(N);
 const focusAttr = new Float32Array(N).fill(1);
-const buildings = (() => {
+const studio = NEON ? null : buildStudio({ name: STYLE, scene, renderer, B, files, districts, unit, SIZE, plateStep, cx, cz,
+  shared, heat, focusAttr, inDeg, t01 });
+if (studio) {
+  document.body.classList.add('studio', `style-${STYLE}`);
+  document.body.style.setProperty('--ink', studio.style.ink);
+  document.body.style.setProperty('--ink-soft', studio.style.inkSoft);
+  document.body.style.setProperty('--paper', studio.style.background);
+}
+const buildings = studio ? studio.buildings : (() => {
   const geo = new THREE.BoxGeometry(1, 1, 1).translate(0, 0.5, 0);
   const info = new Float32Array(N * 4);
   const hue = new Float32Array(N);
@@ -243,7 +257,7 @@ const buildings = (() => {
       attribute float aHue, aHeat, aFocus;
       varying vec3 vW, vL, vN, vSize; varying vec4 vInfo; varying float vHue, vHeat, vFocus, vId;
       void main(){
-        float grow = smoothstep(aInfo.y, aInfo.y + 0.03, uTimeline);
+        float b0 = aInfo.y * 0.97; float grow = smoothstep(b0, b0 + 0.03, uTimeline); // born at 1.0 is fully grown by 1.0
         if (grow < 0.001) { gl_Position = vec4(0., 0., -2., 1.); return; }
         vec3 p = position; p.y *= grow;
         vec4 w = modelMatrix * instanceMatrix * vec4(p, 1.);
@@ -327,7 +341,7 @@ const arc = (i, j) => {
   p1.y = Math.max(p0.y, p2.y) + dist * 0.35 + unit;
   return [p0, p1, p2];
 };
-{
+if (NEON) {
   const SEG = 24;
   const pos = new Float32Array(edges.length * SEG * 2 * 3);
   const attr = new Float32Array(edges.length * SEG * 2 * 4); // t, born, src, dst
@@ -367,7 +381,7 @@ const arc = (i, j) => {
   lines.frustumCulled = false;
   scene.add(lines);
 }
-{
+if (NEON) {
   const PER = edges.length > 1500 ? 1 : 2;
   const n = edges.length * PER;
   const p0 = new Float32Array(n * 3), p1 = new Float32Array(n * 3), p2 = new Float32Array(n * 3);
@@ -421,7 +435,7 @@ const arc = (i, j) => {
 }
 
 // ---- street traffic: head/tail lights circling district blocks
-{
+if (NEON) {
   const rects = [];
   root.each(n => {
     if (!n.children || n.depth > 2) return;
@@ -488,8 +502,18 @@ const arc = (i, j) => {
 // ------------------------------------------------------------ post-processing
 const composer = new EffectComposer(renderer);
 composer.addPass(new RenderPass(scene, camera));
+// a single NaN/inf pixel (e.g. from a degenerate lit triangle) otherwise smears into black blocks through bloom
+composer.addPass(new ShaderPass({
+  uniforms: { tDiffuse: { value: null } },
+  vertexShader: `varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.); }`,
+  fragmentShader: `uniform sampler2D tDiffuse; varying vec2 vUv;
+    void main(){ vec4 c = texture2D(tDiffuse, vUv);
+      if (any(isnan(c)) || any(isinf(c))) c = vec4(0.0, 0.0, 0.0, 1.0);
+      gl_FragColor = min(c, vec4(64.0)); }`,
+}));
 const bloom = new UnrealBloomPass(new THREE.Vector2(viewW(), viewH()), 0.7, 0.45, 0.75);
 composer.addPass(bloom);
+studio?.setupPost(bloom);
 composer.addPass(new OutputPass());
 
 addEventListener('resize', () => {
@@ -556,7 +580,7 @@ const labelEls = (root.children || []).filter(c => c.children).slice(0, 24).map(
   el.className = 'label';
   el.textContent = n.data.name;
   const c = new THREE.Color().setHSL(n.hue, 1, 0.65);
-  el.style.color = `#${c.getHexString()}`;
+  el.style.color = studio ? studio.style.ink : `#${c.getHexString()}`;
   $('#labels').append(el);
   return { el, n, p: new THREE.Vector3((n.x0 + n.x1) / 2 - cx, plateStep, n.y1 - cz + est * 0.15) };
 });
@@ -687,7 +711,50 @@ async function record() {
   const stats = `${N.toLocaleString()} buildings · ${data.stats.loc.toLocaleString()} LOC · ${data.stats.commits.toLocaleString()} commits`;
   const v = new THREE.Vector3();
 
+  // quiet, print-like typography for the lit styles
+  function studioOverlay() {
+    const ST = studio.style;
+    g.drawImage(renderer.domElement, 0, 0, REC.w, REC.h);
+    if (!REC.hud) return;
+    const pad = 72 * S;
+    const year = t => new Date(t * 1000).getFullYear();
+    g.textAlign = 'left'; g.textBaseline = 'alphabetic'; g.letterSpacing = '0px';
+    g.fillStyle = ST.ink; g.font = `400 ${Math.round(76 * S)}px ${ST.font}`;
+    g.fillText(data.name, pad, pad + 60 * S);
+    g.fillStyle = ST.inkSoft; g.font = `400 ${Math.round(17 * S)}px Inter, sans-serif`;
+    g.fillText(`${year(data.start)}–${year(data.end)}   ·   ${N.toLocaleString()} files   ·   ${data.stats.loc.toLocaleString()} lines`, pad, pad + 98 * S);
+    g.textAlign = 'center'; g.textBaseline = 'middle';
+    g.font = `${ST.labelCase === 'upper' ? 500 : 400} ${Math.round((ST.labelCase === 'upper' ? 13 : 19) * S)}px ${ST.labelCase === 'upper' ? 'Inter, sans-serif' : ST.font}`;
+    g.letterSpacing = ST.labelCase === 'upper' ? `${Math.round(3 * S)}px` : '0px';
+    for (const { n, p } of labelEls) {
+      v.copy(p).project(camera);
+      if (v.z > 1 || Math.abs(v.x) > 0.95 || Math.abs(v.y) > 0.95) continue;
+      const txt = ST.labelCase === 'upper' ? n.data.name.toUpperCase() : n.data.name;
+      g.fillText(txt, (v.x * 0.5 + 0.5) * REC.w, (-v.y * 0.5 + 0.5) * REC.h);
+    }
+    g.letterSpacing = '0px';
+    g.textAlign = 'right'; g.textBaseline = 'alphabetic'; g.font = `400 ${Math.round(14 * S)}px Inter, sans-serif`;
+    g.fillText('gitropolis', REC.w - pad * 0.7, REC.h - pad * 0.6);
+  }
+
+  function stillCamera(name) {
+    const target = new THREE.Vector3(0, unit * 0.5, 0);
+    if (STYLE === 'plan' || name === 'plan') {
+      camera.fov = 12; camera.updateProjectionMatrix();
+      camera.up.set(0, 0, -1);
+      camera.position.set(0, (SIZE * 0.6) / Math.tan(THREE.MathUtils.degToRad(6)), 0);
+      camera.lookAt(0, 0, 0);
+      return;
+    }
+    const [az, el, d] = ({ hero: [35, N > 1000 ? 27 : 20, N > 1000 ? 0.95 : 1.0], aerial: [40, 42, 1.15], street: [60, 7, 0.5] }[name] || [35, 13, 0.8])
+      .map((x, k) => k < 2 ? THREE.MathUtils.degToRad(x) : x);
+    camera.position.set(Math.cos(el) * Math.cos(az), Math.sin(el), Math.cos(el) * Math.sin(az))
+      .multiplyScalar(SIZE * camK * 1.55 * d).add(target);
+    camera.lookAt(target);
+  }
+
   function overlay(u) {
+    if (studio) return studioOverlay();
     g.drawImage(renderer.domElement, 0, 0, REC.w, REC.h);
     const pad = 56 * S;
     g.textBaseline = 'top';
@@ -721,6 +788,19 @@ async function record() {
     }
     g.textAlign = 'right'; g.textBaseline = 'bottom'; g.font = font(16, 600); g.fillStyle = 'rgba(78,240,255,.55)';
     g.fillText('made with gitropolis', REC.w - pad * 0.6, REC.h - pad * 0.5);
+  }
+
+  if (studio) await Promise.all([document.fonts.load(`400 64px ${studio.style.font}`), document.fonts.load('400 16px Inter')]);
+  if (REC.still) {
+    setTimeline(1);
+    heat.fill(0);
+    stillCamera(REC.shot);
+    for (let i = 0; i < 3; i++) { tick(0); composer.render(); }
+    overlay(0.5);
+    const blob = await new Promise(r => out.toBlob(r, 'image/png'));
+    await fetch('/frame?i=0', { method: 'POST', body: blob });
+    await report('/done', '1');
+    return;
   }
 
   const total = Math.round(REC.fps * REC.dur);

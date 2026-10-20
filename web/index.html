@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>gitropolis</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;800&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Serif&family=Inter:wght@400;500&family=JetBrains+Mono:wght@400;600;800&display=swap" rel="stylesheet">
 <style>
   :root {
     --bg: #05020d; --ink: #e9e4ff; --dim: #8f86b8; --neon: #4ef0ff; --pink: #ff4fd8; --panel: rgba(12, 8, 30, .72);
@@ -39,6 +39,18 @@
   #legend { position: fixed; right: 24px; bottom: 24px; font-size: 11px; color: var(--dim); line-height: 1.7;
     text-align: right; pointer-events: none; }
   #loading { position: fixed; inset: 0; display: grid; place-items: center; color: var(--neon); letter-spacing: .3em; }
+  /* lit styles: ink on paper, no glow */
+  body.studio { background: var(--paper); color: var(--ink); font-family: Inter, sans-serif; }
+  body.studio #hud h1 { font-family: 'Instrument Serif', serif; font-weight: 400; font-size: 40px; color: var(--ink); text-shadow: none; letter-spacing: 0; }
+  body.studio #hud .stats, body.studio #date .c, body.studio #legend { color: var(--ink-soft); letter-spacing: 0; }
+  body.studio #date .d { font-family: 'Instrument Serif', serif; font-weight: 400; color: var(--ink); text-shadow: none; }
+  body.studio .label { font-family: 'Instrument Serif', serif; font-size: 15px; text-transform: none; letter-spacing: 0; text-shadow: none; font-weight: 400; }
+  body.studio #bar { background: transparent; border: 0; border-top: 1px solid var(--ink-soft); border-radius: 0; backdrop-filter: none; }
+  body.studio #bar button { color: var(--ink); border-color: var(--ink-soft); }
+  body.studio #bar input { accent-color: var(--ink); }
+  body.studio #tip { background: var(--paper); border: 1px solid var(--ink-soft); backdrop-filter: none; }
+  body.studio #tip b { color: var(--ink); }
+  body.studio #legend { display: none; }
   body.recording > :not(canvas):not(#rec) { display: none !important; }
   body.recording canvas { width: 100vw !important; height: auto !important; }
   #rec { position: fixed; top: 12px; left: 12px; color: #ff4fd8; font-size: 14px; letter-spacing: .1em; }

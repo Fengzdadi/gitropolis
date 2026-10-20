@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 // gitropolis [repo] [--port 4173] [--out city.json] [--no-open]
+//           [--style neon|maquette|plan|nocturne] [--still frame.png] [--shot hero|aerial|street|plan] [--no-hud]
 //           [--video city.mp4] [--gif city.gif] [--duration 20] [--fps 30] [--size 1920x1080] [--max-mb 9.5] [--headed]
 import { createServer } from 'node:http';
 import { readFile, writeFile, mkdtemp, stat, rm } from 'node:fs/promises';
@@ -28,15 +29,19 @@ const fps = +flag('--fps', 30);
 const [w, h] = flag('--size', '1920x1080').split('x').map(Number);
 const maxMB = +flag('--max-mb', 9.5); // GitHub README uploads cap at 10 MB
 const headed = bool('--headed');
+const style = flag('--style', 'neon');
+const still = flag('--still');
+const shot = flag('--shot', 'hero');
+const noHud = bool('--no-hud');
 const noOpen = bool('--no-open');
 const repo = args[0] || process.cwd();
-const recording = !!(video || gif);
+const recording = !!(video || gif || still);
 
 const WEB = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'web');
 const TYPES = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.json': 'application/json' };
 const pink = s => `\x1b[35m${s}\x1b[0m`, cyan = s => `\x1b[36m${s}\x1b[0m`;
 
-if (recording) {
+if (video || gif) {
   try { execFileSync('ffmpeg', ['-version'], { stdio: 'ignore' }); } catch {
     console.error('gitropolis: --video/--gif needs ffmpeg on your PATH (macOS: brew install ffmpeg)');
     process.exit(1);
@@ -61,11 +66,11 @@ if (recording) {
   const tmp = await mkdtemp(path.join(os.tmpdir(), 'gitropolis-'));
   // frames land in a near-lossless master first; the size-capped outputs are encoded from it
   const mp4 = path.join(tmp, 'master.mp4');
-  const ff = spawn('ffmpeg', ['-y', '-loglevel', 'error', '-f', 'image2pipe', '-framerate', String(fps), '-c:v', 'mjpeg', '-i', '-',
+  const ff = still ? null : spawn('ffmpeg', ['-y', '-loglevel', 'error', '-f', 'image2pipe', '-framerate', String(fps), '-c:v', 'mjpeg', '-i', '-',
     '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '12', '-pix_fmt', 'yuv420p', mp4],
     { stdio: ['pipe', 'inherit', 'inherit'] });
-  const ffDone = new Promise(r => ff.on('close', r));
-  rec = { tmp, mp4, ff, ffDone, total: Math.round(fps * duration), got: 0, browser: null, t0: Date.now() };
+  const ffDone = ff && new Promise(r => ff.on('close', r));
+  rec = { tmp, mp4, ff, ffDone, total: still ? 1 : Math.round(fps * duration), got: 0, browser: null, t0: Date.now() };
 }
 
 const readBody = req => new Promise((resolve, reject) => {
@@ -83,7 +88,9 @@ const server = createServer(async (req, res) => {
   }
   if (rec && req.method === 'POST') {
     const body = await readBody(req);
-    if (url === '/frame') {
+    if (url === '/frame' && still) {
+      await writeFile(path.resolve(still), body);
+    } else if (url === '/frame') {
       if (!rec.ff.stdin.write(body)) await new Promise(r => rec.ff.stdin.once('drain', r));
       rec.got++;
       const pct = rec.got / rec.total;
@@ -111,12 +118,14 @@ const server = createServer(async (req, res) => {
 server.listen(port, () => {
   const link = `http://localhost:${port}`;
   if (!rec) {
-    console.log(`  city open at ${cyan(link)}`);
-    if (!noOpen) openBrowser(link);
+    const view = style === 'neon' ? link : `${link}/?style=${style}`;
+    console.log(`  city open at ${cyan(view)}`);
+    if (!noOpen) openBrowser(view);
     return;
   }
-  const recUrl = `${link}/?record=1&w=${w}&h=${h}&fps=${fps}&dur=${duration}`;
-  console.log(`  filming ${duration}s at ${w}x${h}@${fps}fps …`);
+  const recUrl = `${link}/?record=1&w=${w}&h=${h}&fps=${fps}&dur=${duration}&style=${style}` +
+    (still ? `&still=1&shot=${shot}${noHud ? '&hud=0' : ''}` : '');
+  console.log(still ? `  photographing ${style} / ${shot} at ${w}x${h} …` : `  filming ${duration}s at ${w}x${h}@${fps}fps …`);
   const chrome = findChrome();
   if (chrome && !headed) {
     rec.browser = spawn(chrome, ['--headless=new', `--window-size=${w},${h}`, '--hide-scrollbars', '--mute-audio',
@@ -129,9 +138,15 @@ server.listen(port, () => {
 });
 
 async function finishRecording() {
+  rec.browser?.kill();
+  if (still) {
+    console.log(`\n  ${cyan('still')} ${path.resolve(still)} (${await size(still)})`);
+    await rm(rec.tmp, { recursive: true, force: true }).catch(() => {});
+    server.close();
+    process.exit(0);
+  }
   rec.ff.stdin.end();
   await rec.ffDone;
-  rec.browser?.kill();
   const secs = ((Date.now() - rec.t0) / 1000).toFixed(0);
   console.log(`\n  rendered in ${secs}s`);
   if (video) {
