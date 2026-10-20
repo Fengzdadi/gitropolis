@@ -83,6 +83,27 @@
   body.style-pixel #links a:hover, body.style-pixel #links button:hover { color: #c0413b; }
   body.waiting #links { visibility: hidden; }
   body.style-pixel .label { font-size: 13px; }
+  /* the share dialog: a pixel panel with the card's preview */
+  #card-dialog { position: fixed; inset: 0; z-index: 50; display: grid; place-items: center; background: rgba(20, 18, 28, .45); padding: 16px;
+    font-family: var(--ui-font, 'Pixelify Sans', monospace); color: #14121c; }
+  #card-dialog .card-panel { background: #f2efe9; border: 3px solid #14121c; box-shadow: 6px 6px 0 #14121c; width: min(760px, 100%);
+    max-height: calc(100vh - 32px); overflow: auto; padding: 14px 16px 16px; display: grid; gap: 12px; }
+  #card-dialog .card-head { display: flex; justify-content: space-between; align-items: center; font-size: 18px; }
+  #card-dialog button { all: unset; cursor: pointer; box-sizing: border-box; border: 3px solid #14121c; background: #fff; padding: 6px 10px; font-size: 14px; text-align: center; }
+  #card-dialog button:hover { background: #f2c14e; }
+  #card-dialog button:active { transform: translate(2px, 2px); }
+  #card-dialog button[hidden] { display: none; }
+  #card-dialog .card-x { border: 0; background: none; font-size: 24px; padding: 0 4px; line-height: 1; }
+  #card-dialog .card-formats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+  #card-dialog .card-formats button { display: grid; gap: 2px; }
+  #card-dialog .card-formats small { font-size: 11px; color: #4a4458; }
+  #card-dialog .card-formats button.on { background: #f2c14e; }
+  #card-dialog .card-view { position: relative; display: grid; place-items: center; background: #cdc8d2; min-height: 180px; padding: 8px; }
+  #card-dialog .card-view img { max-width: 100%; max-height: 52vh; display: block; box-shadow: 4px 4px 0 #14121c; transition: opacity .2s; }
+  #card-dialog .card-view img:not([src]) { display: none; }
+  #card-dialog .card-view span { position: absolute; font-size: 15px; }
+  #card-dialog .card-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  #card-dialog .card-hd { font-size: 13px; margin-right: auto; display: flex; gap: 6px; align-items: center; cursor: pointer; }
   body.recording > :not(canvas):not(#rec) { display: none !important; }
   body.recording canvas { width: 100vw !important; height: auto !important; }
   #rec { position: fixed; top: 12px; left: 12px; color: #ff4fd8; font-size: 14px; letter-spacing: .1em; }
@@ -134,7 +155,7 @@
 </div>
 <div id="links">
   <a id="gh-repo" target="_blank" rel="noopener" hidden>on GitHub ↗</a>
-  <button id="share" title="Copy a link to this city">share</button>
+  <button id="share" title="Share this city: a card to post, or the link">share</button>
   <a id="another" href="/" hidden>another repo</a>
   <a id="gh-self" href="https://github.com/Fengzdadi/gitropolis" target="_blank" rel="noopener">★ gitropolis</a>
 </div>

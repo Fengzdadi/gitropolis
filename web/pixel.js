@@ -82,18 +82,37 @@ export function createPixelPipeline(renderer, scene, camera, { pixel = 3, outlin
   }
   resize();
 
+  function draw(out) {
+    const u = quad.material.uniforms;
+    // tell surface shaders how big one art pixel is in world units, so their patterns can match it
+    if (pxUniform && camera.isOrthographicCamera) pxUniform.value = (camera.top - camera.bottom) / camera.zoom / lowRes.y;
+    u.uEdgePx.value = camera.isOrthographicCamera ? 3 * (camera.top - camera.bottom) / camera.zoom / lowRes.y : 0;
+    u.uNear.value = camera.near; u.uFar.value = camera.far; u.uOrtho.value = camera.isOrthographicCamera ? 1 : 0;
+    renderer.setRenderTarget(target);
+    renderer.render(scene, camera);
+    renderer.setRenderTarget(out);
+    renderer.render(postScene, postCam);
+    renderer.setRenderTarget(null);
+  }
+  let shot = null;
+
   return {
     resize,
-    render() {
-      const u = quad.material.uniforms;
-      // tell surface shaders how big one art pixel is in world units, so their patterns can match it
-      if (pxUniform && camera.isOrthographicCamera) pxUniform.value = (camera.top - camera.bottom) / camera.zoom / lowRes.y;
-      u.uEdgePx.value = camera.isOrthographicCamera ? 3 * (camera.top - camera.bottom) / camera.zoom / lowRes.y : 0;
-      u.uNear.value = camera.near; u.uFar.value = camera.far; u.uOrtho.value = camera.isOrthographicCamera ? 1 : 0;
-      renderer.setRenderTarget(target);
-      renderer.render(scene, camera);
-      renderer.setRenderTarget(null);
-      renderer.render(postScene, postCam);
+    render() { draw(null); },
+    // the current view at exactly w × h art pixels, off screen (for share cards): an ImageData
+    capture(w, h) {
+      const keep = lowRes.clone();
+      lowRes.set(w, h); target.setSize(w, h);
+      shot ??= new THREE.WebGLRenderTarget(1, 1, { minFilter: THREE.NearestFilter, magFilter: THREE.NearestFilter });
+      shot.setSize(w, h);
+      draw(shot);
+      const buf = new Uint8Array(w * h * 4);
+      renderer.readRenderTargetPixels(shot, 0, 0, w, h, buf);
+      lowRes.copy(keep); target.setSize(keep.x, keep.y);
+      // WebGL rows run bottom-up
+      const img = new ImageData(w, h), row = w * 4;
+      for (let y = 0; y < h; y++) img.data.set(buf.subarray((h - 1 - y) * row, (h - y) * row), y * row);
+      return img;
     },
   };
 }

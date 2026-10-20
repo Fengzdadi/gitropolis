@@ -11,6 +11,7 @@ import { buildLayout, CITY_KINDS } from './layouts.js';
 import { createPixelPipeline } from './pixel.js';
 import { PERF, HEAP, timed } from './perf.js';
 import { startWaiting } from './waiting.js';
+import { openShareDialog } from './card.js';
 
 const params = new URLSearchParams(location.search);
 // when filming, any error on the page goes straight back to the CLI (rather than a silent 90s wait);
@@ -216,7 +217,7 @@ if (PIXEL) {
 // margins: centre it on screen, leave a margin, keep clear of the title above.
 const ISO_DIR = (() => { const A = Math.PI / 4, E = Math.PI / 6; return new THREE.Vector3(Math.cos(E) * Math.cos(A), Math.sin(E), Math.cos(E) * Math.sin(A)); })();
 let FIT = null;
-function fitFrame() {
+function fitFrame(aspect = viewW() / viewH(), bands = clearBands()) {
   const cam = camera.clone();
   cam.position.copy(ISO_DIR).multiplyScalar(SIZE * 2); cam.lookAt(0, 0, 0); cam.updateMatrixWorld();
   const inv = cam.matrixWorldInverse, v = new THREE.Vector3();
@@ -229,12 +230,12 @@ function fitFrame() {
   });
   for (const bl of layout?.blocks || []) for (const [x, z] of bl.poly) add(x, plateStep + (bl.h || 0), z);
   if (!Number.isFinite(x0)) return { center: new THREE.Vector3(), zoom: 1 };
-  const aspect = viewW() / viewH(), { top, bottom } = clearBands();
+  const { top, bottom, left = 0, right = 0 } = bands;
   // the city may use 90% of the width and what's left of the height between the title and the timeline
-  const free = Math.max(0.3, 1 - top - bottom) * 0.94;
-  const zoom = Math.min(2 * ISO_H * aspect * 0.9 / Math.max(x1 - x0, 1e-6), 2 * ISO_H * free / Math.max(y1 - y0, 1e-6));
-  const halfH = ISO_H / zoom;
-  const c = new THREE.Vector3((x0 + x1) / 2, (y0 + y1) / 2 + halfH * (top - bottom), -SIZE * 2).applyMatrix4(cam.matrixWorld);
+  const freeW = Math.max(0.3, 1 - left - right) * 0.9, freeH = Math.max(0.3, 1 - top - bottom) * 0.94;
+  const zoom = Math.min(2 * ISO_H * aspect * freeW / Math.max(x1 - x0, 1e-6), 2 * ISO_H * freeH / Math.max(y1 - y0, 1e-6));
+  const halfH = ISO_H / zoom, halfW = halfH * aspect;
+  const c = new THREE.Vector3((x0 + x1) / 2 - halfW * (left - right), (y0 + y1) / 2 + halfH * (top - bottom), -SIZE * 2).applyMatrix4(cam.matrixWorld);
   return { center: c, zoom, aspect, h: viewH() };
 }
 // the share of the screen height the overlays take at the top (title, date) and the bottom (timeline,
@@ -252,6 +253,7 @@ function clearBands() {
   return { top: top / H, bottom: bottom / H };
 }
 function aimPixel(center, zoom) {
+  controls.minZoom = Math.min(0.5, zoom * 0.8); // a phone needs to zoom out further to see the whole city
   camera.zoom = zoom; camera.updateProjectionMatrix();
   camera.position.copy(ISO_DIR).multiplyScalar(SIZE * 2).add(center);
   camera.lookAt(center);
@@ -770,12 +772,53 @@ if (route) {
   $('#hud h1').replaceChildren(a);
   $('#gh-repo').href = gh; $('#gh-repo').hidden = false; $('#another').hidden = false;
 }
+const CITY_PHRASE = { farm: 'a farm village', desert: 'a desert boomtown', capital: 'a planned capital', mountain: 'a mountain city', university: 'a university town', port: 'a port city', smalltown: 'a small town', manhattan: 'Manhattan', hongkong: 'Hong Kong', tokyo: 'Tokyo', la: 'Los Angeles', paris: 'Paris', venice: 'Venice', barcelona: 'Barcelona' };
+const shareLink = route ? `https://gitropolis.dev/${route[1]}/${route[2]}` : 'https://gitropolis.dev';
 $('#share').onclick = async () => {
-  const url = location.origin + location.pathname;
-  try { await navigator.clipboard.writeText(url); $('#share').textContent = 'link copied'; }
-  catch { prompt('Copy this link:', url); }
-  setTimeout(() => { $('#share').textContent = 'share'; }, 1800);
+  if (!pix || !layout) { // share cards are drawn in the pixel style; elsewhere, the link
+    try { await navigator.clipboard.writeText(shareLink); $('#share').textContent = 'link copied'; }
+    catch { prompt('Copy this link:', shareLink); }
+    setTimeout(() => { $('#share').textContent = 'share'; }, 1800);
+    return;
+  }
+  const [owner, repo] = route ? [route[1], route[2]] : data.name.includes('/') ? data.name.split('/').slice(-2) : ['', data.name];
+  const year = t => new Date(t * 1000).getFullYear();
+  openShareDialog({
+    link: shareLink,
+    filename: `gitropolis-${owner ? owner + '-' : ''}${repo}`.replace(/[^\w.-]+/g, '-'),
+    capture: captureCity,
+    info: {
+      owner, repo,
+      phrase: CITY_PHRASE[layout.kind] || layout.kind,
+      reasons: layout.kind === data.identity?.city ? data.identity.reasons : [],
+      stats: [[N, 'buildings'], [data.stats.loc, 'lines'], [data.stats.commits, 'commits']],
+      years: [year(data.start), year(data.end)],
+      activity(n) {
+        const bins = new Array(n).fill(0);
+        for (const c of commits) bins[Math.min(n - 1, Math.floor((c[0] - data.start) / span * n))]++;
+        const max = Math.max(1, ...bins);
+        return bins.map(v => v ? 0.15 + 0.85 * Math.sqrt(v / max) : 0);
+      },
+      url: shareLink.replace(/^https:\/\//, ''),
+    },
+  });
 };
+// the whole grown city, framed for a share card of artW × artH art pixels, without disturbing the view
+function captureCity(artW, artH, bands) {
+  const keep = { l: camera.left, r: camera.right, zoom: camera.zoom, pos: camera.position.clone(), target: controls.target.clone(),
+    tl: shared.uTimeline.value, focus: shared.uFocus.value, hover: shared.uHover?.value, heat: heat.slice() };
+  camera.left = -ISO_H * artW / artH; camera.right = -camera.left;
+  const fit = fitFrame(artW / artH, bands);
+  aimPixel(fit.center, fit.zoom);
+  shared.uTimeline.value = 1; shared.uFocus.value = -1; if (shared.uHover) shared.uHover.value = -1;
+  heat.fill(0); buildings.geometry.attributes.aHeat.needsUpdate = true;
+  const img = pix.capture(artW, artH);
+  camera.left = keep.l; camera.right = keep.r; camera.zoom = keep.zoom; camera.updateProjectionMatrix();
+  camera.position.copy(keep.pos); controls.target.copy(keep.target); camera.lookAt(keep.target);
+  shared.uTimeline.value = keep.tl; shared.uFocus.value = keep.focus; if (shared.uHover) shared.uHover.value = keep.hover;
+  heat.set(keep.heat); buildings.geometry.attributes.aHeat.needsUpdate = true;
+  return img;
+}
 
 function setTimeline(v) {
   shared.uTimeline.value = v;
@@ -1038,7 +1081,7 @@ async function record() {
     g.fillText(`${year(data.start)}–${year(data.end)}   ·   ${N.toLocaleString()} files   ·   ${data.stats.loc.toLocaleString()} lines`, pad, pad + 98 * S);
     if (layout && data.identity) {
       const id = data.identity;
-      const name = { farm: 'a farm village', desert: 'a desert boomtown', capital: 'a planned capital', mountain: 'a mountain city', university: 'a university town', port: 'a port city', smalltown: 'a small town', manhattan: 'Manhattan', hongkong: 'Hong Kong', tokyo: 'Tokyo', la: 'Los Angeles', paris: 'Paris', venice: 'Venice', barcelona: 'Barcelona' }[layout.kind];
+      const name = CITY_PHRASE[layout.kind];
       g.fillStyle = ST.ink; g.font = `italic 400 ${Math.round(30 * S)}px ${ST.font}`;
       g.fillText(`built like ${name}`, pad, pad + 146 * S);
       if (layout.kind === id.city && id.reasons.length) {
