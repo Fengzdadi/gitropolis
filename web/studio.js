@@ -197,7 +197,7 @@ function buildTerrain(scene, layout, S, plateStep, shared, street) {
 }
 
 export function buildStudio(ctx) {
-  const { name, scene, renderer, B, files, districts, unit, SIZE, plateStep, cx, cz, shared, heat, focusAttr, inDeg, t01, layout } = ctx;
+  const { name, scene, renderer, B, files, districts, unit, SIZE, plateStep, cx, cz, shared, heat, focusAttr, inDeg, hub, t01, layout } = ctx;
   // a desert city stands on sand: the open ground and the lawns between blocks become dunes
   const S = layout?.sand ? { ...STYLES[name], land: STYLES[name].sand, lawn: STYLES[name].dune } : STYLES[name];
   const N = files.length;
@@ -297,7 +297,6 @@ export function buildStudio(ctx) {
   }
 
   // ---- buildings: one instanced mesh, standard material + injected growth, windows, heat and focus
-  const hub = inDeg.indexOf(Math.max(...inDeg));
   const info = new Float32Array(N * 4);
   const geo = new THREE.BoxGeometry(1, 1, 1).translate(0, 0.5, 0);
   const base = new THREE.Color(S.building), accent = new THREE.Color(S.accent);
@@ -380,7 +379,7 @@ export function buildStudio(ctx) {
   // pixel style: real architecture per file; the box mesh stays as an invisible picking proxy
   let cityMesh = null;
   if (S.pixel && layout) {
-    const specs = timed('building specs', () => buildingSpecs({ files, B, inDeg, unit, kind: layout.kind, t01 }));
+    const specs = timed('building specs', () => buildingSpecs({ files, B, inDeg, hub, unit, kind: layout.kind, t01 }));
     cityMesh = timed('building geometry + merge', () => buildCityMesh({ buildingGeometry, specs, B, files, t01, shared, unit, heat, focus: focusAttr }));
     scene.add(cityMesh);
     mesh.material.visible = false;

@@ -21,7 +21,7 @@ const WALL_PAINT = ['#f2e3c6', '#cfe0ea', '#d6ebd3', '#f4e2a1', '#d9d4ea', '#f0c
 const DISTRICT_RE = /^(packages|apps|libs|crates|modules|plugins|services|projects)\/[^/]+/;
 const districtKey = p => (DISTRICT_RE.exec(p) || [p.includes('/') ? p.split('/')[0] : '·'])[0];
 
-export function buildingSpecs({ files, B, inDeg, unit, kind, t01 }) {
+export function buildingSpecs({ files, B, inDeg, hub: hubIdx, unit, kind, t01 }) {
   const N = files.length;
   const rank = (vals) => { const order = [...vals.keys()].sort((a, b) => vals[a] - vals[b]); const r = new Array(N); order.forEach((i, k) => { r[i] = k / Math.max(1, N - 1); }); return r; };
   const bornRank = rank(files.map(f => f.born));
@@ -32,9 +32,9 @@ export function buildingSpecs({ files, B, inDeg, unit, kind, t01 }) {
   const recentChurn = files.map(f => t01(f.last) > 0.95 ? f.churn : 0);
   const cranes = top(recentChurn, 0.015, 5);
   const locs = files.map(f => f.loc).sort((a, b) => a - b), medLoc = locs[N >> 1] || 1;
-  const maxIn = Math.max(...inDeg);
   const crowdLoc = N > 6000 ? locs[Math.floor(N * 0.8)] : 0;
-  const entry = outDeg.indexOf(Math.max(...outDeg));
+  let entry = 0;
+  for (let i = 1; i < N; i++) if (outDeg[i] > outDeg[entry]) entry = i;
   const nbLocs = files.filter(f => f.a?.r === 'notebook').map(f => f.loc).sort((a, b) => a - b);
   const barnLoc = nbLocs.length ? nbLocs[Math.floor(nbLocs.length * 0.85)] : Infinity; // only the biggest notebooks are barns
   // the city's own vernacular (for manifests, docs and other non-code buildings): its biggest language
@@ -106,9 +106,9 @@ export function buildingSpecs({ files, B, inDeg, unit, kind, t01 }) {
         else if (slender) form = 'tower';
         else form = 'slab';
     }
-    // the city's landmark is always a tower, whatever kind of file it is
-    // (a farm always has its windmill: with no imports at all, the green holds the first file)
-    const hub = (inDeg[i] === maxIn && maxIn > 0) || (kind === 'farm' && maxIn === 0 && i === 0);
+    // the city's landmark is always a tower, whatever kind of file it is: the one hub the planner gave
+    // the landmark's plot (with no imports at all that's the first file, so the plot is never empty)
+    const hub = i === hubIdx;
     const status = new Set(f.s || []);
     if (status.has('giant') && role === 'source') form = 'mega';
     else if (hub) form = town ? 'clocktower' : kind === 'port' ? 'lighthouse' : kind === 'university' ? 'library' : kind === 'capital' ? 'congress' : kind === 'desert' ? 'needle' : kind === 'farm' ? 'windmill' : (a.c || 0) >= 2 ? 'setback' : 'tower';
