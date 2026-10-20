@@ -58,6 +58,10 @@ gitropolis reads the shape of your code and picks a plan to match it. A big mono
 <td><img src="docs/media/capital-service.png" alt="ardanlabs/service as a planned capital"><br><b>Planned capital</b>: ardanlabs/service. A strictly layered design: no package depends on one that depends back on it. The foundation layer stands at the head of a monumental axis by a lake, each layer above steps back down the axis, and the biggest layer sweeps out as two wings.</td>
 <td><img src="docs/media/capital-service-close.png" alt="close-up of the capital's plaza"><br><b>Planned capital</b>, close up. The most-depended-on file is the congress, the file that imports the most is the cathedral, and everything else is a white slab on columns in a green superblock.</td>
 </tr>
+<tr>
+<td><img src="docs/media/desert-openai-agents.png" alt="openai-agents-python as a desert boomtown"><br><b>Desert boomtown</b>: openai-agents-python. A big city out of nothing in under two years. The biggest files are supertalls along the coast highway, the newest ones are still cranes, and the tests live in villas on a palm island.</td>
+<td><img src="docs/media/desert-flask.png" alt="flask drawn as a desert boomtown"><br><b>Desert boomtown</b>: flask <sup>*</sup>, drawn small enough to see every piece. The needle is the most-depended-on file, with twisting, sail and crowned towers, empty plots of sand, and the palm with its crescent.</td>
+</tr>
 </table>
 
 <sub><sup>*</sup> These were forced with `--city`; left to itself, gitropolis plans these repos as Paris and Manhattan. Any repo can be drawn as any city.</sub>
@@ -84,6 +88,7 @@ Some repos also get a condition on top of their plan. A repo with no recent comm
 | The tallest spire | the most-imported file |
 | City hall · courthouse · clock tower | README · LICENSE · CHANGELOG |
 | Port · power plant · airport | lockfile · package manifest · deploy config |
+| Supertall · needle · crane · palm villa | one of the biggest files · the most-depended-on file · a file born in the last stretch · a test or doc |
 | Axis · superblock · congress · cathedral | a layer of the design · a package · the most-depended-on file · the file that imports the most |
 | Terrace · stairway | a package (subpackages are higher terraces) · the empty directories a path climbs through |
 | College · chapel · library | docs and books: a page · a table of contents · the most-linked page |
@@ -108,7 +113,7 @@ Filming runs in headless Chrome, so it looks the same on every machine. It needs
 
 | Option | Default | |
 |---|---|---|
-| `--city <plan>` | `auto` | `capital` `mountain` `university` `port` `smalltown` `manhattan` `hongkong` `tokyo` `la` `paris` `venice` `barcelona` |
+| `--city <plan>` | `auto` | `desert` `capital` `mountain` `university` `port` `smalltown` `manhattan` `hongkong` `tokyo` `la` `paris` `venice` `barcelona` |
 | `--style <look>` | `pixel` | `maquette` `plan` `nocturne` are smooth-shaded alternatives |
 | `--pixel <n>` | `2` | size of one art pixel, in screen pixels |
 | `--zoom <n>` | `1` | close-up factor; `3` frames the city centre |

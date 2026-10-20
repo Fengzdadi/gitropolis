@@ -22,7 +22,7 @@ function shortLabel(t) {
   return s.length > 22 ? s.slice(0, 21) + '…' : s;
 }
 
-export const CITY_KINDS = ['capital', 'mountain', 'university', 'port', 'smalltown', 'manhattan', 'hongkong', 'tokyo', 'la', 'paris', 'venice', 'barcelona'];
+export const CITY_KINDS = ['desert', 'capital', 'mountain', 'university', 'port', 'smalltown', 'manhattan', 'hongkong', 'tokyo', 'la', 'paris', 'venice', 'barcelona'];
 
 // ---------------------------------------------------------------- shared helpers
 
@@ -456,6 +456,99 @@ const PLANNERS = {
       lots, blocks, labels, land: [rectPoly(-ST, -ST, W, H)],
       camera: { az: 45, el: 46, dist: 0.85 },
       height: (i, rel) => i === ctx.hub ? 9 : 1.45 + 0.2 * Math.tanh(Math.log(rel)),
+    };
+  },
+
+  // a desert boomtown: a city that wasn't here two years ago. The biggest files are supertall towers
+  // in a line along the coast highway, the most-depended-on one a needle on a plaza with a fountain
+  // lake; the rest of the code is a grid of blocks inland with empty plots of sand still waiting; and
+  // the tests and docs live in villas out on a palm-shaped island.
+  desert(ds, ctx) {
+    const files = ctx.files;
+    const items = ds.flatMap(d => d.items.map(it => ({ ...it, d }))).filter(it => it.i !== ctx.hub);
+    const N = items.length;
+    const T = clamp(Math.round(N * 0.04), 4, 40);
+    // (only code: a lockfile or a manifest is a landmark of its own, never a tower on the strip)
+    const towers = new Set(items.filter(it => !['cfg', 'doc', 'lock'].includes(files[it.i].lang)).sort((a, b) => files[b.i].loc - files[a.i].loc).slice(0, T).map(it => it.i));
+    const villas = items.filter(it => !towers.has(it.i) && (PERIPH_RE.test(it.d.name + '/') || PERIPH_RE.test(files[it.i].p)));
+    const villaSet = new Set(villas.map(it => it.i));
+    const lots = [], blocks = [], labels = [], water = [], roads = [];
+    // the strip: towers either side of the highway, the needle's plaza in the middle
+    const RD = 0.6, side = it => clamp(Math.sqrt(it.a) * 1.1, 1.0, 2.4);
+    const strip = [...items].filter(it => towers.has(it.i)).sort((a, b) => files[b.i].loc - files[a.i].loc);
+    const rows = [[], []];
+    strip.forEach((it, n) => rows[n % 2].push(it));
+    // middle-out along each row, so the tallest stand near the needle
+    const arrange = list => { const out = []; list.forEach((it, n) => (n % 2 ? out.push(it) : out.unshift(it))); return out; };
+    const HP = 4.5; // the needle's plaza
+    const rowLen = list => sum(list.map(it => side(it) + 0.7));
+    const L = Math.max(rowLen(rows[0]), rowLen(rows[1])) + HP + 2;
+    rows.forEach((list, r) => {
+      const arr = arrange(list), half = Math.ceil(arr.length / 2);
+      let xl = -HP / 2 - 0.7, xr = HP / 2 + 0.7;
+      arr.forEach((it, n) => {
+        const s = side(it), left = n < half;
+        const x = left ? xl - s / 2 : xr + s / 2;
+        if (left) xl -= s + 0.7; else xr += s + 0.7;
+        const z = r ? RD + 0.4 + s / 2 : -RD - 0.4 - s / 2;
+        blocks.push({ poly: rectPoly(x - s / 2 - 0.15, z - s / 2 - 0.15, x + s / 2 + 0.15, z + s / 2 + 0.15), type: 'plaza' });
+        lots.push({ i: it.i, x, z, w: s * 0.8, d: s * 0.8, rot: 0 });
+      });
+    });
+    blocks.push({ poly: rectPoly(-HP / 2, -RD - 0.4 - HP, HP / 2, -RD - 0.4), type: 'plaza' });
+    lots.push({ i: ctx.hub, x: 0, z: -RD - 0.4 - HP * 0.62, w: 1.6, d: 1.6, rot: 0 });
+    water.push(circlePoly(HP * 0.22, -RD - 0.4 - HP * 0.22, 0.75, 20)); // the fountain lake at its foot
+    roads.push({ a: [-L / 2 - 2, 0], b: [L / 2 + 2, 0], w: RD * 1.6 });
+    // inland: districts on a grid, with plots of open sand still waiting for someone to build on them
+    const inland = ds.map(d => ({ d, items: d.items.filter(it => it.i !== ctx.hub && !towers.has(it.i) && !villaSet.has(it.i)) })).filter(g => g.items.length);
+    const A = sum(inland.flatMap(g => g.items.map(it => it.a)));
+    const cells = [];
+    for (const g of inland) for (const c of chunk(g.items, 7)) cells.push({ d: g.d, items: c, a: sum(c.map(it => it.a)) });
+    const vacant = Math.round(cells.length * 0.35);
+    for (let k = 0; k < vacant; k++) cells.splice(Math.floor(hash(k + 3) * (cells.length + 1)), 0, { vacant: true, a: 4 + hash(k) * 4 });
+    const W = Math.max(L, Math.sqrt((A + vacant * 6) / 0.55) * 1.2), D = (A + vacant * 6) / 0.55 / W + 1;
+    const z0 = -RD - 0.4 - HP - 1.2;
+    const root = hierarchy({ children: cells }).sum(c => c.a || 0);
+    treemap().tile(treemapSquarify.ratio(1)).size([W, D]).paddingInner(0.7)(root);
+    const seen = new Set();
+    for (const l of root.leaves()) {
+      const c = l.data;
+      if (c.vacant) continue;
+      const x0 = l.x0 - W / 2, x1 = l.x1 - W / 2, zA = z0 - l.y1, zB = z0 - l.y0;
+      blocks.push({ poly: rectPoly(x0, zA, x1, zB), type: ground(c.d) });
+      lots.push(...packRect(c.items, x0, zA, x1, zB, 0.08));
+      if (!seen.has(c.d) && c.d.name !== '·') { seen.add(c.d); labels.push({ text: c.d.name, x: (x0 + x1) / 2, z: zA - 0.35 }); }
+    }
+    // the sea, and the palm island in it: a trunk out from the beach, fronds of villas, a crescent
+    const zSea = RD + 0.4 + 2.4 + 1.6;
+    const VA = sum(villas.map(it => it.a));
+    const F = clamp(Math.round(Math.sqrt(villas.length) * 1.2), villas.length ? 4 : 0, 18);
+    const perFrond = Math.ceil(villas.length / Math.max(1, F)), fl = clamp(perFrond * 0.75, 2.5, 9);
+    const trunkX = L * 0.22, trunkL = Math.ceil(F / 2) * 1.6 + 2.5;
+    const land = [rectPoly(-W / 2 - 3, z0 - D - 3, W / 2 + 3, zSea)];
+    if (F) {
+      land.push(rectPoly(trunkX - 0.5, zSea - 0.2, trunkX + 0.5, zSea + trunkL));
+      for (let k = 0; k < F; k++) {
+        const z = zSea + 2.2 + Math.floor(k / 2) * 1.6, dir = k % 2 ? 1 : -1;
+        const xa = trunkX + dir * 0.5, xb = trunkX + dir * (0.5 + fl);
+        land.push(rectPoly(Math.min(xa, xb), z - 0.4, Math.max(xa, xb), z + 0.4));
+        const mine = villas.slice(k * perFrond, (k + 1) * perFrond);
+        mine.forEach((it, n) => {
+          const t = (n + 0.5) / Math.max(1, mine.length);
+          lots.push({ i: it.i, x: xa + (xb - xa) * t, z, w: Math.min(0.62, fl / Math.max(1, mine.length) * 0.8), d: 0.5, rot: 0 });
+        });
+      }
+      // the crescent breakwater round the palm
+      const cr = [], R0 = fl + 2.2, R1 = R0 + 0.6, czc = zSea + trunkL * 0.5;
+      for (let k = 0; k <= 30; k++) { const a = -0.1 + Math.PI * 1.2 * k / 30; cr.push([trunkX + Math.cos(a + Math.PI * -0.1) * R1, czc + Math.sin(a) * R1 * 0.9]); }
+      for (let k = 30; k >= 0; k--) { const a = -0.1 + Math.PI * 1.2 * k / 30; cr.push([trunkX + Math.cos(a + Math.PI * -0.1) * R0, czc + Math.sin(a) * R0 * 0.9]); }
+      land.push(cr);
+      void VA;
+    }
+    return {
+      lots, blocks, labels, water, roads, sand: true, ground: 'water', land,
+      camera: { az: 45, el: 30, dist: 0.9 },
+      height: (i, rel) => i === ctx.hub ? 16 : towers.has(i) ? Math.min(3 + 4 * Math.pow(rel, 0.4), 11) : villaSet.has(i) ? 0.45 : Math.min(0.5 + 0.7 * Math.pow(rel, 0.5), 2.4),
     };
   },
 
@@ -940,6 +1033,7 @@ export function buildLayout(kind, { files, inDeg, SIZE, frontAz }) {
     roads: (L.roads || []).map(r => ({ a: P(r.a), b: P(r.b), w: r.w * s })),
     hills: (L.hills || []).map(h => ({ x: (h.x - mx) * s, z: (h.z - mz) * s, r: h.r * s, h: h.h * s })),
     paths: !!L.paths,
+    sand: !!L.sand,
     stairs: (L.stairs || []).map(st => ({ ...st, x: (st.x - mx) * s, z: (st.z - mz) * s, rise: st.rise * s, run: st.run * s, w: st.w * s, top: st.top * s })),
     cables: (L.cables || []).map(c => ({ a: [...P(c.a), c.a[2] * s], b: [...P(c.b), c.b[2] * s] })),
     ships: (L.ships || []).map(sh => ({ ...sh, x: (sh.x - mx) * s, z: (sh.z - mz) * s, len: sh.len * s, beam: sh.beam * s })),

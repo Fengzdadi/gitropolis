@@ -42,8 +42,9 @@ export function buildingSpecs({ files, B, inDeg, unit, kind, t01 }) {
   const cityStyle = STYLE_BY_LANG[mainLang] || 'default';
   // one airport per city: the biggest deploy file
   // only a handful of the very newest source files are building sites, or the whole city is scaffolding
-  const sites = new Set([...files.keys()].filter(i => (files[i].s || []).includes('new') && (files[i].a?.r || 'source') === 'source')
-    .sort((a, b) => files[b].born - files[a].born).slice(0, Math.max(2, Math.round(N * 0.01))));
+  // (a boomtown is different: there the newest 12% of its source files are cranes and scaffolding)
+  const sites = new Set([...files.keys()].filter(i => (kind === 'desert' || (files[i].s || []).includes('new')) && (files[i].a?.r || 'source') === 'source')
+    .sort((a, b) => files[b].born - files[a].born).slice(0, Math.max(2, Math.round(N * (kind === 'desert' ? 0.12 : 0.01)))));
   // districts ranked by size get palette slots in order, so the biggest ones get the most distinct colours
   // when one top-level directory holds most of the code (a lone src/ or source/), its subdirectories
   // are the real neighbourhoods: paint by those instead, so single-directory repos aren't one colour
@@ -103,10 +104,12 @@ export function buildingSpecs({ files, B, inDeg, unit, kind, t01 }) {
     const hub = inDeg[i] === maxIn && maxIn > 0;
     const status = new Set(f.s || []);
     if (status.has('giant') && role === 'source') form = 'mega';
-    else if (hub) form = town ? 'clocktower' : kind === 'port' ? 'lighthouse' : kind === 'university' ? 'library' : kind === 'capital' ? 'congress' : (a.c || 0) >= 2 ? 'setback' : 'tower';
+    else if (hub) form = town ? 'clocktower' : kind === 'port' ? 'lighthouse' : kind === 'university' ? 'library' : kind === 'capital' ? 'congress' : kind === 'desert' ? 'needle' : (a.c || 0) >= 2 ? 'setback' : 'tower';
     else if (kind === 'capital' && i === entry) form = 'cathedral'; // the file that imports the most: where the plan is read from
     else if (status.has('dead')) form = 'ruin';
     else if (sites.has(i)) form = 'site';
+    // the boomtown's strip: anything that tall is a supertall
+    if (kind === 'desert' && !hub && b.h > unit * 2.8 && ['slab', 'tower', 'setback', 'podium', 'hall', 'frame', 'mega', 'house', 'shed'].includes(form)) form = 'supertall';
     if (kind === 'capital' && ['slab', 'tower', 'setback', 'podium', 'house', 'hall', 'frame', 'mega'].includes(form)) form = 'pilotis';
     const era = town && hub ? 'old' : bornRank[i] < 0.34 ? 'old' : bornRank[i] < 0.67 ? 'mid' : 'new';
     const LOW = { house: 1.1, shed: 1.4, hall: 1.4, plant: 1.4, cityhall: 1.8, courthouse: 1.4, port: 0.6, airport: 0.9, containers: 0.5, tanks: 0.7, warehouse: 0.8 };
@@ -115,6 +118,7 @@ export function buildingSpecs({ files, B, inDeg, unit, kind, t01 }) {
     if (form === 'lighthouse') h = Math.max(b.h, unit * 3);
     if (form === 'chapel') h = Math.max(b.h, unit * 1.7);
     if (form === 'library') h = Math.max(b.h, unit * 2.4);
+    if (form === 'needle') h = Math.max(b.h, unit * 8);
     if (form === 'cathedral') h = Math.max(b.h * 0.8, unit * 1.3);
     if (form === 'ruin') h *= 0.6;
     if (form === 'site') h *= 0.35;

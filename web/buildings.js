@@ -41,7 +41,8 @@ export const LANDMARKS = ['cityhall', 'courthouse', 'clocktower', 'port', 'airpo
 export const INDUSTRY = ['containers', 'tanks', 'warehouse', 'lighthouse']; // the port city
 export const CAMPUS = ['college', 'chapel', 'library']; // the university town
 export const CAPITAL = ['pilotis', 'congress', 'cathedral']; // the planned capital
-export const FORMS = [...BASE_FORMS, ...LANDMARKS, ...INDUSTRY, ...CAMPUS, ...CAPITAL];
+export const DESERT = ['supertall', 'needle']; // the desert boomtown
+export const FORMS = [...BASE_FORMS, ...LANDMARKS, ...INDUSTRY, ...CAMPUS, ...CAPITAL, ...DESERT];
 export const STYLES = ['rust', 'c', 'cpp', 'go', 'python', 'js', 'ts', 'java', 'ruby', 'php', 'shell', 'default'];
 export const ERAS = ['old', 'mid', 'new'];
 export const ROOFS = ['flat', 'gable', 'hip', 'mansard', 'spire', 'dome'];
@@ -1699,6 +1700,57 @@ function buildCathedral(M, S) {
   return null;
 }
 
+// ------------------------------------------------------------ the desert boomtown
+// supertall glass tower in one of three silhouettes: twisting, sail, or crowned with a spire
+function buildSupertall(M, S) {
+  const { w, d, h, u } = S, rng = S.rng;
+  S.nb = 3;
+  const kind = ['twist', 'sail', 'crown'][Math.floor(rng() * 3)];
+  const g1 = rgb(S.P.glass[rng() < 0.5 ? 0 : 3]), g2 = rgb(S.P.glass[1]), mull = rgb(S.P.metal[2]);
+  const R = Math.min(w, d) * 0.5 * SQ * 0.95, base = h * 0.04;
+  M.box(-w / 2, w / 2, 0, base, -d / 2, d / 2, [POD, S.base], [TRIM, S.trim]);
+  if (kind === 'twist') {
+    const n = 14;
+    for (let k = 0; k < n; k++) {
+      const y0 = base + (h - base) * k / n, y1 = base + (h - base) * (k + 1) / n, r = R * (1 - 0.25 * k / n);
+      M.loft(0, 0, [[y0, r, r], [y1 - (h / n) * 0.12, r, r]], 4, [GLASS, k % 2 ? g1 : g2], { rot: Math.PI / 4 + k * 0.09 });
+      M.loft(0, 0, [[y1 - (h / n) * 0.12, r * 1.02, r * 1.02], [y1, r * 1.02, r * 1.02]], 4, [TRIM, mull], { rot: Math.PI / 4 + k * 0.09, cap: k === n - 1 ? [ROOF, mull] : undefined });
+    }
+  } else if (kind === 'sail') {
+    const prof = [[base, 1], [h * 0.45, 0.95], [h * 0.75, 0.7], [h * 0.92, 0.35], [h, 0.08]];
+    M.loft(0, 0, prof.map(([y, k]) => [y, R * k, R * k * 0.75]), 4, [GLASS, g1], { rot: Math.PI / 4, cap: [ROOF, mull] });
+    M.strut([R * 0.45, base, R * 0.35], [R * 0.05, h * 1.04, R * 0.04], Math.max(u * 0.04, 0.02), TRIM, mull); // the mast down its spine
+  } else {
+    const bands = 10, top = h * 0.8;
+    for (let k = 0; k < bands; k++) {
+      const y0 = base + (top - base) * k / bands, y1 = base + (top - base) * (k + 1) / bands;
+      M.box(-w * 0.42, w * 0.42, y0, y1 - (y1 - y0) * 0.15, -d * 0.42, d * 0.42, [GLASS, k % 3 ? g1 : g2], null, ['top']);
+      M.box(-w * 0.43, w * 0.43, y1 - (y1 - y0) * 0.15, y1, -d * 0.43, d * 0.43, [TRIM, mull], [ROOF, mull]);
+    }
+    M.taper(0, 0, w * 0.86, d * 0.86, w * 0.1, d * 0.1, top, h * 0.95, [GLASS, g2], [ROOF, mull]);
+    M.strut([0, h * 0.95, 0], [0, h * 1.08, 0], Math.max(u * 0.03, 0.015), TRIM, mull);
+  }
+  return null;
+}
+
+// the tallest tower in town: a stepped hexagonal shaft that keeps narrowing into a long needle
+function buildNeedle(M, S) {
+  const { w, d, h, u } = S;
+  S.nb = 4;
+  const R = Math.min(w, d) * 0.48, silver = rgb(S.P.metal[2]), glass = rgb(S.P.glass[0]), dark = rgb(S.P.glass[2]);
+  M.loft(0, 0, [[0, R * 1.15, R * 1.15], [h * 0.02, R * 1.15, R * 1.15]], 6, [POD, S.base], { cap: [POD, S.base] });
+  const tiers = 9, shaft = h * 0.78;
+  let y = h * 0.02;
+  for (let k = 0; k < tiers; k++) {
+    const r = R * (1 - k / (tiers + 1.5)), th = (shaft - h * 0.02) / tiers;
+    M.loft(0, 0, [[y, r, r], [y + th * 0.88, r * 0.97, r * 0.97]], 6, [GLASS, k % 2 ? glass : dark], { rot: k * 0.35 });
+    M.loft(0, 0, [[y + th * 0.88, r * 1.01, r * 1.01], [y + th, r * 0.95, r * 0.95]], 6, [TRIM, silver], { rot: k * 0.35 });
+    y += th;
+  }
+  M.loft(0, 0, [[shaft, R * 0.22, R * 0.22], [h * 0.9, R * 0.1, R * 0.1], [h, 0, 0]], 6, [TRIM, silver]);
+  return null;
+}
+
 // a container ship moored in a basin: not a file, just the harbour's life. Bow towards +x.
 export function shipGeometry({ len, beam, seed = 1 }) {
   const M = new Builder(), rng = mulberry32(seed * 2654435761 + 7);
@@ -1736,7 +1788,8 @@ const BUILDERS = { slab: buildSlab, tower: buildTower, setback: buildSetback, po
   cityhall: buildCityhall, courthouse: buildCourthouse, clocktower: buildClocktower, port: buildPort, airport: buildAirport, ruin: buildRuin, site: buildSite, mega: buildMega,
   containers: buildContainers, tanks: buildTanks, warehouse: buildWarehouse, lighthouse: buildLighthouse,
   college: buildCollege, chapel: buildChapel, library: buildLibrary,
-  pilotis: buildPilotis, congress: buildCongress, cathedral: buildCathedral };
+  pilotis: buildPilotis, congress: buildCongress, cathedral: buildCathedral,
+  supertall: buildSupertall, needle: buildNeedle };
 
 const FLAT = { old: 'flat', mid: 'flat', new: 'flat' };
 const DEFAULT_ROOF = {
@@ -1753,6 +1806,7 @@ const DEFAULT_ROOF = {
   containers: FLAT, tanks: FLAT, warehouse: FLAT, lighthouse: FLAT,
   college: FLAT, chapel: FLAT, library: FLAT,
   pilotis: FLAT, congress: FLAT, cathedral: FLAT,
+  supertall: FLAT, needle: FLAT,
 };
 // landmarks that ignore the era: a ruin is always weathered, a building site is always raw
 const FORCE_ERA = { ruin: 'old', site: 'mid' };

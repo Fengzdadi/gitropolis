@@ -22,7 +22,7 @@
 <div id="labels"></div>
 <script type="module">
 import * as THREE from 'three';
-import { buildingGeometry, BASE_FORMS, LANDMARKS, INDUSTRY, CAMPUS, CAPITAL, ERAS, ROOFS, STYLES } from './buildings.js';
+import { buildingGeometry, BASE_FORMS, LANDMARKS, INDUSTRY, CAMPUS, CAPITAL, DESERT, ERAS, ROOFS, STYLES } from './buildings.js';
 
 // One scene, one orthographic iso camera, every building laid out on a grid.
 const W = innerWidth, H = innerHeight;
@@ -47,6 +47,7 @@ const sizes = { // representative footprints per form: [w, d, h]
   containers: [16, 9, 4], tanks: [12, 8, 6], warehouse: [16, 8, 6], lighthouse: [5, 5, 26],
   college: [16, 6, 10], chapel: [14, 6, 18], library: [14, 14, 18],
   pilotis: [18, 5, 10], congress: [20, 12, 22], cathedral: [10, 10, 12],
+  supertall: [7, 7, 50], needle: [8, 8, 70],
 };
 const Q = new URLSearchParams(location.search), only = Q.get('only'), show = g => !only || only.split(',').includes(g);
 const group = (g, fn) => { if (show(g)) fn(); };
@@ -108,6 +109,12 @@ group('capital', () => {
   const it = (form, era, seed, extra = {}) => ({ spec: { form, era, seed, w: sizes[form][0], d: sizes[form][1], h: sizes[form][2], ...extra }, name: `${form} ${era}` });
   ERAS.forEach((era, r) => rows.push({ label: `capital ${era}`, items: CAPITAL.map((f, i) => it(f, era, 81 + r * 4 + i)) }));
   rows.push({ label: 'capital more', items: [it('pilotis', 'new', 90, { w: 5, d: 16 }), it('pilotis', 'mid', 91, { w: 8, d: 6, h: 6 })] });
+});
+
+// the desert boomtown: every supertall silhouette (by seed) and the needle
+group('desert', () => {
+  const it = (form, era, seed, extra = {}) => ({ spec: { form, era, seed, w: sizes[form][0], d: sizes[form][1], h: sizes[form][2], ...extra }, name: `${form} ${seed}` });
+  rows.push({ label: 'desert', items: [it('supertall', 'new', 1), it('supertall', 'new', 2), it('supertall', 'new', 3), it('supertall', 'new', 4), it('supertall', 'new', 6), it('needle', 'new', 5)] });
 });
 
 // ?f=courthouse,port keeps only those forms; ?s=rust,go keeps only those styles (for close inspection)

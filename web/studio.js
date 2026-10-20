@@ -18,7 +18,7 @@ export const STYLES = {
     hemi: { sky: '#f6f3ee', ground: '#a69d90', intensity: 1.25 },
     heightScale: 0.42, maxHeight: 4.5,
     building: '#f1ede6', buildingJitter: 0.035, ground: '#d8d1c5', plate: '#e4ded4', roughness: 0.92,
-    rail: '#8f877c', water: '#b7c2c3', land: '#ddd6ca', yard: '#c9c4b8', cliff: '#cbbfae', plaza: '#ece7de', park: '#c6cab0', lawn: '#d4d4bf', hill: '#d9d1c4', road: '#c9c1b4',
+    rail: '#8f877c', water: '#b7c2c3', land: '#ddd6ca', yard: '#c9c4b8', sand: '#e6d8b5', dune: '#d6c49c', cliff: '#cbbfae', plaza: '#ece7de', park: '#c6cab0', lawn: '#d4d4bf', hill: '#d9d1c4', road: '#c9c1b4',
     windows: 0, accent: '#d8452b', edges: { color: '#2a2724', opacity: 0.07 },
     toneMapping: THREE.NeutralToneMapping, exposure: 1.15, bloom: null,
     ink: '#2a2724', inkSoft: 'rgba(42,39,36,.55)', font: "'Instrument Serif', Georgia, serif", labelCase: 'none',
@@ -26,7 +26,7 @@ export const STYLES = {
   plan: {
     background: '#f1ede4', fog: null, flat: true,
     building: '#1c1b1a', buildingJitter: 0, ground: '#f1ede4', plate: '#e7e2d7',
-    rail: '#2f5d7c', water: '#dce3e3', land: '#f1ede4', yard: '#e4e0d6', cliff: '#ddd5c6', plaza: '#ece8df', park: '#e1e3d0', lawn: '#ebebdf', hill: '#e4dfd4', road: '#ddd7cb',
+    rail: '#2f5d7c', water: '#dce3e3', land: '#f1ede4', yard: '#e4e0d6', sand: '#f1e7d0', dune: '#e6d9bc', cliff: '#ddd5c6', plaza: '#ece8df', park: '#e1e3d0', lawn: '#ebebdf', hill: '#e4dfd4', road: '#ddd7cb',
     windows: 0, accent: '#d23c2a', edges: { color: '#d23c2a', opacity: 0.22 },
     toneMapping: THREE.NoToneMapping, exposure: 1.0, bloom: null,
     ink: '#1c1b1a', inkSoft: 'rgba(28,27,26,.55)', font: "'Instrument Serif', Georgia, serif", labelCase: 'upper',
@@ -36,7 +36,7 @@ export const STYLES = {
     sun: { color: '#fff4e0', intensity: 2.6, elevation: 50, azimuth: 75 },
     hemi: { sky: '#c4e4ee', ground: '#61944a', intensity: 1.0 },
     building: '#bdb293', buildingJitter: 0.06, ground: '#61944a', plate: '#cdc8d2', roughness: 1,
-    rail: '#4a4458', water: '#2f6188', land: '#61944a', yard: '#9c97a8', cliff: '#968a6e', plaza: '#e0d7b8', park: '#3d6b36', lawn: '#93bf62', hill: '#3d6b36', road: '#6e6880',
+    rail: '#4a4458', water: '#2f6188', land: '#61944a', yard: '#9c97a8', sand: '#dccfa4', dune: '#bdb293', cliff: '#968a6e', plaza: '#e0d7b8', park: '#3d6b36', lawn: '#93bf62', hill: '#3d6b36', road: '#6e6880',
     windows: 0, accent: '#c0413b', edges: null,
     toneMapping: THREE.NoToneMapping, exposure: 1.0, bloom: null,
     ink: '#14121c', inkSoft: 'rgba(20,18,28,.7)', font: "'Pixelify Sans', monospace", uiFont: "'Pixelify Sans', monospace", labelCase: 'none',
@@ -47,7 +47,7 @@ export const STYLES = {
     hemi: { sky: '#56607e', ground: '#17151a', intensity: 1.15 },
     heightScale: 0.55, maxHeight: 6,
     building: '#3d4049', buildingJitter: 0.04, ground: '#14161c', plate: '#24262e', roughness: 0.8,
-    rail: '#6d6050', water: '#0b1626', land: '#1c1e25', yard: '#25272e', cliff: '#1d1f25', plaza: '#2d2f37', park: '#18211a', lawn: '#1b211d', hill: '#15161c', road: '#0e0f13',
+    rail: '#6d6050', water: '#0b1626', land: '#1c1e25', yard: '#25272e', sand: '#2a2620', dune: '#221f1a', cliff: '#1d1f25', plaza: '#2d2f37', park: '#18211a', lawn: '#1b211d', hill: '#15161c', road: '#0e0f13',
     windows: 1, windowColor: '#ffc27a', accent: '#ffc27a', edges: { color: '#ffc27a', opacity: 0.018 }, hubEdgeBoost: 3,
     toneMapping: THREE.ACESFilmicToneMapping, exposure: 1.1, bloom: { strength: 0.35, radius: 0.4, threshold: 0.85 },
     ink: '#e8e2d6', inkSoft: 'rgba(232,226,214,.55)', font: "'Instrument Serif', Georgia, serif", labelCase: 'none',
@@ -87,7 +87,8 @@ function buildTerrain(scene, layout, S, plateStep, shared, street) {
   };
   const landTop = layout.groundIsWater ? plateStep * 0.8 : 0;
   if (layout.groundIsWater) add(slab([...layout.land, ...layout.shore], 0, landTop), S.land, 'grass-or-street');
-  if (layout.water.length) add(slab(layout.water, 0, plateStep * 0.05), S.water, 'water');
+  // lakes and rivers; on a city whose ground is the sea, they're pools sitting on the land
+  if (layout.water.length) add(slab(layout.water, layout.groundIsWater ? landTop : 0, plateStep * 0.05), S.water, 'water');
   const colors = { block: S.plate, park: S.park, plaza: S.plaza, lawn: S.lawn, yard: S.yard };
   // terraces (a mountain city): rock cliffs up to each terrace, its surface laid on top
   const raised = layout.blocks.filter(b => b.h > 0);
@@ -193,7 +194,8 @@ function buildTerrain(scene, layout, S, plateStep, shared, street) {
 
 export function buildStudio(ctx) {
   const { name, scene, renderer, B, files, districts, unit, SIZE, plateStep, cx, cz, shared, heat, focusAttr, inDeg, t01, layout } = ctx;
-  const S = STYLES[name];
+  // a desert city stands on sand: the open ground and the lawns between blocks become dunes
+  const S = layout?.sand ? { ...STYLES[name], land: STYLES[name].sand, lawn: STYLES[name].dune } : STYLES[name];
   const N = files.length;
   // each style sets its own skyline proportions: a model city is squat, a night city can soar
   const H = B.map(b => S.flat ? plateStep * 0.5 : layout ? b.h : Math.min(b.h * (S.heightScale || 1), unit * (S.maxHeight || 99)));

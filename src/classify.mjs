@@ -198,6 +198,7 @@ export function cityMetrics(city, now = Date.now() / 1000) {
     coreFiles: n,
     totalFiles: codeIdx.length,
     ageYears: span / YEAR,
+    commitsPerWeek: commitCount / Math.max(1, span / (7 * 86400)),
     idleYears: Math.max(0, (now - end) / YEAR),
     staleShare: F.filter(f => end - f.last > 2 * YEAR).length / Math.max(1, n),
     recentBoost: avgPerWindow && commitCount >= 200 && recentCommits >= 30 ? recentCommits / avgPerWindow : 0,
@@ -216,6 +217,11 @@ export function cityMetrics(city, now = Date.now() / 1000) {
 
 // Each archetype: a list of [score 0..1, reason] terms; the city's score is their mean.
 const ARCHETYPES = {
+  desert: m => [
+    [1 - ramp(m.ageYears, 1.5, 3), `only ${Math.max(1, Math.round(m.ageYears * 12))} months old`],
+    [ramp(m.commitsPerWeek, 15, 80), `${Math.round(m.commitsPerWeek)} commits a week: towers going up faster than the roads`],
+    [ramp(m.files, 150, 1500), `${m.files.toLocaleString()} buildings out of the sand`],
+  ],
   capital: m => {
     // the plan only counts if it holds: any package cycle and it's not a planned city
     const clean = m.pkgEdges >= 20 ? ramp(m.pkgAcyclic, 0.9, 1) : 0;
@@ -289,7 +295,7 @@ const STATES = {
 };
 
 export const CITY_NAMES = {
-  capital: 'Planned Capital', mountain: 'Mountain City', university: 'University Town', port: 'Port City', smalltown: 'Small Town', manhattan: 'Manhattan', hongkong: 'Hong Kong', tokyo: 'Tokyo',
+  desert: 'Desert Boomtown', capital: 'Planned Capital', mountain: 'Mountain City', university: 'University Town', port: 'Port City', smalltown: 'Small Town', manhattan: 'Manhattan', hongkong: 'Hong Kong', tokyo: 'Tokyo',
   la: 'Los Angeles', paris: 'Paris', venice: 'Venice', barcelona: 'Barcelona',
 };
 
@@ -303,6 +309,8 @@ export function classify(city) {
   const port = scored.find(s => s.id === 'port');
   const best = m.infraShare >= 0.5 && m.infraFiles >= 8 ? port
     : m.proseShare >= 0.5 && m.proseFiles >= 10 ? scored.find(s => s.id === 'university')
+    // a big city out of nothing in under two years is a boomtown, whatever its streets look like
+    : m.ageYears < 2 && m.commitsPerWeek >= 15 && m.files >= 150 ? scored.find(s => s.id === 'desert')
     : m.files < 15 ? scored.find(s => s.id === 'smalltown') : scored[0];
   return {
     city: best.id,
