@@ -142,6 +142,16 @@ controls.autoRotate = true;
 controls.autoRotateSpeed = 0.35;
 controls.addEventListener('start', () => { controls.autoRotate = false; });
 
+// each planned city has its own establishing shot: azimuth, elevation, distance (× SIZE) and a target
+function planCamera({ az, el, dist, target }) {
+  const A = THREE.MathUtils.degToRad(az), E = THREE.MathUtils.degToRad(el);
+  const t = new THREE.Vector3(target[0], unit * 0.5, target[1]);
+  camera.position.set(Math.cos(E) * Math.cos(A), Math.sin(E), Math.cos(E) * Math.sin(A)).multiplyScalar(SIZE * 1.25 * dist).add(t);
+  camera.lookAt(t);
+  controls.target.copy(t);
+}
+if (layout?.camera) { planCamera(layout.camera); controls.update(); }
+
 const shared = {
   uTime: { value: 0 },
   uTimeline: { value: 0 },
@@ -778,6 +788,7 @@ async function record() {
     }
     // a small town is long and thin: come in closer so it doesn't shrink to a speck
     const near = layout?.kind === 'smalltown' ? 0.7 : 1;
+    if (layout?.camera && name === 'hero') return planCamera(layout.camera);
     const [az, el, d] = ({ hero: [35, N > 1000 ? 27 : 20, (N > 1000 ? 0.95 : 1.0) * near], aerial: [40, 42, 1.15 * near], street: [60, 7, 0.5] }[name] || [35, 13, 0.8])
       .map((x, k) => k < 2 ? THREE.MathUtils.degToRad(x) : x);
     camera.position.set(Math.cos(el) * Math.cos(az), Math.sin(el), Math.cos(el) * Math.sin(az))

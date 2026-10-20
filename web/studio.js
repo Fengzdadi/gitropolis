@@ -12,7 +12,7 @@ export const STYLES = {
     hemi: { sky: '#f6f3ee', ground: '#a69d90', intensity: 1.25 },
     heightScale: 0.42, maxHeight: 4.5,
     building: '#f1ede6', buildingJitter: 0.035, ground: '#d8d1c5', plate: '#e4ded4', roughness: 0.92,
-    water: '#b7c2c3', land: '#ddd6ca', plaza: '#ece7de', park: '#c6cab0', lawn: '#d4d4bf', hill: '#d9d1c4', road: '#c9c1b4',
+    rail: '#8f877c', water: '#b7c2c3', land: '#ddd6ca', plaza: '#ece7de', park: '#c6cab0', lawn: '#d4d4bf', hill: '#d9d1c4', road: '#c9c1b4',
     windows: 0, accent: '#d8452b', edges: { color: '#2a2724', opacity: 0.07 },
     toneMapping: THREE.NeutralToneMapping, exposure: 1.15, bloom: null,
     ink: '#2a2724', inkSoft: 'rgba(42,39,36,.55)', font: "'Instrument Serif', Georgia, serif", labelCase: 'none',
@@ -20,7 +20,7 @@ export const STYLES = {
   plan: {
     background: '#f1ede4', fog: null, flat: true,
     building: '#1c1b1a', buildingJitter: 0, ground: '#f1ede4', plate: '#e7e2d7',
-    water: '#dce3e3', land: '#f1ede4', plaza: '#ece8df', park: '#e1e3d0', lawn: '#ebebdf', hill: '#e4dfd4', road: '#ddd7cb',
+    rail: '#2f5d7c', water: '#dce3e3', land: '#f1ede4', plaza: '#ece8df', park: '#e1e3d0', lawn: '#ebebdf', hill: '#e4dfd4', road: '#ddd7cb',
     windows: 0, accent: '#d23c2a', edges: { color: '#d23c2a', opacity: 0.22 },
     toneMapping: THREE.NoToneMapping, exposure: 1.0, bloom: null,
     ink: '#1c1b1a', inkSoft: 'rgba(28,27,26,.55)', font: "'Instrument Serif', Georgia, serif", labelCase: 'upper',
@@ -28,11 +28,11 @@ export const STYLES = {
   nocturne: {
     background: '#0d1018', fog: ['#2a2629', 0.25, 1.9], sky: ['#0a0d15', '#2b2830', '#6a4a35'],
     sun: { color: '#8fa3c7', intensity: 0.35, elevation: 35, azimuth: 120 },
-    hemi: { sky: '#4a5470', ground: '#141217', intensity: 0.9 },
+    hemi: { sky: '#56607e', ground: '#17151a', intensity: 1.15 },
     heightScale: 0.55, maxHeight: 6,
-    building: '#34363d', buildingJitter: 0.04, ground: '#14161c', plate: '#1a1c23', roughness: 0.8,
-    water: '#06080c', land: '#15171d', plaza: '#22242b', park: '#131913', lawn: '#16191a', hill: '#101116', road: '#1d1f25',
-    windows: 1, windowColor: '#ffc27a', accent: '#ffc27a', edges: { color: '#ffc27a', opacity: 0.05 },
+    building: '#3d4049', buildingJitter: 0.04, ground: '#14161c', plate: '#24262e', roughness: 0.8,
+    rail: '#6d6050', water: '#0b1626', land: '#1c1e25', plaza: '#2d2f37', park: '#18211a', lawn: '#1b211d', hill: '#15161c', road: '#0e0f13',
+    windows: 1, windowColor: '#ffc27a', accent: '#ffc27a', edges: { color: '#ffc27a', opacity: 0.018 }, hubEdgeBoost: 3,
     toneMapping: THREE.ACESFilmicToneMapping, exposure: 1.1, bloom: { strength: 0.35, radius: 0.4, threshold: 0.85 },
     ink: '#e8e2d6', inkSoft: 'rgba(232,226,214,.55)', font: "'Instrument Serif', Georgia, serif", labelCase: 'none',
   },
@@ -59,7 +59,8 @@ function buildTerrain(scene, layout, S, plateStep) {
     scene.add(mesh);
   };
   const landTop = layout.groundIsWater ? plateStep * 0.8 : 0;
-  if (layout.groundIsWater) add(slab(layout.land, 0, landTop), S.land);
+  if (layout.groundIsWater) add(slab([...layout.land, ...layout.shore], 0, landTop), S.land);
+  if (layout.water.length) add(slab(layout.water, 0, plateStep * 0.05), S.water);
   const colors = { block: S.plate, park: S.park, plaza: S.plaza, lawn: S.lawn };
   for (const type of Object.keys(colors)) {
     const polys = layout.blocks.filter(b => b.type === type).map(b => b.poly);
@@ -88,7 +89,26 @@ function buildTerrain(scene, layout, S, plateStep) {
     mesh.castShadow = mesh.receiveShadow = !S.flat;
     scene.add(mesh);
   }
-  for (const h of layout.hills) {
+  // elevated rail: a deck on slim pillars, platforms at the stations
+  const u = layout.unit;
+  for (const rail of layout.rails) {
+    const pts = rail.pts.map(([x, z]) => new THREE.Vector3(x, landTop + plateStep + rail.h, z));
+    const curve = new THREE.CatmullRomCurve3(pts, rail.closed, 'centripetal', 0.5);
+    const n = Math.max(40, Math.round(curve.getLength() / (u * 0.4)));
+    const deck = [], pillars = [];
+    const P = curve.getSpacedPoints(n);
+    for (let k = 0; k < P.length - 1; k++) {
+      const a = P[k], b = P[k + 1], L = a.distanceTo(b);
+      deck.push(new THREE.BoxGeometry(L * 1.02, u * 0.16, u * 0.42).rotateY(-Math.atan2(b.z - a.z, b.x - a.x)).translate((a.x + b.x) / 2, (a.y + b.y) / 2, (a.z + b.z) / 2));
+      if (k % 4 === 0) pillars.push(new THREE.BoxGeometry(u * 0.12, rail.h, u * 0.12).translate(a.x, landTop + plateStep + rail.h / 2, a.z));
+    }
+    for (const [x, z] of rail.pts) deck.push(new THREE.BoxGeometry(u * 1.1, u * 0.2, u * 0.8).translate(x, landTop + plateStep + rail.h, z));
+    add(mergeGeometries([...deck, ...pillars]), S.rail);
+  }
+  if (layout.decor.length) {
+    add(mergeGeometries(layout.decor.map(d => new THREE.BoxGeometry(d.w, d.h, d.d).translate(d.x, landTop + plateStep + d.h / 2, d.z))), S.building);
+  }
+  for (const h of S.flat ? [] : layout.hills) { // seen from straight above, hills are just blobs
     const mesh = new THREE.Mesh(new THREE.IcosahedronGeometry(1, 2), mat(S.hill));
     mesh.scale.set(h.r, h.h, h.r * 0.8);
     mesh.position.set(h.x, 0, h.z);
@@ -140,7 +160,7 @@ export function buildStudio(ctx) {
   }
 
   // ---- ground
-  const groundColor = layout?.groundIsWater ? S.water : layout ? S.road : S.ground;
+  const groundColor = !layout ? S.ground : { water: S.water, land: S.land, road: S.road }[layout.ground];
   const groundMat = S.flat ? new THREE.MeshBasicMaterial({ color: groundColor })
     : new THREE.MeshStandardMaterial({ color: groundColor, roughness: layout?.groundIsWater ? 0.35 : 1 });
   const ground = new THREE.Mesh(new THREE.PlaneGeometry(SIZE * 14, SIZE * 14).rotateX(-Math.PI / 2), groundMat);
@@ -239,7 +259,7 @@ export function buildStudio(ctx) {
           float win = step(0.25, g.x) * step(g.x, 0.75) * step(0.3, g.y) * step(g.y, 0.72);
           // recently edited files keep their lights on; old ones go dark
           float recency = 1.0 - clamp((uTimeline - vInfo.z) / 0.25, 0.0, 1.0);
-          float p = mix(0.015, 0.55, recency * recency);
+          float p = mix(0.07, 0.55, recency * recency);
           float lit = step(hash2(id + vInfo.x * 37.0 + vON.xz * 11.0), p);
           vec3 near = win * lit * uWinColor * (0.6 + 1.6 * hash2(id + 3.1));
           vec3 avg = uWinColor * p * 0.12; // distant facades: a hint of light, not a lit wall
@@ -284,7 +304,7 @@ export function buildStudio(ctx) {
       curve.v0 = p0; curve.v1 = p1; curve.v2 = p2;
       const isHub = (i === hub || j === hub) && hubLines++ < 80;
       const k = isHub ? accent : ink;
-      const alpha = isHub ? Math.min(1, S.edges.opacity * 6) * Math.max(0.5, fade) : S.edges.opacity * fade;
+      const alpha = isHub ? Math.min(1, S.edges.opacity * (S.hubEdgeBoost || 6)) * Math.max(0.5, fade) : S.edges.opacity * fade;
       for (let s = 0; s < SEG; s++) {
         for (const t of [s / SEG, (s + 1) / SEG]) {
           const p = curve.getPoint(t);

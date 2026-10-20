@@ -4,6 +4,9 @@
 import { hierarchy, treemap, treemapSquarify, pack } from 'd3-hierarchy';
 
 const GROUP_RE = /^(packages|apps|libs|crates|modules|plugins|services|projects)\/[^/]+/;
+// tests, docs, examples… are the city's green edge rather than its core
+const PERIPH_RE = /(^|\/)(tests?|__tests__|specs?|e2e|testing|fixtures?|samples?|examples?|docs?|playground|benchmarks?|bench|scripts|website|site|\.github|\.devcontainer)(\/|$)/;
+const ground = d => d.periphery ? 'lawn' : 'block';
 const hash = n => { const s = Math.sin(n * 12.9898 + 78.233) * 43758.5453; return s - Math.floor(s); };
 const sum = xs => xs.reduce((s, x) => s + x, 0);
 const clamp = (x, a, b) => Math.max(a, Math.min(b, x));
@@ -32,6 +35,7 @@ function districtsOf(files, area) {
   for (const d of ds) {
     d.items.sort((a, b) => a.dir < b.dir ? -1 : a.dir > b.dir ? 1 : b.a - a.a);
     d.area = sum(d.items.map(it => it.a));
+    d.periphery = PERIPH_RE.test(d.name + '/');
   }
   return ds.sort((a, b) => b.area - a.area);
 }
@@ -102,7 +106,7 @@ const PLANNERS = {
         if (inPark(c, r)) continue;
         const { d, items } = chunks[k++];
         const x0 = cellX(c), z0 = cellZ(r) - BD;
-        blocks.push({ poly: rectPoly(x0, z0, x0 + BW, z0 + BD), type: 'block' });
+        blocks.push({ poly: rectPoly(x0, z0, x0 + BW, z0 + BD), type: ground(d) });
         lots.push(...packRect(items, x0, z0, x0 + BW, z0 + BD, 0.07));
         if (!seen.has(d) && d.name !== '·') { seen.add(d); labels.push({ text: d.name, x: x0 + BW / 2, z: z0 + BD + ST * 0.5 }); }
       }
@@ -112,8 +116,13 @@ const PLANNERS = {
     const X1 = cellX(C - 1) + BW, Z0 = cellZ(R - 1) - BD, M = AV * 1.2;
     // the island, with Manhattan's tapered southern tip
     const land = [[[-M, Z0 - M], [X1 + M, Z0 - M], [X1 + M, M], [X1 * 0.6, M + 2.2], [X1 * 0.3, M + 2.6], [-M, M + 0.8]]];
+    const zS = M + 3, zN = Z0 - M - 3;
+    const shore = [rectPoly(-M - 16, zN - 6, -M - 4.5, zS + 6), rectPoly(X1 + M + 4.5, zN - 6, X1 + M + 18, zS + 6)];
+    const bridges = [0.15, 0.4].map(f => { const z = cellZ(Math.floor(R * f)) - BD / 2; return { a: [X1 + M - 0.3, z], b: [X1 + M + 4.8, z], w: 0.45 }; });
+    bridges.push({ a: [-M + 0.3, cellZ(Math.floor(R * 0.7)) - BD / 2], b: [-M - 4.8, cellZ(Math.floor(R * 0.7)) - BD / 2], w: 0.4 });
     return {
-      lots, blocks, land, labels, groundIsWater: true,
+      lots, blocks, land, shore, bridges, labels, ground: 'water',
+      camera: { az: 128, el: 24, dist: 1.05 },
       height: (i, rel) => Math.min(0.6 + 1.6 * Math.pow(rel, 0.55), 11) * (i === ctx.hub ? 1.2 : 1),
     };
   },
@@ -144,7 +153,7 @@ const PLANNERS = {
         const take = [];
         let used = 0;
         while (idx < d.items.length && (used + d.items[idx].a <= cap || !take.length)) { used += d.items[idx].a; take.push(d.items[idx++]); }
-        blocks.push({ poly: rectPoly(x0, z0, x1, z1), type: 'block' });
+        blocks.push({ poly: rectPoly(x0, z0, x1, z1), type: ground(d) });
         if (take.length) lots.push(...packRect(take, x0, z0, x1, z1, 0.06));
       }
       if (idx < d.items.length) { const [x0, z0, x1, z1] = cells[cells.length - 1]; lots.push(...packRect(d.items.slice(idx), x0, z0, x1, z1, 0.04)); }
@@ -155,6 +164,8 @@ const PLANNERS = {
     const stations = new Set(ranked.slice(0, Math.max(1, Math.round(ranked.length * 0.015))).filter(i => ctx.inDeg[i] > 0));
     return {
       lots, blocks, labels, land: [rectPoly(-0.6, -0.6, W + 0.6, W + 0.6)],
+      rail: { stations: 10, closed: true, h: 1.55 },
+      camera: { az: 35, el: 24, dist: 0.72 },
       height: (i, rel) => Math.min(0.32 + 0.95 * Math.sqrt(rel), 5) * (stations.has(i) ? 2.6 : 1),
     };
   },
@@ -184,8 +195,16 @@ const PLANNERS = {
       });
       if (d.name !== '·') labels.push({ text: downtown ? `${d.name} (downtown)` : d.name, x: (leaf.x0 + leaf.x1) / 2, z: leaf.y1 + 0.8 });
     }
+    const roads = [];
+    for (const leaf of root.leaves()) {
+      const o = 1.6, x0 = leaf.x0 - o, x1 = Math.max(leaf.x1, leaf.x0 + 1.2) + o, z0 = leaf.y0 - o, z1 = Math.max(leaf.y1, leaf.y0 + 1.2) + o;
+      roads.push({ a: [x0, z0], b: [x1, z0], w: 0.9 }, { a: [x1, z0], b: [x1, z1], w: 0.9 }, { a: [x1, z1], b: [x0, z1], w: 0.9 }, { a: [x0, z1], b: [x0, z0], w: 0.9 });
+    }
+    const nh = Math.max(3, Math.ceil(W / 7));
+    const hills = Array.from({ length: nh }, (_, k) => ({ x: (k + 0.5) * W / nh, z: -7 - hash(k + 4) * 6, r: 6 + hash(k + 1) * 5, h: 3 + hash(k + 2) * 4 }));
     return {
-      lots, blocks, labels, land: [rectPoly(-1, -1, W + 1, W + 1)],
+      lots, blocks, labels, roads, hills, ground: 'land', land: [rectPoly(-1, -1, W + 1, W + 1)],
+      camera: { az: 50, el: 17, dist: 0.8 },
       height: (i, rel, d) => d === hubD ? Math.min(0.6 + 2.2 * Math.pow(rel, 0.6), 12) : Math.min(0.22 + 0.3 * Math.pow(rel, 0.4), 1.1),
       districtOf: i => ds.find(d => d.items.some(it => it.i === i)),
     };
@@ -207,35 +226,61 @@ const PLANNERS = {
     const short = sum(raw.map(x => Math.max(0, MIN - x)));
     const big = sum(raw.filter(x => x > MIN));
     const spans = raw.map(x => x <= MIN ? MIN : x - short * (x / big));
+    // the river: a gentle S through the centre, wide enough that the plaza becomes an island
+    const RH = Math.max(0.8, r0 * 0.4);
+    const river = x => 0.9 * Math.sin(x / 6 + 0.4) - 0.9 * Math.sin(0.4);
+    const wet = (x, z, m = 0) => Math.abs(z - river(x)) < RH + m;
+    const boundaries = [];
     let t = -Math.PI / 2;
     for (const [di, d] of rest.entries()) {
       const span = spans[di];
       const t0 = t, t1 = t + span;
       t = t1;
       let r = r0 + 0.5, band = 0, k = 0;
+      boundaries.push(t0);
       while (k < d.items.length && band < 400) {
         const rin = r, rout = r + BAND, rm = r + BAND / 2;
         const ga = (AVE / 2) / rm; // keeps radial avenues a constant width
         const a0 = t0 + ga, a1 = t1 - ga, avail = (a1 - a0) * rm;
-        let cur = 0;
-        const start = k;
+        let cur = 0, seg = 0;
+        const close = () => { if (cur > seg) blocks.push({ poly: annularSector(rin, rout, a0 + seg / rm, a0 + cur / rm), type: ground(d) }); };
         while (k < d.items.length && avail > 0.4) {
           const it = d.items[k];
           const w = Math.min(it.a / BAND, avail);
           if (cur + w > avail && cur > 0) break;
           const th = a0 + (cur + w / 2) / rm;
-          lots.push({ i: it.i, x: Math.cos(th) * rm, z: Math.sin(th) * rm, w: w * 0.92, d: BAND * 0.86, rot: -(th + Math.PI / 2) });
+          const x = Math.cos(th) * rm, z = Math.sin(th) * rm;
+          if (wet(x, z, Math.max(w, BAND) / 2 + 0.15)) { close(); cur += 0.3; seg = cur; continue; } // step over the river
+          lots.push({ i: it.i, x, z, w: w * 0.92, d: BAND * 0.86, rot: -(th + Math.PI / 2) });
           cur += w; k++;
         }
-        if (k > start) blocks.push({ poly: annularSector(rin, rout, a0, a0 + cur / rm), type: 'block' });
+        close();
         band++;
         r = rout + (band % 4 === 0 ? BLVD : STREET);
       }
       const tm = (t0 + t1) / 2, rl = r + 0.8;
       if (d.name !== '·') labels.push({ text: d.name, x: Math.cos(tm) * rl, z: Math.sin(tm) * rl });
     }
+    const Rest = Math.sqrt(total / (Math.PI * 0.55)) + r0 + 4;
+    const water = [[...Array.from({ length: 61 }, (_, k) => { const x = -Rest * 1.6 + k * Rest * 3.2 / 60; return [x, river(x) - RH]; }),
+      ...Array.from({ length: 61 }, (_, k) => { const x = Rest * 1.6 - k * Rest * 3.2 / 60; return [x, river(x) + RH]; })]];
+    // every avenue that meets the river crosses it on a bridge
+    const bridges = [];
+    for (const tb of boundaries) for (const dir of [tb]) {
+      let inside = false, rIn = 0;
+      for (let rr = r0 - 0.4; rr < Rest; rr += 0.05) {
+        const w = wet(Math.cos(dir) * rr, Math.sin(dir) * rr);
+        if (w && !inside) { inside = true; rIn = rr; }
+        if (!w && inside) {
+          inside = false;
+          const a = rIn - 0.25, b = rr + 0.25;
+          bridges.push({ a: [Math.cos(dir) * a, Math.sin(dir) * a], b: [Math.cos(dir) * b, Math.sin(dir) * b], w: AVE * 0.8 });
+        }
+      }
+    }
     return {
-      lots, blocks, labels,
+      lots, blocks, labels, water, bridges,
+      camera: { az: 62, el: 36, dist: 0.85 },
       height: (i, rel) => i === ctx.hub ? 5.5 : 0.95 + 0.18 * Math.tanh(Math.log(rel)),
     };
   },
@@ -267,7 +312,7 @@ const PLANNERS = {
           lots.push({ i: it.i, x: x + w / 2, z, w: w * 0.9, d: ROW * 0.88, rot: 0 });
           x += w; idx++;
         }
-        if (idx > start) blocks.push({ poly: rectPoly(cx - half, z - ROW / 2, x, z + ROW / 2), type: 'block' });
+        if (idx > start) blocks.push({ poly: rectPoly(cx - half, z - ROW / 2, x, z + ROW / 2), type: ground(d) });
         row++;
         z += ROW + (row % 3 === 0 ? 0.45 : GAP);
       }
@@ -292,7 +337,8 @@ const PLANNERS = {
     const hubLot = lots.find(l => l.i === ctx.hub);
     if (hubLot) { hubLot.w = hubLot.d = 0.45; }
     return {
-      lots, blocks, land, labels, bridges, groundIsWater: true,
+      lots, blocks, land, labels, bridges, ground: 'water',
+      camera: { az: 40, el: 40, dist: 0.9 },
       height: (i, rel) => i === ctx.hub ? 6.5 : Math.min(0.42 + 0.45 * Math.pow(rel, 0.4), 1.8),
     };
   },
@@ -306,7 +352,7 @@ const PLANNERS = {
     const lots = [], blocks = [], labels = [];
     for (const l of root.leaves()) {
       const d = l.data.d;
-      blocks.push({ poly: rectPoly(l.x0, l.y0, l.x1, l.y1), type: 'block' });
+      blocks.push({ poly: rectPoly(l.x0, l.y0, l.x1, l.y1), type: ground(d) });
       lots.push(...packRect(d.items, l.x0, l.y0, l.x1, l.y1, 0.05));
       if (d.name !== '·') labels.push({ text: d.name, x: (l.x0 + l.x1) / 2, z: l.y1 + 0.5 });
     }
@@ -314,7 +360,8 @@ const PLANNERS = {
     const n = Math.max(3, Math.ceil(W / 5));
     for (let k = 0; k < n; k++) hills.push({ x: (k + 0.5) * W / n + (hash(k) - 0.5) * 3, z: -4 - hash(k + 9) * 5, r: 4 + hash(k + 3) * 4, h: 5 + hash(k + 5) * 7 });
     return {
-      lots, blocks, labels, hills, groundIsWater: true, land: [rectPoly(-1, -13, W + 1, D + 0.6)],
+      lots, blocks, labels, hills, ground: 'water', land: [rectPoly(-1, -13, W + 1, D + 0.6)],
+      camera: { az: 104, el: 16, dist: 0.85 },
       height: (i, rel) => Math.min(1.1 + 2.0 * Math.sqrt(rel), 14),
     };
   },
@@ -346,7 +393,7 @@ const PLANNERS = {
       }
       if (g >= groups.length) break;
       const { d, items } = groups[g++];
-      blocks.push({ poly: oct(x0, z0), type: 'block' });
+      blocks.push({ poly: oct(x0, z0), type: ground(d) });
       // walk the four sides clockwise, laying buildings along the street front
       const sides = [[x0 + CH * 0.75, z0 + RD / 2, 1, 0, 0], [x0 + S - RD / 2, z0 + CH * 0.75, 0, 1, -Math.PI / 2],
         [x0 + S - CH * 0.75, z0 + S - RD / 2, -1, 0, Math.PI], [x0 + RD / 2, z0 + S - CH * 0.75, 0, -1, Math.PI / 2]];
@@ -364,6 +411,8 @@ const PLANNERS = {
     const W = C * (S + ST), H = R * (S + ST);
     return {
       lots, blocks, labels, land: [rectPoly(-ST, -ST, W, H)],
+      rail: { stations: 6, closed: false, h: 2.3 },
+      camera: { az: 45, el: 46, dist: 0.85 },
       height: (i, rel) => i === ctx.hub ? 9 : 1.45 + 0.2 * Math.tanh(Math.log(rel)),
     };
   },
@@ -396,7 +445,9 @@ const PLANNERS = {
     }
     const span = Math.max(4, ...lots.map(l => Math.abs(l.x) + l.w / 2)) + 1.2;
     return {
-      lots, blocks, labels, roads: [{ a: [-span, 0], b: [span, 0], w: 1.3 }],
+      lots, blocks, labels, roads: [{ a: [-span, 0], b: [span, 0], w: 1.3 }], ground: 'land',
+      decor: [{ x: 0, z: -2.4 - 0.6, w: 0.5, d: 0.5, h: 4.4 }], // the church steeple
+      camera: { az: 62, el: 26, dist: 0.55 },
       height: (i, rel) => i === ctx.hub ? 2.4 : Math.min(0.35 + 0.25 * Math.pow(rel, 0.4), 0.9),
     };
   },
@@ -418,7 +469,8 @@ export function buildLayout(kind, { files, inDeg, SIZE }) {
   const pts = [];
   for (const l of L.lots) if (l) { const r = Math.hypot(l.w, l.d) / 2; pts.push([l.x - r, l.z - r], [l.x + r, l.z + r]); }
   for (const b of L.blocks) pts.push(...b.poly);
-  if (L.groundIsWater) for (const p of L.land || []) pts.push(...p);
+  const groundKind = L.ground || (L.groundIsWater ? 'water' : 'road');
+  if (groundKind === 'water') for (const p of L.land || []) pts.push(...p);
   let x0 = Infinity, x1 = -Infinity, z0 = Infinity, z1 = -Infinity;
   for (const [x, z] of pts) { if (!Number.isFinite(x) || !Number.isFinite(z)) continue; x0 = Math.min(x0, x); x1 = Math.max(x1, x); z0 = Math.min(z0, z); z1 = Math.max(z1, z); }
   const s = (SIZE * 0.92) / Math.max(x1 - x0, z1 - z0, 1e-6);
@@ -428,6 +480,22 @@ export function buildLayout(kind, { files, inDeg, SIZE }) {
   for (const l of L.lots) lots[l.i] = { x: (l.x - mx) * s, z: (l.z - mz) * s, w: l.w * s, d: l.d * s, rot: l.rot || 0 };
   const districtOf = L.districtOf || (() => null);
   const heights = files.map((f, i) => L.height(i, f.loc / medLoc, districtOf(i)) * s);
+
+  // a rail line strung through the busiest files: the stations are the dependency hubs
+  const rails = [];
+  if (L.rail) {
+    const pick = [...inDeg.keys()].filter(i => inDeg[i] > 0 && lots[i]).sort((a, b) => inDeg[b] - inDeg[a]).slice(0, L.rail.stations);
+    if (pick.length >= 3) {
+      const tour = [pick[0]], left = new Set(pick.slice(1));
+      while (left.size) {
+        const last = lots[tour.at(-1)];
+        let best = null, bd = Infinity;
+        for (const j of left) { const dd = Math.hypot(lots[j].x - last.x, lots[j].z - last.z); if (dd < bd) { bd = dd; best = j; } }
+        tour.push(best); left.delete(best);
+      }
+      rails.push({ pts: tour.map(i => [lots[i].x, lots[i].z]), closed: L.rail.closed, h: L.rail.h * s, stations: tour });
+    }
+  }
   return {
     kind,
     unit: s,
@@ -436,7 +504,13 @@ export function buildLayout(kind, { files, inDeg, SIZE }) {
     hub,
     blocks: L.blocks.map(b => ({ ...b, poly: b.poly.map(P) })),
     land: (L.land || []).map(p => p.map(P)),
-    groundIsWater: !!L.groundIsWater,
+    ground: groundKind,
+    groundIsWater: groundKind === 'water',
+    shore: (L.shore || []).map(p => p.map(P)),
+    water: (L.water || []).map(p => p.map(P)),
+    rails,
+    decor: (L.decor || []).map(d => ({ x: (d.x - mx) * s, z: (d.z - mz) * s, w: d.w * s, d: d.d * s, h: d.h * s })),
+    camera: L.camera ? { ...L.camera, target: L.camera.target ? P(L.camera.target) : [0, 0] } : null,
     bridges: (L.bridges || []).map(b => ({ a: P(b.a), b: P(b.b), w: b.w * s })),
     roads: (L.roads || []).map(r => ({ a: P(r.a), b: P(r.b), w: r.w * s })),
     hills: (L.hills || []).map(h => ({ x: (h.x - mx) * s, z: (h.z - mz) * s, r: h.r * s, h: h.h * s })),
