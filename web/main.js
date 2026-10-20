@@ -10,6 +10,7 @@ import { buildStudio } from './studio.js';
 import { buildLayout, CITY_KINDS } from './layouts.js';
 import { createPixelPipeline } from './pixel.js';
 import { PERF, HEAP, timed } from './perf.js';
+import { startWaiting } from './waiting.js';
 
 const params = new URLSearchParams(location.search);
 // when filming, any error on the page goes straight back to the CLI (rather than a silent 90s wait);
@@ -34,7 +35,9 @@ const dataSrc = params.get('data');
 const route = /^\/([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+?)(?:\.git)?\/?$/.exec(location.pathname);
 const loadingEl = document.getElementById('loading');
 if (STYLE === 'pixel') document.body.classList.add('waiting');
-if (route) loadingEl.textContent = `SURVEYING ${route[1]}/${route[2]}… (a first visit takes up to a minute)`;
+// a little building site to watch while the city is surveyed (a first visit can take a minute)
+let stopWaiting = () => {};
+if (route) stopWaiting = startWaiting(loadingEl, `surveying ${route[1]}/${route[2]}`);
 const resp = await fetch(dataSrc && !/^([a-z][\w+.-]*:|\/\/|\\)/i.test(dataSrc) ? dataSrc
   : route ? `/api/city/${encodeURIComponent(route[1])}/${encodeURIComponent(route[2])}` : 'city.json');
 const isJSON = (resp.headers.get('content-type') || '').includes('json');
@@ -51,6 +54,7 @@ if (!route && !(resp.ok && isJSON)) {
 }
 if (!resp.ok) {
   const why = isJSON ? (await resp.json()).error : `the server said ${resp.status}`;
+  stopWaiting();
   loadingEl.textContent = why || "couldn't build that city";
   await new Promise(() => {});
 }
@@ -626,6 +630,7 @@ const $ = s => document.querySelector(s);
 $('#hud h1').textContent = data.name;
 $('#hud .stats').textContent =
   `${N.toLocaleString()} buildings · ${data.stats.loc.toLocaleString()} LOC · ${data.stats.edges.toLocaleString()} imports · ${data.stats.commits.toLocaleString()} commits`;
+stopWaiting();
 $('#loading').remove();
 document.body.classList.remove('waiting');
 
