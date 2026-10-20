@@ -143,7 +143,7 @@ export function cityMetrics(city, now = Date.now() / 1000) {
 // Each archetype: a list of [score 0..1, reason] terms; the city's score is their mean.
 const ARCHETYPES = {
   smalltown: m => [
-    [1 - ramp(m.files, 15, 40), `only ${m.files} files — one main street`],
+    [1 - ramp(m.files, 15, 40), `only ${m.files} file${m.files === 1 ? "" : "s"} — one main street`],
   ],
   manhattan: m => [
     [ramp(m.top5Share, 0.25, 0.55), `${pct(m.top5Share)} of all code lives in the biggest 5% of files`],

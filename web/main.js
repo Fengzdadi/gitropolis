@@ -12,8 +12,8 @@ import { createPixelPipeline } from './pixel.js';
 import { PERF, HEAP, timed } from './perf.js';
 
 const params = new URLSearchParams(location.search);
-// neon (original) | maquette | plan | nocturne
-const STYLE = params.get('style') || 'neon';
+// pixel | maquette | plan | nocturne | neon (the original prototype)
+const STYLE = params.get('style') || 'pixel';
 const NEON = STYLE === 'neon';
 const PIXEL = STYLE === 'pixel';
 // art-pixel size in screen pixels, and how far to zoom in (close-ups frame the city's landmark)
@@ -983,4 +983,5 @@ async function record() {
   progress.textContent = 'DONE — you can close this tab';
 }
 
-window.__city = { data, root, B, unit, camera, controls, setTimeline, focus, shared, bloom, scene, renderer, studio };
+// poke at the city from the console with ?debug
+if (params.has('debug')) window.__city = { data, root, B, unit, camera, controls, setTimeline, focus, shared, bloom, scene, renderer, studio };

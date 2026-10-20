@@ -1,7 +1,9 @@
 #!/usr/bin/env node
 // gitropolis [repo] [--port 4173] [--out city.json] [--no-open]
-//           [--style neon|maquette|plan|nocturne] [--still frame.png] [--shot hero|aerial|street|plan] [--no-hud]
-//           [--video city.mp4] [--gif city.gif] [--duration 20] [--fps 30] [--size 1920x1080] [--max-mb 9.5] [--headed]
+//           [--style pixel|maquette|plan|nocturne|neon] [--city auto|<archetype>] [--pixel 2] [--zoom 1]
+//           [--still frame.png] [--shot hero|aerial|street|plan] [--no-hud]
+//           [--video city.mp4] [--gif city.gif] [--static] [--duration 20] [--fps 30] [--size 1920x1080] [--max-mb 9.5] [--headed]
+//           [--bench] [--help] [--version]
 import { createServer } from 'node:http';
 import { readFile, writeFile, mkdtemp, stat, rm } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
@@ -12,6 +14,23 @@ import { fileURLToPath } from 'node:url';
 import { scanRepo } from '../src/scan.mjs';
 
 const args = process.argv.slice(2);
+const PKG = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'));
+if (args.includes('--version') || args.includes('-v')) { console.log(PKG.version); process.exit(0); }
+if (args.includes('--help') || args.includes('-h')) {
+  console.log(`gitropolis ${PKG.version} — your git repo as a pixel-art city
+
+  gitropolis [repo]                     open the city in your browser (repo defaults to .)
+
+  --style pixel|maquette|plan|nocturne  look (default pixel)
+  --city auto|smalltown|manhattan|hongkong|tokyo|la|paris|venice|barcelona
+                                        city plan (default: picked from the code)
+  --pixel <n>  --zoom <n>               art-pixel size (default 2), close-up factor
+  --still <file.png> [--shot hero|aerial|street|plan] [--no-hud]
+  --video <file.mp4>  --gif <file.gif>  film the city growing (needs ffmpeg and Chrome)
+  --static  --duration <s>  --fps <n>  --size <WxH>  --max-mb <n>  --headed
+  --port <n>  --no-open  --out <city.json>  --bench`);
+  process.exit(0);
+}
 const flag = (name, def) => {
   const i = args.indexOf(name);
   if (i < 0) return def;
@@ -29,17 +48,22 @@ const fps = +flag('--fps', 30);
 const [w, h] = flag('--size', '1920x1080').split('x').map(Number);
 const maxMB = +flag('--max-mb', 9.5); // GitHub README uploads cap at 10 MB
 const headed = bool('--headed');
-const style = flag('--style', 'maquette');
+const style = flag('--style', 'pixel');
 const pxOpt = flag('--pixel'); // pixel style: size of one art pixel (default 2)
 const zoomOpt = flag('--zoom'); // close-up factor (pixel style)
 const cityOpt = flag('--city', 'auto'); // auto | classic | smalltown | manhattan | hongkong | tokyo | la | paris | venice | barcelona
 const still = flag('--still');
 const shot = flag('--shot', 'hero');
 const noHud = bool('--no-hud');
-const fixedCam = bool('--static');
-const benchMode = bool('--bench'); // measure setup and frame cost in headless Chrome // films: hold the establishing shot instead of pushing in
+const fixedCam = bool('--static'); // films: hold the establishing shot instead of pushing in
+const benchMode = bool('--bench'); // measure setup and frame cost in headless Chrome
 const noOpen = bool('--no-open');
 const repo = args[0] || process.cwd();
+if (!existsSync(repo)) { console.error(`gitropolis: no such folder ${repo}`); process.exit(1); }
+try { execFileSync('git', ['-C', repo, 'rev-parse', '--is-inside-work-tree'], { stdio: 'ignore' }); } catch {
+  console.error(`gitropolis: ${path.resolve(repo)} isn't a git repository (or git isn't installed)`);
+  process.exit(1);
+}
 const recording = !!(video || gif || still || benchMode);
 
 const WEB = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'web');
@@ -61,7 +85,6 @@ console.log(`done in ${city.scanMs}ms\n  ${s.files} buildings · ${s.loc.toLocal
 const id = city.identity;
 console.log(`\n  this repo is ${pink(id.name)}${id.reasons.length ? ' — ' + id.reasons.join('; ') : ''}`);
 for (const st of id.states) console.log(`  + ${st.reason}`);
-if (id.chip) console.log(`  (psst: hardware sources found — try --style chip)`);
 console.log('');
 
 if (out) {
