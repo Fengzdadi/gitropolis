@@ -33,6 +33,7 @@ const ZOOM = +params.get('zoom') || 1;
 const dataSrc = params.get('data');
 const route = /^\/([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+?)(?:\.git)?\/?$/.exec(location.pathname);
 const loadingEl = document.getElementById('loading');
+if (STYLE === 'pixel') document.body.classList.add('waiting');
 if (route) loadingEl.textContent = `SURVEYING ${route[1]}/${route[2]}… (a first visit takes up to a minute)`;
 const resp = await fetch(dataSrc && !/^([a-z][\w+.-]*:|\/\/|\\)/i.test(dataSrc) ? dataSrc
   : route ? `/api/city/${encodeURIComponent(route[1])}/${encodeURIComponent(route[2])}` : 'city.json');
@@ -626,6 +627,7 @@ $('#hud h1').textContent = data.name;
 $('#hud .stats').textContent =
   `${N.toLocaleString()} buildings · ${data.stats.loc.toLocaleString()} LOC · ${data.stats.edges.toLocaleString()} imports · ${data.stats.commits.toLocaleString()} commits`;
 $('#loading').remove();
+document.body.classList.remove('waiting');
 
 const fmtDate = t => new Date(t * 1000).toISOString().slice(0, 7);
 const commits = data.commits; // [t, idx...]
