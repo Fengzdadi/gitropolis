@@ -679,12 +679,86 @@ const commits = data.commits; // [t, idx...]
 let ci = 0;
 let playing = true, speed = 1;
 const INTRO_SECONDS = 16;
-const slider = $('#slider');
 $('#play').onclick = () => { playing = !playing; if (playing && shared.uTimeline.value >= 1) setTimeline(0); syncPlay(); };
 $('#speed').onclick = () => { speed = speed === 1 ? 2 : speed === 2 ? 4 : speed === 4 ? 0.5 : 1; $('#speed').textContent = speed + '×'; setFlashSeconds(INTRO_SECONDS / speed); };
-slider.oninput = () => { setTimeline(slider.value / 1000); playing = false; syncPlay(); };
-addEventListener('keydown', e => { if (e.code === 'Space') { e.preventDefault(); $('#play').click(); } });
-const syncPlay = () => { $('#play').textContent = playing ? '❚❚' : '▶'; };
+// at the end the play button offers a replay
+const syncPlay = () => { $('#play').textContent = playing ? '❚❚' : shared.uTimeline.value >= 1 ? '↺' : '▶'; };
+
+// ---- the timeline strip: commit activity over the history, coloured up to the playhead
+const track = $('#track'), spark = $('#spark');
+let bins = [], drawnAt = -1;
+function layoutTrack() {
+  const w = Math.max(40, track.clientWidth), dpr = Math.min(devicePixelRatio, 2);
+  const BAR = 3; // css px per bar
+  spark.width = Math.round(w * dpr); spark.height = Math.round(26 * dpr);
+  const n = Math.max(8, Math.floor(w / BAR));
+  bins = new Array(n).fill(0);
+  for (const c of commits) bins[Math.min(n - 1, Math.floor((c[0] - data.start) / span * n))]++;
+  const max = Math.max(1, ...bins);
+  bins = bins.map(v => v ? 0.15 + 0.85 * Math.sqrt(v / max) : 0); // sqrt: quiet stretches still show
+  // year marks (months for a history under ~18 months), spaced so they never collide
+  const years = $('#years'); years.replaceChildren();
+  const short = span < 1.5 * 365.25 * 86400, first = new Date(data.start * 1000);
+  let d = short ? new Date(first.getFullYear(), first.getMonth() + 1, 1) : new Date(first.getFullYear() + 1, 0, 1), lastX = -1e9;
+  while (d.getTime() / 1000 < data.end) {
+    const x = (d.getTime() / 1000 - data.start) / span * w;
+    if (x - lastX > (short ? 34 : 40) && x > 12 && x < w - 12) {
+      const el = document.createElement('span');
+      el.textContent = short ? d.toLocaleString('en', { month: 'short' }) : String(d.getFullYear());
+      el.style.left = `${x}px`; years.append(el); lastX = x;
+    }
+    d = short ? new Date(d.getFullYear(), d.getMonth() + 1, 1) : new Date(d.getFullYear() + 1, 0, 1);
+  }
+  drawnAt = -1;
+}
+function drawTrack() {
+  const v = shared.uTimeline.value;
+  if (v === drawnAt || !bins.length) return;
+  drawnAt = v;
+  const g = spark.getContext('2d'), W = spark.width, H = spark.height, n = bins.length, bw = W / n;
+  const css = getComputedStyle(track);
+  g.clearRect(0, 0, W, H);
+  for (let k = 0; k < n; k++) {
+    if (!bins[k]) continue;
+    const h = Math.max(2, Math.round(bins[k] * (H - 4)));
+    g.fillStyle = (k + 0.5) / n <= v ? css.getPropertyValue('--on') : css.getPropertyValue('--off');
+    g.fillRect(Math.floor(k * bw), H - h, Math.max(1, Math.floor(bw) - 1), h);
+  }
+  const x = Math.round(v * (W - 3));
+  g.fillStyle = css.getPropertyValue('--head');
+  g.fillRect(x, 0, 3, H);
+  track.setAttribute('aria-valuenow', String(Math.round(v * 100)));
+}
+const scrubTo = e => {
+  const r = track.getBoundingClientRect();
+  setTimeline(Math.min(1, Math.max(0, (e.clientX - r.left) / r.width)));
+  playing = false; syncPlay();
+};
+track.addEventListener('pointerdown', e => { track.setPointerCapture(e.pointerId); scrubTo(e); });
+track.addEventListener('pointermove', e => { if (track.hasPointerCapture(e.pointerId)) scrubTo(e); });
+addEventListener('keydown', e => {
+  if (e.target.closest?.('input, textarea')) return;
+  const step = e.shiftKey ? 0.1 : 0.02;
+  if (e.code === 'Space') { e.preventDefault(); $('#play').click(); }
+  else if (e.code === 'ArrowRight' || e.code === 'ArrowLeft') { e.preventDefault(); setTimeline(Math.min(1, Math.max(0, shared.uTimeline.value + (e.code === 'ArrowRight' ? step : -step)))); playing = false; syncPlay(); }
+  else if (e.code === 'Home' || e.code === 'End') { e.preventDefault(); setTimeline(e.code === 'End' ? 1 : 0); playing = false; syncPlay(); }
+});
+addEventListener('resize', layoutTrack);
+layoutTrack();
+
+// ---- links: the repo itself on GitHub (on the hosted site), sharing, the way home, gitropolis itself
+if (route) {
+  const gh = `https://github.com/${route[1]}/${route[2]}`;
+  const a = document.createElement('a'); a.href = gh; a.target = '_blank'; a.rel = 'noopener'; a.title = 'Open this repository on GitHub'; a.textContent = data.name;
+  $('#hud h1').replaceChildren(a);
+  $('#gh-repo').href = gh; $('#gh-repo').hidden = false; $('#another').hidden = false;
+}
+$('#share').onclick = async () => {
+  const url = location.origin + location.pathname;
+  try { await navigator.clipboard.writeText(url); $('#share').textContent = 'link copied'; }
+  catch { prompt('Copy this link:', url); }
+  setTimeout(() => { $('#share').textContent = 'share'; }, 1800);
+};
 
 function setTimeline(v) {
   shared.uTimeline.value = v;
@@ -698,7 +772,7 @@ function setTimeline(v) {
 function advance(dt) {
   if (!playing) return;
   moveTimeline(Math.min(1, shared.uTimeline.value + dt * speed / INTRO_SECONDS));
-  if (shared.uTimeline.value >= 1) { playing = false; syncPlay(); }
+  if (shared.uTimeline.value >= 1) { playing = false; syncPlay(); drawTrack(); }
 }
 
 // move forward in time, flashing every building touched by the commits we pass
@@ -827,7 +901,7 @@ if (!REC) {
     const dt = Math.min(clock.getDelta(), 0.1);
     advance(dt);
     tick(dt);
-    slider.value = Math.round(shared.uTimeline.value * 1000);
+    drawTrack();
     $('#date .d').textContent = fmtDate(data.start + shared.uTimeline.value * span);
     $('#date .c').textContent = `commit ${ci.toLocaleString()} / ${commits.length.toLocaleString()}`;
     controls.update();
