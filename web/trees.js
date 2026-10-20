@@ -50,6 +50,7 @@ const MIX = {
   hongkong: { round: 3, palm: 1 },
   barcelona: { round: 3, palm: 1 },
   smalltown: { round: 3, conifer: 2, autumn: 2 },
+  port: { conifer: 2, round: 1 },
 };
 
 function pickSpecies(kind, seed) {

@@ -2,6 +2,9 @@
 // city archetype from them, and explain the winner in plain words. Same repo → same city.
 
 const NONCODE = new Set(['cfg', 'doc', 'lock']);
+// infrastructure as code: it makes a port, but never decides the shape of the code city
+const INFRA = new Set(['hcl', 'yaml', 'jsonnet', 'nix', 'tmpl']);
+const INFRA_NAMES = { tf: 'Terraform', k8s: 'Kubernetes manifests', chart: 'Helm charts', values: 'Helm charts', kustomize: 'Kustomize', jsonnet: 'jsonnet', ansible: 'Ansible', nix: 'Nix', tmpl: 'templates', yaml: 'YAML' };
 const YEAR = 365.25 * 86400;
 const TEST_RE = /(^|\/)(tests?|__tests__|specs?|e2e|testing)(\/|$)|\.(test|spec)\.[a-z]+$|_test\.(go|py|rs)$|(^|\/)test_[^/]+\.py$/;
 const GROUP_RE = /^(packages|apps|libs|crates|modules|plugins|services|projects)\/[^/]+/;
@@ -17,7 +20,16 @@ const pct = x => `${Math.round(x * 100)}%`;
 export function cityMetrics(city, now = Date.now() / 1000) {
   const all = city.files;
   // manifests / build files / docs / lockfiles ('cfg', 'doc', 'lock') are buildings in the city but not part of the codebase being judged
-  const codeIdx = all.map((f, i) => NONCODE.has(f.lang) ? -1 : i).filter(i => i >= 0);
+  // the port: how much of the repo is infrastructure, and which kinds lead
+  const infraIdx = all.map((f, i) => INFRA.has(f.lang) ? i : -1).filter(i => i >= 0);
+  const plainIdx = all.map((f, i) => NONCODE.has(f.lang) || INFRA.has(f.lang) ? -1 : i).filter(i => i >= 0);
+  const infraLoc = sum(infraIdx.map(i => all[i].loc)), codeLoc = sum(plainIdx.map(i => all[i].loc));
+  // in a port the infrastructure *is* the codebase; anywhere else it doesn't shape the city
+  const isPort = infraLoc / Math.max(1, infraLoc + codeLoc) >= 0.5 && infraIdx.length >= 8;
+  const codeIdx = isPort ? [...plainIdx, ...infraIdx].sort((a, b) => a - b) : plainIdx;
+  const kindLoc = {};
+  for (const i of infraIdx) { const k = INFRA_NAMES[all[i].a?.k] || 'YAML'; kindLoc[k] = (kindLoc[k] || 0) + all[i].loc; }
+  const infraKinds = Object.keys(kindLoc).sort((a, b) => kindLoc[b] - kindLoc[a]).filter((k, n) => n === 0 || kindLoc[k] > infraLoc * 0.15);
   const coreIdx = codeIdx.filter(i => !NONCORE_RE.test(all[i].p));
   // re-index imports onto the core subset (fall back to everything for tiny / test-only repos)
   const useCore = coreIdx.length >= 20;
@@ -100,9 +112,10 @@ export function cityMetrics(city, now = Date.now() / 1000) {
   }
 
   // history is judged on code alone: a late package.json bump must not stretch the timeline
-  const cfgOnly = codeIdx.length < all.length;
-  const start = cfgOnly && codeIdx.length ? Math.min(...codeIdx.map(i => all[i].born)) : city.start;
-  const end = cfgOnly && codeIdx.length ? Math.max(...codeIdx.map(i => all[i].last)) : city.end;
+  const workIdx = isPort ? codeIdx : [...codeIdx, ...infraIdx]; // infrastructure is real work for the timeline
+  const cfgOnly = workIdx.length < all.length;
+  const start = cfgOnly && workIdx.length ? Math.min(...workIdx.map(i => all[i].born)) : city.start;
+  const end = cfgOnly && workIdx.length ? Math.max(...workIdx.map(i => all[i].last)) : city.end;
   const commits = cfgOnly ? city.commits.filter(c => { for (let k = 1; k < c.length; k++) if (!NONCODE.has(all[c[k]].lang)) return true; return false; }) : city.commits;
   const span = Math.max(1, end - start);
   const recentWindow = 90 * 86400;
@@ -136,12 +149,19 @@ export function cityMetrics(city, now = Date.now() / 1000) {
     staleShare: F.filter(f => end - f.last > 2 * YEAR).length / Math.max(1, n),
     recentBoost: avgPerWindow && commitCount >= 200 && recentCommits >= 30 ? recentCommits / avgPerWindow : 0,
     hardware: (city.extras?.hardwareFiles || 0) > 0,
+    infraFiles: infraIdx.length,
+    infraShare: infraLoc / Math.max(1, infraLoc + codeLoc),
+    infraKinds,
     usedCore: useCore,
   };
 }
 
 // Each archetype: a list of [score 0..1, reason] terms; the city's score is their mean.
 const ARCHETYPES = {
+  port: m => [
+    [ramp(m.infraShare, 0.3, 0.6), `${pct(m.infraShare)} of it is infrastructure: ${m.infraKinds.join(', ')}`],
+    [ramp(m.infraFiles, 8, 50), `${m.infraFiles} cargo manifests on the quays`],
+  ],
   smalltown: m => [
     [1 - ramp(m.files, 15, 40), `only ${m.files} file${m.files === 1 ? "" : "s"} — one main street`],
   ],
@@ -193,7 +213,7 @@ const STATES = {
 };
 
 export const CITY_NAMES = {
-  smalltown: 'Small Town', manhattan: 'Manhattan', hongkong: 'Hong Kong', tokyo: 'Tokyo',
+  port: 'Port City', smalltown: 'Small Town', manhattan: 'Manhattan', hongkong: 'Hong Kong', tokyo: 'Tokyo',
   la: 'Los Angeles', paris: 'Paris', venice: 'Venice', barcelona: 'Barcelona',
 };
 
@@ -203,8 +223,10 @@ export function classify(city) {
     const terms = fn(m);
     return { id, score: mean(terms.map(t => t[0])), reasons: terms.filter(t => t[0] >= 0.5).sort((a, b) => b[0] - a[0]).map(t => t[1]) };
   }).sort((a, b) => b.score - a.score);
-  // tiny repos are towns, whatever else they look like
-  const best = m.files < 15 ? scored.find(s => s.id === 'smalltown') : scored[0];
+  // a repo that's mostly infrastructure is a port, however little code it has; otherwise tiny repos are towns
+  const port = scored.find(s => s.id === 'port');
+  const best = m.infraShare >= 0.5 && m.infraFiles >= 8 ? port
+    : m.files < 15 ? scored.find(s => s.id === 'smalltown') : scored[0];
   return {
     city: best.id,
     name: CITY_NAMES[best.id],

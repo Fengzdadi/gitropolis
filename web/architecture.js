@@ -5,8 +5,10 @@ import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { addFacadeDetail } from './surfaces.js';
 
 const PERIPHERY = /(^|\/)(tests?|__tests__|specs?|e2e|fixtures?|samples?|examples?|docs?|playgrounds?|templates?|benchmarks?)(\/|$)/;
-const ROOF_BY_CITY = { paris: 'mansard', smalltown: 'gable', la: 'flat', venice: 'hip', barcelona: 'flat' };
+const ROOF_BY_CITY = { port: 'flat', paris: 'mansard', smalltown: 'gable', la: 'flat', venice: 'hip', barcelona: 'flat' };
 // each language builds in its own vernacular
+// kinds of infrastructure as code → port industry (Terraform is decided by size: plant or factory)
+const INFRA_FORM = { k8s: 'containers', yaml: 'containers', chart: 'warehouse', values: 'warehouse', kustomize: 'warehouse', ansible: 'warehouse', jsonnet: 'tanks', nix: 'tanks', tmpl: 'shed' };
 const STYLE_BY_LANG = { rs: 'rust', c: 'c', cpp: 'cpp', go: 'go', py: 'python', js: 'js', ts: 'ts', java: 'java', kt: 'java', rb: 'ruby', php: 'php', sh: 'shell' };
 const CODE = new Set(Object.keys(STYLE_BY_LANG));
 
@@ -78,6 +80,10 @@ export function buildingSpecs({ files, B, inDeg, unit, kind, t01 }) {
       case 'index': form = 'hall'; break;
       case 'types': form = 'frame'; break;
       case 'test': case 'docs': form = 'house'; break;
+      // infrastructure is the port's industry: what a file describes decides what stands on the quay
+      case 'infra': form = INFRA_FORM[a.k] || 'containers';
+        if (a.k === 'tf') form = f.loc > medLoc * 2 ? 'plant' : 'shed';
+        break;
       default:
         if (f.loc < medLoc * 0.35) form = 'house';
         else if ((a.c || 0) >= 2 && b.h > unit * 1.2) form = 'setback';
@@ -89,21 +95,22 @@ export function buildingSpecs({ files, B, inDeg, unit, kind, t01 }) {
     const hub = inDeg[i] === maxIn && maxIn > 0;
     const status = new Set(f.s || []);
     if (status.has('giant') && role === 'source') form = 'mega';
-    else if (hub) form = town ? 'clocktower' : (a.c || 0) >= 2 ? 'setback' : 'tower';
+    else if (hub) form = town ? 'clocktower' : kind === 'port' ? 'lighthouse' : (a.c || 0) >= 2 ? 'setback' : 'tower';
     else if (status.has('dead')) form = 'ruin';
     else if (sites.has(i)) form = 'site';
     const era = town && hub ? 'old' : bornRank[i] < 0.34 ? 'old' : bornRank[i] < 0.67 ? 'mid' : 'new';
-    const LOW = { house: 1.1, shed: 1.4, hall: 1.4, plant: 1.4, cityhall: 1.8, courthouse: 1.4, port: 0.6, airport: 0.9 };
+    const LOW = { house: 1.1, shed: 1.4, hall: 1.4, plant: 1.4, cityhall: 1.8, courthouse: 1.4, port: 0.6, airport: 0.9, containers: 0.5, tanks: 0.7, warehouse: 0.8 };
     let h = LOW[form] ? Math.min(b.h, unit * LOW[form]) : b.h;
     if (form === 'clocktower') h = Math.max(b.h, unit * 2.6);
+    if (form === 'lighthouse') h = Math.max(b.h, unit * 3);
     if (form === 'ruin') h *= 0.6;
     if (form === 'site') h *= 0.35;
     return {
-      w: b.w, d: b.d, h, form, era, seed: i * 7919 + 13,
+      w: b.w, d: b.d, h, form, era, seed: i * 7919 + 13, cu: unit * 0.13,
       // a small town's clock tower is old stone whatever the code is written in
       style: town && hub ? 'default' : STYLE_BY_LANG[f.lang] || cityStyle,
       tiers: Math.min(4, Math.max(2, a.c || 3)),
-      roof: form === 'house' ? (ROOF_BY_CITY[kind] === 'mansard' ? 'mansard' : town && (i * 2654435761 >>> 0) % 3 === 0 ? 'hip' : 'gable') : ROOF_BY_CITY[kind],
+      roof: form === 'house' ? (ROOF_BY_CITY[kind] === 'mansard' ? 'mansard' : town && (i * 2654435761 >>> 0) % 3 === 0 ? 'hip' : 'gable') : form === 'shed' && kind === 'port' ? 'hip' : ROOF_BY_CITY[kind], // port sheds are saw-tooth factories
       tint: (() => {
         const slot = dSlot.get(paintKey(f.p)) || 0;
         // in a small town, alternate between two wall colours within a district so a street isn't uniform

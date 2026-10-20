@@ -42,6 +42,10 @@ gitropolis reads the shape of your code and picks a plan to match it. A big mono
 <td><img src="docs/media/barcelona.png" alt="express as Barcelona"><br><b>Barcelona</b>: express <sup>*</sup>. Directories of about the same size become a grid of identical blocks.</td>
 <td><img src="docs/media/smalltown.png" alt="ky as a small town"><br><b>Small town</b>: ky <sup>*</sup>. One main street, with a clock tower for the most-imported file.</td>
 </tr>
+<tr>
+<td><img src="docs/media/port-argocd-example-apps.png" alt="argocd-example-apps as a port city"><br><b>Port city</b>: argocd-example-apps. A repo of infrastructure, not code. Kubernetes manifests are container yards on the piers, with ships moored between them.</td>
+<td><img src="docs/media/port-terraform-aws-eks.png" alt="terraform-aws-eks as a port city"><br><b>Port city</b>: terraform-aws-eks. Terraform modules become factories and power plants, and the module everything points at is the lighthouse.</td>
+</tr>
 </table>
 
 <sub><sup>*</sup> These were forced with `--city`; left to itself, gitropolis plans these repos as Paris and Manhattan. Any repo can be drawn as any city.</sub>
@@ -68,6 +72,7 @@ Some repos also get a condition on top of their plan. A repo with no recent comm
 | The tallest spire | the most-imported file |
 | City hall · courthouse · clock tower | README · LICENSE · CHANGELOG |
 | Port · power plant · airport | lockfile · package manifest · deploy config |
+| Container yard · warehouse · tank farm · factory | infrastructure as code: Kubernetes manifests · Helm, Kustomize and Ansible · jsonnet and Nix · Terraform |
 | Crane on site | a file that's being edited heavily right now |
 | Ruin | a file nobody has touched in over two years |
 | Flash on a roof | touched by the commit now playing |
@@ -88,7 +93,7 @@ Filming runs in headless Chrome, so it looks the same on every machine. It needs
 
 | Option | Default | |
 |---|---|---|
-| `--city <plan>` | `auto` | `smalltown` `manhattan` `hongkong` `tokyo` `la` `paris` `venice` `barcelona` |
+| `--city <plan>` | `auto` | `port` `smalltown` `manhattan` `hongkong` `tokyo` `la` `paris` `venice` `barcelona` |
 | `--style <look>` | `pixel` | `maquette` `plan` `nocturne` are smooth-shaded alternatives |
 | `--pixel <n>` | `2` | size of one art pixel, in screen pixels |
 | `--zoom <n>` | `1` | close-up factor; `3` frames the city centre |
@@ -104,7 +109,7 @@ Filming runs in headless Chrome, so it looks the same on every machine. It needs
 
 ## How it works
 
-1. **Scan.** `git ls-files`, a regex import pass for JS/TS, Python, Go, Rust and C/C++ (including workspace packages), and a pass over `git log --numstat` that follows renames.
+1. **Scan.** `git ls-files`, a regex import pass for JS/TS, Python, Go, Rust and C/C++ (including workspace packages), and a pass over `git log --numstat` that follows renames. Infrastructure as code is read too, when a repo has enough of it: Terraform module sources, jsonnet imports, Kustomize resources, Helm values and Ansible roles all count as links.
 2. **Plan.** gitropolis measures the code: file sizes, directory depth, import density, how much the packages depend on each other, and the project's age. It scores each city archetype on these numbers and lays out the winner's streets, blocks, water and landmarks.
 3. **Build.** Every file gets a procedural building. Thousands of them merge into one mesh, so even an 8,600-file repo like svelte keeps a full frame rate.
 4. **Draw.** The lit scene renders at a fraction of screen resolution and is quantised to a fixed palette with ordered dithering. Silhouettes get ink outlines from the depth buffer, and the result is scaled up with hard pixels. Brick courses, roof tiles, glass and water are painted in art pixels, so they stay crisp at every zoom.

@@ -78,7 +78,9 @@ root.hue = 0.78;
 root.each(n => { if (n.hue === undefined) n.hue = n.parent.hue; });
 
 const inDeg = new Array(N).fill(0);
-files.forEach(f => f.imp.forEach(j => inDeg[j]++));
+// outside a port, infrastructure files never become the city's landmark (a chart's values.yaml isn't downtown)
+const PORT = (params.get('city') || 'auto') === 'auto' ? data.identity?.city === 'port' : params.get('city') === 'port';
+files.forEach(f => f.imp.forEach(j => { if (PORT || files[j].a?.r !== 'infra') inDeg[j]++; }));
 const maxChurn = Math.max(1, ...files.map(f => f.churn));
 
 // per-file render info
@@ -852,7 +854,7 @@ async function record() {
     g.fillText(`${year(data.start)}–${year(data.end)}   ·   ${N.toLocaleString()} files   ·   ${data.stats.loc.toLocaleString()} lines`, pad, pad + 98 * S);
     if (layout && data.identity) {
       const id = data.identity;
-      const name = { smalltown: 'a small town', manhattan: 'Manhattan', hongkong: 'Hong Kong', tokyo: 'Tokyo', la: 'Los Angeles', paris: 'Paris', venice: 'Venice', barcelona: 'Barcelona' }[layout.kind];
+      const name = { port: 'a port city', smalltown: 'a small town', manhattan: 'Manhattan', hongkong: 'Hong Kong', tokyo: 'Tokyo', la: 'Los Angeles', paris: 'Paris', venice: 'Venice', barcelona: 'Barcelona' }[layout.kind];
       g.fillStyle = ST.ink; g.font = `italic 400 ${Math.round(30 * S)}px ${ST.font}`;
       g.fillText(`built like ${name}`, pad, pad + 146 * S);
       if (layout.kind === id.city && id.reasons.length) {

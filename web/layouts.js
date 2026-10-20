@@ -22,7 +22,7 @@ function shortLabel(t) {
   return s.length > 22 ? s.slice(0, 21) + '…' : s;
 }
 
-export const CITY_KINDS = ['smalltown', 'manhattan', 'hongkong', 'tokyo', 'la', 'paris', 'venice', 'barcelona'];
+export const CITY_KINDS = ['port', 'smalltown', 'manhattan', 'hongkong', 'tokyo', 'la', 'paris', 'venice', 'barcelona'];
 
 // ---------------------------------------------------------------- shared helpers
 
@@ -432,6 +432,86 @@ const PLANNERS = {
     };
   },
 
+  // a harbour: every infrastructure directory is a pier reaching into the water, basins between them
+  // for the ships, a quay road along the shore, any application code in the town behind it, and the
+  // most-depended-on file as a lighthouse at the end of the breakwater
+  port(ds, ctx) {
+    const infra = it => ctx.files[it.i].a?.r === 'infra';
+    const BASIN = 1.6, FILL = 0.72;
+    const sea = [], town = [];
+    for (const d of ds) {
+      const items = d.items.filter(it => it.i !== ctx.hub);
+      if (!items.length) continue;
+      (items.filter(infra).length >= items.length / 2 ? sea : town).push({ d, items });
+    }
+    const A = sum(sea.flatMap(g => g.items.map(it => it.a)));
+    const K = clamp(Math.round(Math.sqrt(A / 7)), 1, 12); // about as many piers as keeps the harbour square-ish
+    const cap = Math.max(2.4 * 3 * FILL, A / K * 1.15);
+    const PW = clamp(Math.sqrt(cap) * 0.55, 2.4, 5); // long piers get wider, so none is a needle
+    // a directory with a pier's worth of files gets its own pier (or several); small ones share
+    const piers = [];
+    let cur = null;
+    for (const { d, items } of middleOut(sea.map(g => ({ ...g, area: sum(g.items.map(it => it.a)) }))).map(g => g)) {
+      const tot = sum(items.map(it => it.a));
+      if (tot >= cap * 0.45) { cur = null; for (const c of chunk(items, cap)) piers.push({ names: [d.name], items: c, d }); continue; }
+      if (!cur || sum(cur.items.map(it => it.a)) + tot > cap) { cur = { names: [], items: [], d }; piers.push(cur); }
+      cur.names.push(d.name); cur.items.push(...items);
+    }
+    const lots = [], blocks = [], land = [], labels = [], ships = [];
+    let x = 0, maxL = 0, prevL = 0;
+    for (const [k, p] of piers.entries()) {
+      const used = sum(p.items.map(it => it.a));
+      const L = Math.max(2.4, used / (PW * FILL) + 0.5);
+      maxL = Math.max(maxL, L);
+      // a ship tied up alongside, in the basin between this pier and the last
+      const berth = Math.min(L, prevL);
+      if (k > 0 && berth > 3 && hash(k * 7 + ctx.files.length) < 0.7) {
+        const len = Math.min(berth * 0.8, 9), side = hash(k * 3) < 0.5;
+        ships.push({ x: side ? x - BASIN * 0.3 : x - BASIN * 0.7, z: 0.4 + len / 2 + hash(k * 5) * (berth - len - 0.4), len, beam: 0.62, rot: hash(k * 11) < 0.5 ? Math.PI / 2 : -Math.PI / 2, seed: k });
+      }
+      prevL = L;
+      land.push(rectPoly(x, -0.2, x + PW, L));
+      blocks.push({ poly: rectPoly(x + 0.08, 0.15, x + PW - 0.08, L - 0.08), type: 'yard' });
+      lots.push(...packRect(p.items, x + 0.12, 0.2, x + PW - 0.12, L - 0.12, 0.1));
+      const name = p.names.filter(n => n !== '·')[0];
+      if (name) labels.push({ text: p.names.length > 1 ? `${name} +${p.names.length - 1}` : name, x: x + PW / 2, z: L + 0.7 });
+      x += PW + BASIN;
+    }
+    const X1 = Math.max(x - BASIN, PW);
+    // the town behind the quay: application code, packed into ordinary blocks sized to what's there
+    const townA = sum(town.flatMap(g => g.items.map(it => it.a)));
+    const TD = clamp(Math.sqrt(townA / 0.55) * 0.6, 1.2, 12), TW = Math.min(X1, townA / 0.55 / TD);
+    const LD = townA ? TD + 1.0 : 1.2;
+    if (townA) {
+      const root = hierarchy({ children: town.map(g => ({ g, v: sum(g.items.map(it => it.a)) })) }).sum(n => n.v || 0).sort((a, b) => b.value - a.value);
+      treemap().tile(treemapSquarify.ratio(1)).size([TW, TD]).paddingInner(0.35)(root);
+      for (const l of root.leaves()) {
+        const z0 = -LD + l.y0, z1 = -LD + l.y1;
+        blocks.push({ poly: rectPoly(l.x0, z0, l.x1, z1), type: ground(l.data.g.d) });
+        lots.push(...packRect(l.data.g.items, l.x0, z0, l.x1, z1, 0.07));
+        if (l.data.g.d.name !== '·') labels.push({ text: l.data.g.d.name, x: (l.x0 + l.x1) / 2, z: z0 - 0.4 });
+      }
+    }
+    // a concrete apron along the whole waterfront; grass only behind the town, where there is one
+    const M = 0.8;
+    land.push(rectPoly(-M, -1.4, X1 + BASIN + 0.5, 0));
+    blocks.push({ poly: rectPoly(-M, -1.4, X1 + BASIN + 0.5, -0.9), type: 'yard' });
+    if (townA) land.push(rectPoly(-M, -LD - M, TW + M, -1.0));
+    // breakwater curling round the harbour mouth, lighthouse on its head
+    const bx = X1 + BASIN, bz = maxL + 1.6;
+    const arm = [rectPoly(bx, -0.2, bx + 0.5, bz), rectPoly(bx - Math.min(X1 * 0.35, 6), bz - 0.5, bx + 0.5, bz)];
+    land.push(...arm);
+    blocks.push(...arm.map(poly => ({ poly, type: 'yard' }))); // concrete, not lawn
+    const hubLot = { i: ctx.hub, x: bx - Math.min(X1 * 0.35, 6) + 0.45, z: bz - 0.25, w: 0.7, d: 0.7, rot: 0 };
+    lots.push(hubLot);
+    return {
+      lots, blocks, land, labels, ships, ground: 'water',
+      roads: [{ a: [-M, -0.45], b: [bx + 0.5, -0.45], w: 0.6 }],
+      camera: { az: 60, el: 30, dist: 0.78 },
+      height: (i, rel) => i === ctx.hub ? 4.2 : Math.min(0.4 + 0.35 * Math.pow(rel, 0.4), 1.4),
+    };
+  },
+
   // one main street, houses on both sides, a church on the square
   smalltown(ds, ctx) {
     const items = ds.flatMap(d => d.items).filter(it => it.i !== ctx.hub);
@@ -569,6 +649,7 @@ export function buildLayout(kind, { files, inDeg, SIZE, frontAz }) {
     bridges: (L.bridges || []).map(b => ({ a: P(b.a), b: P(b.b), w: b.w * s })),
     roads: (L.roads || []).map(r => ({ a: P(r.a), b: P(r.b), w: r.w * s })),
     hills: (L.hills || []).map(h => ({ x: (h.x - mx) * s, z: (h.z - mz) * s, r: h.r * s, h: h.h * s })),
+    ships: (L.ships || []).map(sh => ({ ...sh, x: (sh.x - mx) * s, z: (sh.z - mz) * s, len: sh.len * s, beam: sh.beam * s })),
     labels: L.labels.map(l => ({ text: shortLabel(l.text), weight: areaOf.get(l.text.replace(' (downtown)', '')) || 0, x: (l.x - mx) * s, z: (l.z - mz) * s }))
       .sort((a, b) => b.weight - a.weight),
   };

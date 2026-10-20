@@ -4,7 +4,7 @@
 //   nocturne  — dark, hazy city where only recently edited files are lit from inside (Hopper, Todd Hido)
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
-import { buildingGeometry } from './buildings.js';
+import { buildingGeometry, shipGeometry } from './buildings.js';
 import { buildingSpecs, buildCityMesh } from './architecture.js';
 import { addGroundDetail } from './surfaces.js';
 import { buildStreets, buildTraffic } from './streets.js';
@@ -18,7 +18,7 @@ export const STYLES = {
     hemi: { sky: '#f6f3ee', ground: '#a69d90', intensity: 1.25 },
     heightScale: 0.42, maxHeight: 4.5,
     building: '#f1ede6', buildingJitter: 0.035, ground: '#d8d1c5', plate: '#e4ded4', roughness: 0.92,
-    rail: '#8f877c', water: '#b7c2c3', land: '#ddd6ca', plaza: '#ece7de', park: '#c6cab0', lawn: '#d4d4bf', hill: '#d9d1c4', road: '#c9c1b4',
+    rail: '#8f877c', water: '#b7c2c3', land: '#ddd6ca', yard: '#c9c4b8', plaza: '#ece7de', park: '#c6cab0', lawn: '#d4d4bf', hill: '#d9d1c4', road: '#c9c1b4',
     windows: 0, accent: '#d8452b', edges: { color: '#2a2724', opacity: 0.07 },
     toneMapping: THREE.NeutralToneMapping, exposure: 1.15, bloom: null,
     ink: '#2a2724', inkSoft: 'rgba(42,39,36,.55)', font: "'Instrument Serif', Georgia, serif", labelCase: 'none',
@@ -26,7 +26,7 @@ export const STYLES = {
   plan: {
     background: '#f1ede4', fog: null, flat: true,
     building: '#1c1b1a', buildingJitter: 0, ground: '#f1ede4', plate: '#e7e2d7',
-    rail: '#2f5d7c', water: '#dce3e3', land: '#f1ede4', plaza: '#ece8df', park: '#e1e3d0', lawn: '#ebebdf', hill: '#e4dfd4', road: '#ddd7cb',
+    rail: '#2f5d7c', water: '#dce3e3', land: '#f1ede4', yard: '#e4e0d6', plaza: '#ece8df', park: '#e1e3d0', lawn: '#ebebdf', hill: '#e4dfd4', road: '#ddd7cb',
     windows: 0, accent: '#d23c2a', edges: { color: '#d23c2a', opacity: 0.22 },
     toneMapping: THREE.NoToneMapping, exposure: 1.0, bloom: null,
     ink: '#1c1b1a', inkSoft: 'rgba(28,27,26,.55)', font: "'Instrument Serif', Georgia, serif", labelCase: 'upper',
@@ -36,7 +36,7 @@ export const STYLES = {
     sun: { color: '#fff4e0', intensity: 2.6, elevation: 50, azimuth: 75 },
     hemi: { sky: '#c4e4ee', ground: '#61944a', intensity: 1.0 },
     building: '#bdb293', buildingJitter: 0.06, ground: '#61944a', plate: '#cdc8d2', roughness: 1,
-    rail: '#4a4458', water: '#2f6188', land: '#61944a', plaza: '#e0d7b8', park: '#3d6b36', lawn: '#93bf62', hill: '#3d6b36', road: '#6e6880',
+    rail: '#4a4458', water: '#2f6188', land: '#61944a', yard: '#9c97a8', plaza: '#e0d7b8', park: '#3d6b36', lawn: '#93bf62', hill: '#3d6b36', road: '#6e6880',
     windows: 0, accent: '#c0413b', edges: null,
     toneMapping: THREE.NoToneMapping, exposure: 1.0, bloom: null,
     ink: '#14121c', inkSoft: 'rgba(20,18,28,.7)', font: "'Pixelify Sans', monospace", uiFont: "'Pixelify Sans', monospace", labelCase: 'none',
@@ -47,7 +47,7 @@ export const STYLES = {
     hemi: { sky: '#56607e', ground: '#17151a', intensity: 1.15 },
     heightScale: 0.55, maxHeight: 6,
     building: '#3d4049', buildingJitter: 0.04, ground: '#14161c', plate: '#24262e', roughness: 0.8,
-    rail: '#6d6050', water: '#0b1626', land: '#1c1e25', plaza: '#2d2f37', park: '#18211a', lawn: '#1b211d', hill: '#15161c', road: '#0e0f13',
+    rail: '#6d6050', water: '#0b1626', land: '#1c1e25', yard: '#25272e', plaza: '#2d2f37', park: '#18211a', lawn: '#1b211d', hill: '#15161c', road: '#0e0f13',
     windows: 1, windowColor: '#ffc27a', accent: '#ffc27a', edges: { color: '#ffc27a', opacity: 0.018 }, hubEdgeBoost: 3,
     toneMapping: THREE.ACESFilmicToneMapping, exposure: 1.1, bloom: { strength: 0.35, radius: 0.4, threshold: 0.85 },
     ink: '#e8e2d6', inkSoft: 'rgba(232,226,214,.55)', font: "'Instrument Serif', Georgia, serif", labelCase: 'none',
@@ -79,10 +79,10 @@ function buildTerrain(scene, layout, S, plateStep, shared, street) {
   const landTop = layout.groundIsWater ? plateStep * 0.8 : 0;
   if (layout.groundIsWater) add(slab([...layout.land, ...layout.shore], 0, landTop), S.land, 'grass-or-street');
   if (layout.water.length) add(slab(layout.water, 0, plateStep * 0.05), S.water, 'water');
-  const colors = { block: S.plate, park: S.park, plaza: S.plaza, lawn: S.lawn };
+  const colors = { block: S.plate, park: S.park, plaza: S.plaza, lawn: S.lawn, yard: S.yard };
   for (const type of Object.keys(colors)) {
     const polys = layout.blocks.filter(b => b.type === type).map(b => b.poly);
-    add(slab(polys, landTop, type === 'park' ? plateStep * 1.4 : plateStep), colors[type], { block: 'paving', plaza: 'paving', park: 'grass', lawn: 'grass' }[type]);
+    add(slab(polys, landTop, type === 'park' ? plateStep * 1.4 : plateStep), colors[type], { block: 'paving', plaza: 'paving', park: 'grass', lawn: 'grass', yard: 'paving' }[type]);
   }
   if (S.flat) {
     // plan: hairline outline around every block
@@ -125,6 +125,12 @@ function buildTerrain(scene, layout, S, plateStep, shared, street) {
   }
   if (layout.decor.length) {
     add(mergeGeometries(layout.decor.map(d => new THREE.BoxGeometry(d.w, d.h, d.d).translate(d.x, landTop + plateStep + d.h / 2, d.z))), S.building);
+  }
+  if (layout.ships?.length) {
+    const geo = mergeGeometries(layout.ships.map(sh => shipGeometry(sh).rotateY(sh.rot).translate(sh.x, plateStep * 0.05, sh.z)));
+    const mesh = new THREE.Mesh(geo, S.flat ? new THREE.MeshBasicMaterial({ vertexColors: true }) : new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.9, flatShading: true }));
+    mesh.castShadow = mesh.receiveShadow = !S.flat;
+    scene.add(mesh);
   }
   for (const h of S.flat ? [] : layout.hills) { // seen from straight above, hills are just blobs
     const mesh = new THREE.Mesh(new THREE.IcosahedronGeometry(1, 2), mat(S.hill));

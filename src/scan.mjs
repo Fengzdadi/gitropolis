@@ -13,7 +13,16 @@ const LANGS = {
   c: 'c', h: 'c', cc: 'cpp', cpp: 'cpp', hpp: 'cpp', cs: 'cs', rb: 'rb', php: 'php',
   swift: 'swift', scala: 'scala', lua: 'lua', zig: 'zig', ex: 'ex', exs: 'ex',
   css: 'css', scss: 'css', less: 'css', html: 'html', sh: 'sh',
+  // infrastructure as code: only kept when it's a real part of the repo (see INFRA_MIN)
+  tf: 'hcl', tfvars: 'hcl', hcl: 'hcl', bicep: 'hcl', yaml: 'yaml', yml: 'yaml',
+  jsonnet: 'jsonnet', libsonnet: 'jsonnet', nix: 'nix', j2: 'tmpl', tpl: 'tmpl',
 };
+export const INFRA = new Set(['hcl', 'yaml', 'jsonnet', 'nix', 'tmpl']);
+// a repo keeps its infrastructure files as buildings when they're at least this share of its lines
+// (ordinary repos sit near 0%: a few CI and config YAMLs, which stay out of the city as before).
+// Test data doesn't count, or a YAML parser's fixtures would make it a port.
+const INFRA_MIN = 0.1;
+const INFRA_FIXTURE = /(^|\/)(tests?|__tests__|specs?|e2e|fixtures?|__fixtures__|testdata|samples?|docs?)(\/|$)/;
 // non-code files that still matter in the city: dependency manifests and build/CI definitions
 const CFG_FILE = /(^|\/)(package\.json|Cargo\.toml|pyproject\.toml|setup\.cfg|go\.mod|Gemfile|pom\.xml|build\.gradle(\.kts)?|requirements[^/]*\.txt|Dockerfile[^/]*|docker-compose[^/]*\.ya?ml|compose\.ya?ml|fly\.toml|vercel\.json|netlify\.toml|Procfile|Makefile|tsconfig[^/]*\.json)$|^\.github\/workflows\/[^/]+\.ya?ml$/;
 const SKIP_DIR = /(^|\/)(node_modules|vendor|third_party|deps|dist|build|out|\.next|target|__pycache__|\.git)\//;
@@ -68,9 +77,19 @@ export async function scanRepo(repo, { maxCommits = 20000 } = {}) {
     else if (LINKED.has(lang) && text.includes('.')) for (const m of text.matchAll(STR_REF)) refs.add(stemOf(m[1]));
     if (!loc) for (const line of text.split('\n')) if (line.trim()) loc++;
     if (!loc) continue;
-    index.set(p, files.length);
-    files.push({ p, lang, loc, a: fileAnatomy(p, text, lang), text, imp: new Set(), churn: 0, born: 0, last: 0 });
+    const a = INFRA.has(lang) ? { c: 0, f: 0, lf: 0, x: 0, r: 'infra', k: infraKind(p, text, lang) } : fileAnatomy(p, text, lang);
+    files.push({ p, lang, loc, a, text, imp: new Set(), churn: 0, born: 0, last: 0 });
   }
+  {
+    let infraLoc = 0, infraN = 0, codeLoc = 0;
+    for (const f of files) {
+      if (INFRA.has(f.lang)) { if (!INFRA_FIXTURE.test(f.p)) { infraLoc += f.loc; infraN++; } } else if (!NONCODE.has(f.lang)) codeLoc += f.loc;
+    }
+    if (infraN < 8 || infraLoc / Math.max(1, infraLoc + codeLoc) < INFRA_MIN) {
+      for (let k = files.length - 1; k >= 0; k--) if (INFRA.has(files[k].lang)) files.splice(k, 1);
+    }
+  }
+  files.forEach((f, i) => index.set(f.p, i));
 
   const tails = resolveImports(root, files, index, listed);
 
@@ -232,6 +251,18 @@ function resolveImports(root, files, index, listed) {
       goDirs.get(d).push(i);
     }
   }
+  // infrastructure: files per directory, for module sources and chart values
+  const infraByDir = new Map();
+  for (const f of files) if (INFRA.has(f.lang)) {
+    const d = path.posix.dirname(f.p);
+    if (!infraByDir.has(d)) infraByDir.set(d, []);
+    infraByDir.get(d).push(f.p);
+  }
+  infraByDir.suffix = new Map(); // "a/b.libsonnet" → path, for jsonnet's library search paths
+  for (const ps of infraByDir.values()) for (const p of ps) {
+    const segs = p.split('/');
+    for (let k = 1; k <= Math.min(3, segs.length); k++) { const key = segs.slice(-k).join('/'); if (!infraByDir.suffix.has(key)) infraByDir.suffix.set(key, p); }
+  }
   let goModule = '';
   try { goModule = /^module\s+(\S+)/m.exec(readFileSync(path.join(root, 'go.mod'), 'utf8'))[1]; } catch { }
 
@@ -336,8 +367,81 @@ function resolveImports(root, files, index, listed) {
       for (const m of text.matchAll(C_RE)) {
         addEdge(f, path.posix.normalize(path.posix.join(dir, m[1])));
       }
+    } else if (INFRA.has(f.lang)) {
+      linkInfra(f, dir, text, index, infraByDir, addEdge);
     }
     f.text = null;
   }
   return tails;
+}
+
+// ---------------------------------------------------------------- infrastructure as code
+// what kind of infrastructure a file is: it decides the building (container yard, tank farm, warehouse…)
+function infraKind(p, text, lang) {
+  const base = p.slice(p.lastIndexOf('/') + 1).toLowerCase();
+  if (lang !== 'yaml') return { hcl: 'tf', jsonnet: 'jsonnet', nix: 'nix', tmpl: 'tmpl' }[lang];
+  if (base === 'chart.yaml') return 'chart';
+  if (/^kustomization\.ya?ml$/.test(base)) return 'kustomize';
+  if (/^values[^/]*\.ya?ml$/.test(base)) return 'values';
+  if (/(^|\/)templates\//.test(p) && text.includes('{{')) return 'k8s';
+  if (/^\s*apiVersion:/m.test(text) && /^\s*kind:\s*\S/m.test(text)) return 'k8s';
+  if (/(^|\/)(roles|playbooks?|tasks|handlers|group_vars|host_vars)\//.test(p) || /^\s*-?\s*hosts:\s/m.test(text)) return 'ansible';
+  return 'yaml';
+}
+
+const TF_SOURCE = /\bsource\s*=\s*"(\.{1,2}\/[^"]*)"/g;
+const JSONNET_IMPORT = /\bimport(?:str)?\s+['"]([^'"]+)['"]/g;
+const ANSIBLE_REF = /\b(?:include_tasks|import_tasks|include|import_playbook|include_vars|src|template|file):\s*['"]?([\w./-]+\.(?:ya?ml|j2|tpl))/g;
+
+function linkInfra(f, dir, text, index, byDir, addEdge) {
+  const join = q => path.posix.normalize(path.posix.join(dir, q)).replace(/\/$/, '');
+  // a module / directory reference lands on its main file
+  const linkDir = d => {
+    const ps = byDir.get(d === '' ? '.' : d);
+    if (!ps) return;
+    const main = ps.find(p => /\/?(main\.tf|kustomization\.ya?ml|default\.nix)$/.test(p)) || ps[0];
+    addEdge(f, main);
+  };
+  if (f.lang === 'hcl') {
+    for (const m of text.matchAll(TF_SOURCE)) linkDir(join(m[1]));
+    // variables.tf is what every file in its module reads
+    const vars = (dir === '.' ? '' : dir + '/') + 'variables.tf';
+    if (/\bvar\.\w/.test(text) && vars !== f.p) addEdge(f, vars);
+  } else if (f.lang === 'jsonnet') {
+    for (const m of text.matchAll(JSONNET_IMPORT)) {
+      const rel = join(m[1]);
+      if (index.has(rel)) addEdge(f, rel);
+      else { const hit = byDir.suffix.get(m[1].split('/').slice(-3).join('/')); if (hit) addEdge(f, hit); }
+    }
+  } else if (f.a.k === 'kustomize') {
+    let inList = false;
+    for (const line of text.split('\n')) {
+      if (/^(resources|bases|components|patchesStrategicMerge|patches):/.test(line)) { inList = true; continue; }
+      if (/^\S/.test(line)) inList = false;
+      const m = inList && /^\s*-\s*(?:path:\s*)?['"]?([\w./-]+)['"]?\s*$/.exec(line);
+      if (!m) continue;
+      const q = join(m[1]);
+      if (index.has(q)) addEdge(f, q); else linkDir(q);
+    }
+  } else if (/(^|\/)templates\//.test(f.p) && text.includes('.Values')) {
+    // a chart's templates all read its values.yaml
+    const chart = f.p.slice(0, f.p.lastIndexOf('templates/'));
+    addEdge(f, chart + 'values.yaml');
+  } else if (f.a.k === 'ansible') {
+    for (const m of text.matchAll(ANSIBLE_REF)) {
+      const q = m[1];
+      for (const c of [join(q), join('../templates/' + q), join('../files/' + q), join('../tasks/' + q), join('../vars/' + q)]) if (index.has(c)) { addEdge(f, c); break; }
+    }
+    // roles: [a, b] / - role: a → roles/a/tasks/main.yml
+    let inRoles = false;
+    for (const line of text.split('\n')) {
+      if (/^\s*roles:\s*$/.test(line)) { inRoles = true; continue; }
+      const m = /^\s*-\s*(?:role:\s*)?([\w.-]+)\s*$/.exec(line) || /\brole:\s*([\w.-]+)/.exec(line);
+      if (inRoles && !m && /^\s*\w/.test(line) && !/^\s*-/.test(line)) inRoles = false;
+      if (!m || !(inRoles || line.includes('role:'))) continue;
+      for (const root of ['roles/', dir === '.' ? 'roles/' : dir + '/roles/']) {
+        for (const ext of ['yml', 'yaml']) { const t = `${root}${m[1]}/tasks/main.${ext}`; if (index.has(t)) addEdge(f, t); }
+      }
+    }
+  }
 }

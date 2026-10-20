@@ -38,7 +38,8 @@ export const PALETTE = {
 
 export const BASE_FORMS = ['slab', 'tower', 'setback', 'podium', 'house', 'shed', 'plant', 'hall', 'frame'];
 export const LANDMARKS = ['cityhall', 'courthouse', 'clocktower', 'port', 'airport', 'ruin', 'site', 'mega'];
-export const FORMS = [...BASE_FORMS, ...LANDMARKS];
+export const INDUSTRY = ['containers', 'tanks', 'warehouse', 'lighthouse']; // the port city
+export const FORMS = [...BASE_FORMS, ...LANDMARKS, ...INDUSTRY];
 export const STYLES = ['rust', 'c', 'cpp', 'go', 'python', 'js', 'ts', 'java', 'ruby', 'php', 'shell', 'default'];
 export const ERAS = ['old', 'mid', 'new'];
 export const ROOFS = ['flat', 'gable', 'hip', 'mansard', 'spire', 'dome'];
@@ -1432,8 +1433,138 @@ function buildMega(M, S) {
   return null;
 }
 
+// ------------------------------------------------------------ the port city's industry
+// Containers are sized from spec.cu (one container width, the same across the whole city) so a
+// yard of a big manifest and a yard of a small one stack the same boxes, just more of them.
+
+// container yard: rows of stacked boxes on a paved apron, aisles every two rows, a gantry over big yards
+function buildContainers(M, S) {
+  const { w, d, h, u } = S, rng = S.rng;
+  const pa = Math.min(h * 0.04, u * 0.03);
+  M.box(-w / 2, w / 2, 0, pa, -d / 2, d / 2, [POD, rgb(S.P.concrete[2])], [POD, rgb(S.P.concrete[1])]);
+  const alongX = w >= d, L = alongX ? w : d, W = alongX ? d : w;
+  const Wc = clamp(S.spec.cu || u * 0.16, u * 0.08, W * 0.45), Hc = Wc * 0.95, Lc = Math.min(Wc * 2.5, L * 0.9);
+  const cols = CONTAINERS.map(([r, i]) => rgb(S.P[r][i]));
+  const maxLv = clamp(Math.round(h / Hc), 1, 4);
+  const nL = Math.max(1, Math.floor((L * 0.94) / (Lc * 1.06)));
+  const rows = [];
+  for (let z = -W / 2 + Wc * 0.6, r = 0; z + Wc / 2 <= W / 2 - Wc * 0.1; r++) { rows.push(z); z += Wc * (r % 2 ? 1.9 : 1.04); }
+  M.swap = !alongX; // lay rows along local x, mirror when the long side is z
+  for (const z of rows) for (let i = 0; i < nL; i++) {
+    if (rng() < 0.08) continue;
+    const x = -L / 2 + L * 0.03 + (i + 0.5) * (L * 0.94 / nL);
+    const lv = 1 + Math.floor(rng() * maxLv);
+    for (let l = 0; l < lv; l++) {
+      const c = cols[Math.floor(rng() * cols.length)];
+      // the camera never sees the back faces, or the top of a box with another on it
+      M.box(x - Lc / 2, x + Lc / 2, pa + l * Hc, pa + (l + 1) * Hc, z - Wc / 2, z + Wc / 2, [WALL, c], [WALL, c], l < lv - 1 ? ['nx', 'nz', 'top'] : ['nx', 'nz']);
+    }
+  }
+  if (L > Lc * 4 && W > Wc * 3) { // rubber-tyred gantry straddling the stacks
+    const cc = rgb(S.P.accent[0]), t = Wc * 0.18, xg = -L / 2 + L * (0.2 + rng() * 0.6), Hg = Hc * (maxLv + 0.8);
+    const za = -W / 2 + Wc * 0.15, zb = W / 2 - Wc * 0.15;
+    for (const sx of [-1, 1]) for (const z of [za, zb]) M.box(xg + sx * Lc * 0.6 - t / 2, xg + sx * Lc * 0.6 + t / 2, pa, Hg, z - t / 2, z + t / 2, [ACC, cc], null, ['top']);
+    for (const sx of [-1, 1]) M.box(xg + sx * Lc * 0.6 - t / 2, xg + sx * Lc * 0.6 + t / 2, Hg, Hg + t, za - t / 2, zb + t / 2, [ACC, cc], [ACC, cc]);
+    M.box(xg - Lc * 0.6, xg + Lc * 0.6, Hg + t, Hg + t * 1.6, za, za + t * 1.5, [ACC, cc], [ACC, cc]);
+  }
+  M.swap = false;
+  return null;
+}
+
+// tank farm: one to four squat cylinders inside a low bund wall
+function buildTanks(M, S) {
+  const { w, d, h, u } = S, rng = S.rng;
+  const pa = Math.min(h * 0.04, u * 0.03), e = u * 0.03;
+  M.box(-w / 2, w / 2, 0, pa, -d / 2, d / 2, [POD, rgb(S.P.concrete[2])], [POD, rgb(S.P.ground[1])]);
+  for (const [x0, x1, z0, z1] of [[-w / 2, w / 2, d / 2 - e, d / 2], [-w / 2, w / 2, -d / 2, -d / 2 + e], [w / 2 - e, w / 2, -d / 2, d / 2], [-w / 2, -w / 2 + e, -d / 2, d / 2]])
+    M.box(x0, x1, pa, pa * 3, z0, z1, [POD, rgb(S.P.concrete[0])], [POD, rgb(S.P.concrete[0])]);
+  const nx = w > d * 1.6 ? 2 : 1, nz = d > w * 1.6 ? 2 : 1, many = u > (S.spec.cu || u) * 9 ? 2 : 1;
+  const gx = Math.min(nx * many, 3), gz = Math.min(nz * many, 3);
+  const R = Math.min(w / gx, d / gz) * 0.4;
+  const shell = [S.white, S.alu, rgb(S.P.stone[0])][Math.floor(rng() * 3)];
+  for (let i = 0; i < gx; i++) for (let k = 0; k < gz; k++) {
+    const cx = -w / 2 + (i + 0.5) * w / gx, cz = -d / 2 + (k + 0.5) * d / gz;
+    const Ht = Math.min(h, R * 1.5) * (0.8 + rng() * 0.2);
+    M.loft(cx, cz, [[pa, R, R], [pa + Ht, R, R]], 12, [WALL, shell]);
+    M.loft(cx, cz, [[pa + Ht * 0.72, R * 1.01, R * 1.01], [pa + Ht * 0.8, R * 1.01, R * 1.01]], 12, [ACC, S.accent]); // painted band
+    M.loft(cx, cz, [[pa + Ht, R, R], [pa + Ht + R * 0.18, R * 0.25, R * 0.25]], 12, [ROOF, S.alu], { cap: [ROOF, S.alu] });
+  }
+  return null;
+}
+
+// warehouse: long corrugated shed with a shallow roof and a row of loading doors on the yard side
+function buildWarehouse(M, S) {
+  const { w, d, h, u } = S;
+  const alongX = w >= d, L = alongX ? w : d, W = alongX ? d : w;
+  const rise = Math.min(W * 0.14, h * 0.25), wallH = h - rise, e = u * 0.03;
+  const tin = rgb(S.P.tin[0]), wallC = S.era === 'old' ? S.wall : S.era === 'mid' ? tin : rgb(S.P.metal[0]);
+  M.swap = !alongX;
+  M.box(-L / 2, L / 2, 0, wallH, -W / 2, W / 2, [WALL, wallC], null, ['top']);
+  M.box(-L / 2 - e, L / 2 + e, wallH * 0.82, wallH * 0.9, W / 2, W / 2 + e, [ACC, S.accent], [ACC, S.accent]); // company stripe
+  const n = clamp(Math.round(L / (wallH * 1.3)), 2, 8);
+  for (let i = 0; i < n; i++) {
+    const x = -L / 2 + (i + 0.5) * L / n, dw = Math.min(L / n * 0.55, wallH * 0.9);
+    M.box(x - dw / 2, x + dw / 2, 0, wallH * 0.62, W / 2, W / 2 + e * 0.6, [TRIM, S.dark], [TRIM, S.dark]);
+  }
+  gable(M, 0, 0, L + e * 2, W + e * 2, wallH, rise, e, 'x', S.era === 'new' ? S.flat : S.slate, WALL, wallC);
+  M.swap = false;
+  return null;
+}
+
+// the port's landmark: a striped lighthouse on a rock, its lamp lit
+function buildLighthouse(M, S) {
+  const { w, d, h, u } = S;
+  const rock = rgb(S.P.stone[2]), red = rgb(S.P.accent[1]), white = S.white;
+  const rb = u * 0.48, rt = u * 0.2, base = h * 0.06;
+  M.loft(0, 0, [[0, rb, rb], [base, rb * 0.9, rb * 0.9]], 8, [POD, rock], { cap: [POD, rock], rot: Math.PI / 8 });
+  const r0 = u * 0.3, top = h * 0.8, bands = 5;
+  for (let b = 0; b < bands; b++) {
+    const y0 = base + (top - base) * b / bands, y1 = base + (top - base) * (b + 1) / bands;
+    const ra = r0 + (rt - r0) * b / bands, rb2 = r0 + (rt - r0) * (b + 1) / bands;
+    M.loft(0, 0, [[y0, ra, ra], [y1, rb2, rb2]], 10, [WALL, b % 2 ? red : white]);
+  }
+  M.loft(0, 0, [[top, rt * 1.5, rt * 1.5], [top + h * 0.02, rt * 1.5, rt * 1.5]], 10, [TRIM, S.dark], { cap: [TRIM, S.dark] }); // gallery
+  M.loft(0, 0, [[top + h * 0.02, rt * 0.9, rt * 0.9], [top + h * 0.11, rt * 0.9, rt * 0.9]], 8, [ACC, rgb(S.P.accent[0])]); // lamp room
+  M.loft(0, 0, [[top + h * 0.11, rt * 1.1, rt * 1.1], [h, 0, 0]], 8, [ROOF, red]);
+  return null;
+}
+
+// a container ship moored in a basin: not a file, just the harbour's life. Bow towards +x.
+export function shipGeometry({ len, beam, seed = 1 }) {
+  const M = new Builder(), rng = mulberry32(seed * 2654435761 + 7);
+  const P = PALETTE, hullC = rgb([P.primary[0], P.accent[3], P.corten[2], P.green[1]][Math.floor(rng() * 4)]);
+  const red = rgb(P.accent[1]), white = rgb(P.accent[2]), dark = rgb(P.accent[3]);
+  const L = len, B = beam, fb = B * 0.55, wl = B * 0.12; // freeboard, red waterline band
+  const xs = -L / 2, xb = L / 2 - B * 0.9; // stern, start of the bow
+  M.box(xs, xb, 0, wl, -B / 2, B / 2, [POD, red], null, ['top']);
+  M.box(xs, xb, wl, fb, -B / 2, B / 2, [WALL, hullC], [ROOF, rgb(P.metal[1])]);
+  // bow: a wedge closing to a point
+  const tip = [L / 2, fb, 0], tipL = [L / 2 - B * 0.15, 0, 0];
+  M.quad([xb, 0, B / 2], [tipL[0], 0, 0], tip, [xb, fb, B / 2], WALL, hullC, [xb, fb / 2, 0]);
+  M.quad([tipL[0], 0, 0], [xb, 0, -B / 2], [xb, fb, -B / 2], tip, WALL, hullC, [xb, fb / 2, 0]);
+  M.tri([xb, fb, B / 2], tip, [xb, fb, -B / 2], ROOF, rgb(P.metal[1]), [xb, 0, 0]);
+  // deck cargo: bays of containers between the bridge and the bow
+  const cols = CONTAINERS.map(([r, i]) => rgb(P[r][i])), ch = B * 0.22, bayL = B * 0.62;
+  const x0 = xs + L * 0.24, x1 = xb - B * 0.1, rows = 3, cw = B * 0.86 / rows;
+  for (let x = x0; x + bayL <= x1; x += bayL * 1.06) for (let r = 0; r < rows; r++) {
+    const z = -B * 0.43 + (r + 0.5) * cw, lv = 1 + Math.floor(rng() * 3);
+    for (let l = 0; l < lv; l++) {
+      const c = cols[Math.floor(rng() * cols.length)];
+      M.box(x, x + bayL, fb + l * ch, fb + (l + 1) * ch, z - cw * 0.47, z + cw * 0.47, [WALL, c], [WALL, c], l < lv - 1 ? ['nx', 'nz', 'top'] : ['nx', 'nz']);
+    }
+  }
+  // the bridge at the stern, its wings, and a funnel in the company colour
+  const bx0 = xs + L * 0.04, bx1 = xs + L * 0.17, bh = fb + B * 1.1;
+  M.box(bx0, bx1, fb, bh, -B * 0.36, B * 0.36, [WALL, white], [ROOF, white]);
+  M.box(bx1 - (bx1 - bx0) * 0.3, bx1, bh - B * 0.18, bh - B * 0.06, -B * 0.5, B * 0.5, [TRIM, white], [TRIM, white]);
+  M.box(bx1 - (bx1 - bx0) * 0.31, bx1 + 1e-3, bh - B * 0.4, bh - B * 0.22, -B * 0.34, B * 0.34, [GLASS, rgb(P.glass[2])], null, ['top']);
+  M.box(bx0 - B * 0.12, bx0 + B * 0.14, fb, bh + B * 0.3, -B * 0.12, B * 0.12, [ACC, red], [TRIM, dark]);
+  return M.geometry();
+}
+
 const BUILDERS = { slab: buildSlab, tower: buildTower, setback: buildSetback, podium: buildPodium, house: buildHouse, shed: buildShed, plant: buildPlant, hall: buildHall, frame: buildFrame,
-  cityhall: buildCityhall, courthouse: buildCourthouse, clocktower: buildClocktower, port: buildPort, airport: buildAirport, ruin: buildRuin, site: buildSite, mega: buildMega };
+  cityhall: buildCityhall, courthouse: buildCourthouse, clocktower: buildClocktower, port: buildPort, airport: buildAirport, ruin: buildRuin, site: buildSite, mega: buildMega,
+  containers: buildContainers, tanks: buildTanks, warehouse: buildWarehouse, lighthouse: buildLighthouse };
 
 const FLAT = { old: 'flat', mid: 'flat', new: 'flat' };
 const DEFAULT_ROOF = {
@@ -1447,6 +1578,7 @@ const DEFAULT_ROOF = {
   hall:    { old: 'dome', mid: 'flat', new: 'flat' },
   frame:   { old: 'flat', mid: 'flat', new: 'flat' },
   cityhall: FLAT, courthouse: FLAT, clocktower: FLAT, port: FLAT, airport: FLAT, ruin: FLAT, site: FLAT, mega: FLAT,
+  containers: FLAT, tanks: FLAT, warehouse: FLAT, lighthouse: FLAT,
 };
 // landmarks that ignore the era: a ruin is always weathered, a building site is always raw
 const FORCE_ERA = { ruin: 'old', site: 'mid' };

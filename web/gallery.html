@@ -22,7 +22,7 @@
 <div id="labels"></div>
 <script type="module">
 import * as THREE from 'three';
-import { buildingGeometry, BASE_FORMS, LANDMARKS, ERAS, ROOFS, STYLES } from './buildings.js';
+import { buildingGeometry, BASE_FORMS, LANDMARKS, INDUSTRY, ERAS, ROOFS, STYLES } from './buildings.js';
 
 // One scene, one orthographic iso camera, every building laid out on a grid.
 const W = innerWidth, H = innerHeight;
@@ -44,6 +44,7 @@ const sizes = { // representative footprints per form: [w, d, h]
   house: [6, 5, 5], shed: [12, 8, 5.5], plant: [12, 8, 20], hall: [14, 10, 8], frame: [8, 8, 17],
   cityhall: [14, 10, 16], courthouse: [13, 11, 15], clocktower: [5, 5, 28], port: [18, 12, 9],
   airport: [20, 13, 10], ruin: [10, 8, 10], site: [11, 9, 13], mega: [18, 16, 46],
+  containers: [16, 9, 4], tanks: [12, 8, 6], warehouse: [16, 8, 6], lighthouse: [5, 5, 26],
 };
 const Q = new URLSearchParams(location.search), only = Q.get('only'), show = g => !only || only.split(',').includes(g);
 const group = (g, fn) => { if (show(g)) fn(); };
@@ -84,6 +85,13 @@ group('landmarks', () => {
     lm('cityhall', 'go', { crown: 'tower' }, 3), lm('cityhall', 'ruby', { crown: 'dome', era: 'old' }, 4), lm('courthouse', 'c', {}, 6), lm('clocktower', 'python', { era: 'old' }, 7),
     lm('port', 'ts', {}, 8), lm('airport', 'go', {}, 9), lm('ruin', 'rust', {}, 10), lm('mega', 'cpp', {}, 11), lm('site', 'js', {}, 12),
   ] });
+});
+
+// the port city's industry, in each era, plus a big yard and a tank farm
+group('industry', () => {
+  const it = (form, era, seed, extra = {}) => ({ spec: { form, era, seed, cu: 1.1, w: sizes[form][0], d: sizes[form][1], h: sizes[form][2], ...extra }, name: `${form} ${era}` });
+  ERAS.forEach((era, r) => rows.push({ label: `industry ${era}`, items: INDUSTRY.map((f, i) => it(f, era, 31 + r * 4 + i)) }));
+  rows.push({ label: 'industry big', items: [it('containers', 'mid', 50, { w: 24, d: 14, h: 4.5 }), it('tanks', 'mid', 51, { w: 18, d: 14, h: 6 }), it('warehouse', 'old', 52, { w: 22, d: 9, h: 7 })] });
 });
 
 // ?f=courthouse,port keeps only those forms; ?s=rust,go keeps only those styles (for close inspection)
