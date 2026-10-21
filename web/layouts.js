@@ -1169,7 +1169,7 @@ export function buildLayout(kind, { files, inDeg, hub, SIZE, frontAz }) {
     cables: (L.cables || []).map(c => ({ a: [...P(c.a), c.a[2] * s], b: [...P(c.b), c.b[2] * s] })),
     ships: (L.ships || []).map(sh => ({ ...sh, x: (sh.x - mx) * s, z: (sh.z - mz) * s, len: sh.len * s, beam: sh.beam * s })),
     // a label appears with its district: when the first file under that name was born
-    labels: L.labels.map(l => ({ bornRaw: districtBorn(files, l.text), text: shortLabel(l.text), weight: l.weight ?? (areaOf.get(l.text.replace(' (downtown)', '')) || 0), x: (l.x - mx) * s, z: (l.z - mz) * s, y: (l.y || 0) * s }))
+    labels: L.labels.map(l => ({ bornRaw: districtBorn(files, l.text), path: l.text.replace(/ \(downtown\)$| \+\d+$/, ''), text: shortLabel(l.text), weight: l.weight ?? (areaOf.get(l.text.replace(' (downtown)', '')) || 0), x: (l.x - mx) * s, z: (l.z - mz) * s, y: (l.y || 0) * s }))
       .sort((a, b) => b.weight - a.weight),
   };
 }

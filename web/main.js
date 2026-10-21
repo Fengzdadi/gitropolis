@@ -389,8 +389,9 @@ if (NEON) {
 // ---- buildings (one instanced mesh, one draw call)
 const heat = new Float32Array(N);
 const focusAttr = new Float32Array(N).fill(1);
+const glowAttr = new Float32Array(N); // 1 for the buildings of the district under the pointer
 const studio = NEON ? null : timed('studio (all)', () => buildStudio({ name: STYLE, scene, renderer, B, files, districts, unit, SIZE, plateStep, cx, cz,
-  shared, heat, focusAttr, inDeg, hub, t01, layout }));
+  shared, heat, focusAttr, glowAttr, inDeg, hub, t01, layout }));
 if (studio) {
   document.body.classList.add('studio', `style-${STYLE}`);
   if (studio.style.uiFont) document.body.style.setProperty('--ui-font', studio.style.uiFont);
@@ -873,7 +874,7 @@ function moveTimeline(v) {
 
 // ------------------------------------------------------------ labels for top-level districts
 const labelSource = layout
-  ? layout.labels.slice(0, 24).map(l => ({ data: { name: l.text }, born: l.born || 0, hue: 0, at: [l.x, l.z], y: l.y || 0 }))
+  ? layout.labels.slice(0, 24).map(l => ({ data: { name: l.text }, path: l.path, born: l.born || 0, hue: 0, at: [l.x, l.z], y: l.y || 0 }))
   : (root.children || []).filter(c => c.children).slice(0, 24);
 const labelEls = labelSource.map(n => {
   const el = document.createElement('div');
@@ -885,6 +886,27 @@ const labelEls = labelSource.map(n => {
   const p = n.at ? new THREE.Vector3(n.at[0], plateStep * 2 + (n.y || 0), n.at[1])
     : new THREE.Vector3((n.x0 + n.x1) / 2 - cx, plateStep, n.y1 - cz + est * 0.15);
   return { el, n, p };
+});
+// which named district each file belongs to (the longest named folder it sits in), for hovering
+const fileLabel = new Int16Array(N).fill(-1), labelMembers = labelSource.map(() => []);
+if (layout) files.forEach((f, i) => {
+  let best = -1, len = -1;
+  labelSource.forEach((n, k) => { if (n.path && (f.p === n.path || f.p.startsWith(n.path + '/')) && n.path.length > len) { best = k; len = n.path.length; } });
+  fileLabel[i] = best;
+  if (best >= 0) labelMembers[best].push(i);
+});
+let hoverLabel = -1, labelsOn = true;
+function hoverDistrict(k) {
+  if (k === hoverLabel) return;
+  glowAttr.fill(0);
+  for (const i of labelMembers[k] || []) glowAttr[i] = 1;
+  hoverLabel = k;
+}
+// L hides and shows the names (for a clean screenshot)
+addEventListener('keydown', e => {
+  if (e.code !== 'KeyL' || e.metaKey || e.ctrlKey || e.target.closest?.('input, textarea')) return;
+  labelsOn = !labelsOn;
+  $('#labels').style.display = labelsOn ? '' : 'none';
 });
 const tmp = new THREE.Vector3();
 // labels arrive biggest district first; each is shown only if it doesn't collide with one already placed
@@ -898,18 +920,31 @@ function placeLabels(boxes, reserved = []) {
   });
 }
 function updateLabels() {
-  const boxes = labelEls.map(({ el, n, p }) => {
+  if (!labelsOn) return;
+  // pixel art: the whole city shows only its biggest districts' names; closer in, more of them
+  const zoomIn = PIXEL && FIT ? camera.zoom / FIT.zoom : Infinity;
+  const shown = zoomIn < 1.35 ? 6 : zoomIn < 2.2 ? 12 : labelEls.length;
+  const boxes = labelEls.map(({ el, n, p }, k) => {
+    if (k >= shown && k !== hoverLabel) return null;
     tmp.copy(p).project(camera);
     if (tmp.z >= 1 || shared.uTimeline.value < n.born) return null;
-    el.w ??= el.offsetWidth || n.data.name.length * 7;
-    return { x: (tmp.x * 0.5 + 0.5) * innerWidth, y: (-tmp.y * 0.5 + 0.5) * innerHeight, w: el.w, h: 16 };
+    el.w ||= el.offsetWidth || n.data.name.length * 7 + 14;
+    el.h ||= el.offsetHeight || 20;
+    // a pixel name is a sign on a post planted at the spot, so its box sits above it
+    const y = (-tmp.y * 0.5 + 0.5) * innerHeight - (PIXEL ? el.h / 2 + 8 : 0);
+    return { x: (tmp.x * 0.5 + 0.5) * innerWidth, y, w: el.w, h: el.h };
   });
-  const show = placeLabels(boxes);
+  // the hovered district's name goes first, so it always gets its place
+  const order = boxes.map((_, k) => k);
+  if (hoverLabel >= 0) order.sort((a, b) => (b === hoverLabel) - (a === hoverLabel));
+  const placed = placeLabels(order.map(k => boxes[k])), show = [];
+  order.forEach((k, j) => { show[k] = placed[j]; });
   labelEls.forEach(({ el, p }, k) => {
     el.style.display = show[k] ? '' : 'none';
     if (!show[k]) return;
     el.style.left = `${boxes[k].x}px`;
     el.style.top = `${boxes[k].y}px`;
+    el.classList.toggle('on', k === hoverLabel);
     // perspective views fade far names; the isometric pixel view has no near and far
     el.style.opacity = camera.isOrthographicCamera ? 1 : Math.max(0.15, Math.min(1, 1.6 - camera.position.distanceTo(p) / SIZE));
   });
@@ -935,6 +970,7 @@ renderer.domElement.addEventListener('pointermove', e => {
   lastMove = t;
   hoverId = pick(e);
   shared.uHover.value = hoverId;
+  hoverDistrict(hoverId >= 0 ? fileLabel[hoverId] : -1);
   if (hoverId < 0) { tip.style.display = 'none'; renderer.domElement.style.cursor = ''; return; }
   renderer.domElement.style.cursor = 'pointer';
   const f = files[hoverId];
@@ -944,11 +980,13 @@ renderer.domElement.addEventListener('pointermove', e => {
   tip.replaceChildren(name,
     row(['lines', `${f.loc.toLocaleString()} · `], ['commits', String(f.churn)]),
     row(['imports', `${f.imp.length} · `], ['imported by', String(inDeg[hoverId])]),
-    row(['born', `${fmtDate(f.born)} · `], ['last edit', fmtDate(f.last)]));
+    row(['born', `${fmtDate(f.born)} · `], ['last edit', fmtDate(f.last)]),
+    ...(hoverLabel >= 0 ? [row(['district', `${labelSource[hoverLabel].path} · ${labelMembers[hoverLabel].length.toLocaleString()} files`])] : []));
   tip.style.display = 'block';
   tip.style.left = `${Math.min(e.clientX + 16, innerWidth - 380)}px`;
   tip.style.top = `${e.clientY + 16}px`;
 });
+renderer.domElement.addEventListener('pointerleave', () => { hoverDistrict(-1); });
 renderer.domElement.addEventListener('pointerdown', e => { downAt = [e.clientX, e.clientY]; });
 renderer.domElement.addEventListener('pointerup', e => {
   if (!downAt || Math.hypot(e.clientX - downAt[0], e.clientY - downAt[1]) > 4) return;

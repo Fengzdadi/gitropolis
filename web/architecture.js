@@ -169,7 +169,7 @@ function paint(g, t) {
 
 // one merged mesh for the whole city; per-vertex building id, base height and birth time
 // let a shader grow every building from the ground when the timeline reaches it
-export function buildCityMesh({ buildingGeometry, specs, B, files, t01, shared, unit, heat, focus, castShadow = true }) {
+export function buildCityMesh({ buildingGeometry, specs, B, files, t01, shared, unit, heat, focus, glow = null, castShadow = true }) {
   const geos = [];
   specs.forEach((spec, i) => {
     if (B[i].w < 0.01) return;
@@ -219,14 +219,16 @@ export function buildCityMesh({ buildingGeometry, specs, B, files, t01, shared, 
   mat.onBeforeCompile = sh => {
     Object.assign(sh.uniforms, { uTimeline: shared.uTimeline, uFocus: shared.uFocus, tState: { value: stateTex } });
     sh.vertexShader = sh.vertexShader
-      .replace('#include <common>', `#include <common>\nattribute vec3 aMeta; uniform float uTimeline; uniform sampler2D tState; varying vec2 vState;`)
-      .replace('#include <begin_vertex>', `#include <begin_vertex>\n${grow}\nvState = texture2D(tState, vec2((mod(aMeta.x, ${SW}.0) + 0.5) / ${SW}.0, (floor(aMeta.x / ${SW}.0) + 0.5) / ${SH}.0)).rg;`);
+      .replace('#include <common>', `#include <common>\nattribute vec3 aMeta; uniform float uTimeline; uniform sampler2D tState; varying vec3 vState;`)
+      .replace('#include <begin_vertex>', `#include <begin_vertex>\n${grow}\nvState = texture2D(tState, vec2((mod(aMeta.x, ${SW}.0) + 0.5) / ${SW}.0, (floor(aMeta.x / ${SW}.0) + 0.5) / ${SH}.0)).rgb;`);
     sh.fragmentShader = sh.fragmentShader
-      .replace('#include <common>', '#include <common>\nvarying vec2 vState; uniform float uFocus;')
+      .replace('#include <common>', '#include <common>\nvarying vec3 vState; uniform float uFocus;')
       .replace('#include <color_fragment>', `#include <color_fragment>
         // a building touched by a commit flashes warm; when one is focused, the rest of the city recedes
         diffuseColor.rgb = mix(diffuseColor.rgb, vec3(1.0, 0.9, 0.6), vState.r * 0.75);
-        if (uFocus >= 0.0) diffuseColor.rgb *= mix(0.55, 1.0, vState.g);`);
+        if (uFocus >= 0.0) diffuseColor.rgb *= mix(0.55, 1.0, vState.g);
+        // the district under the pointer lights up a little
+        diffuseColor.rgb = mix(diffuseColor.rgb, vec3(1.0, 0.93, 0.7), vState.b * 0.2);`);
   };
   addFacadeDetail(mat, { unit, shared });
   const depth = new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking });
@@ -238,7 +240,7 @@ export function buildCityMesh({ buildingGeometry, specs, B, files, t01, shared, 
   };
   const mesh = new THREE.Mesh(geo, mat);
   mesh.userData.syncState = () => {
-    for (let i = 0; i < files.length; i++) { stateData[i * 4] = Math.min(255, heat[i] * 255) | 0; stateData[i * 4 + 1] = focus[i] * 255; }
+    for (let i = 0; i < files.length; i++) { stateData[i * 4] = Math.min(255, heat[i] * 255) | 0; stateData[i * 4 + 1] = focus[i] * 255; stateData[i * 4 + 2] = glow ? glow[i] * 255 : 0; }
     stateTex.needsUpdate = true;
   };
   mesh.userData.bytes = bytes;

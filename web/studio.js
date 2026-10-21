@@ -399,7 +399,7 @@ export function buildStudio(ctx) {
   let cityMesh = null;
   if (S.pixel && layout) {
     const specs = timed('building specs', () => buildingSpecs({ files, B, inDeg, hub, unit, kind: layout.kind, t01 }));
-    cityMesh = timed('building geometry + merge', () => buildCityMesh({ buildingGeometry, specs, B, files, t01, shared, unit, heat, focus: focusAttr }));
+    cityMesh = timed('building geometry + merge', () => buildCityMesh({ buildingGeometry, specs, B, files, t01, shared, unit, heat, focus: focusAttr, glow: ctx.glowAttr }));
     scene.add(cityMesh);
     mesh.material.visible = false;
     mesh.castShadow = false;

@@ -97,7 +97,11 @@
   body.style-pixel #links a, body.style-pixel #links button { color: #14121c; }
   body.style-pixel #links a:hover, body.style-pixel #links button:hover { color: #c0413b; }
   body.waiting #links { visibility: hidden; }
-  body.style-pixel .label { font-size: 13px; color: #14121c !important; text-shadow: 1px 0 0 #f2efe9, -1px 0 0 #f2efe9, 0 1px 0 #f2efe9, 0 -1px 0 #f2efe9; }
+  /* pixel names are little signs on posts, in the same paper-and-ink as the rest of the page */
+  body.style-pixel .label { font-size: 12px; color: #14121c !important; text-shadow: none; background: #f2efe9; border: 2px solid #14121c;
+    box-shadow: 2px 2px 0 #14121c; padding: 0 5px; line-height: 16px; letter-spacing: .02em; text-transform: none; }
+  body.style-pixel .label::after { content: ''; position: absolute; left: calc(50% - 1px); top: 100%; width: 2px; height: 8px; background: #14121c; margin-top: 2px; }
+  body.style-pixel .label.on { background: #f2c14e; }
   /* the share dialog: a pixel panel with the card's preview */
   #card-dialog { position: fixed; inset: 0; z-index: 50; display: grid; place-items: center; background: rgba(20, 18, 28, .45); padding: 16px;
     font-family: var(--ui-font, 'Pixelify Sans', monospace); color: #14121c; }
