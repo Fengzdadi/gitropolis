@@ -922,14 +922,18 @@ function note(text) {
   n.textContent = text; n.classList.add('show');
   clearTimeout(noteTimer); noteTimer = setTimeout(() => n.classList.remove('show'), 1800);
 }
-function setLabels(on) {
+function setLabels(on, quiet = false) {
   labelsOn = on;
   $('#labels').style.display = on ? '' : 'none';
   $('#names').classList.toggle('off', !on);
   $('#names').setAttribute('aria-pressed', String(on));
+  if (quiet) return;
   note(on ? 'names shown · L to hide' : 'names hidden · L to show');
+  // remembered in this browser, so someone who'd rather not see them only says so once
+  try { localStorage.setItem('gitropolis.names', on ? 'on' : 'off'); } catch { /* private window: not remembered */ }
 }
 $('#names').onclick = () => setLabels(!labelsOn);
+try { if (localStorage.getItem('gitropolis.names') === 'off') setLabels(false, true); } catch { /* storage blocked: names stay on */ }
 addEventListener('keydown', e => {
   if (e.code !== 'KeyL' || e.metaKey || e.ctrlKey || e.target.closest?.('input, textarea')) return;
   setLabels(!labelsOn);
