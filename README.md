@@ -37,48 +37,75 @@ Your browser opens on the city. There's nothing to install or build and no depen
 
 gitropolis reads the shape of your code and picks a plan to match it. A big monorepo of separate packages becomes islands in a lagoon. Deep, tightly imported trees become dense wards. Old projects with one famous centre get avenues radiating from it.
 
-<table>
-<tr>
-<td width="50%" valign="top"><img src="docs/media/paris.png" alt="flask as Paris" width="100%"><br><b>Paris</b>: flask. Many years of history, buildings of even height, avenues around one centre, a river through town.</td>
-<td width="50%" valign="top"><img src="docs/media/manhattan.png" alt="redis as Manhattan" width="100%"><br><b>Manhattan</b>: redis. A flat, gridded layout, with most of the code in a few huge towers and a park in the middle.</td>
-</tr>
-<tr>
-<td width="50%" valign="top"><img src="docs/media/tokyo.png" alt="vite as Tokyo" width="100%"><br><b>Tokyo</b>: vite. Thousands of small buildings, wards inside wards, and everything imports everything.</td>
-<td width="50%" valign="top"><img src="docs/media/venice.png" alt="TanStack Query as Venice" width="100%"><br><b>Venice</b>: TanStack Query. A monorepo of packages that rarely import each other, so each one is its own island.</td>
-</tr>
-<tr>
-<td width="50%" valign="top"><img src="docs/media/la.png" alt="shadcn/ui as Los Angeles" width="100%"><br><b>Los Angeles</b>: shadcn/ui. Low-rise and spread wide, with almost no imports, so everyone drives alone.</td>
-<td width="50%" valign="top"><img src="docs/media/hongkong.png" alt="axum as Hong Kong" width="100%"><br><b>Hong Kong</b>: axum <sup>*</sup>. Long files packed into crowded directories become towers on a harbour.</td>
-</tr>
-<tr>
-<td width="50%" valign="top"><img src="docs/media/barcelona.png" alt="express as Barcelona" width="100%"><br><b>Barcelona</b>: express <sup>*</sup>. Directories of about the same size become a grid of identical blocks.</td>
-<td width="50%" valign="top"><img src="docs/media/smalltown.png" alt="ky as a small town" width="100%"><br><b>Small town</b>: ky <sup>*</sup>. One main street, with a clock tower for the most-imported file.</td>
-</tr>
-<tr>
-<td width="50%" valign="top"><img src="docs/media/port-argocd-example-apps.png" alt="argocd-example-apps as a port city" width="100%"><br><b>Port city</b>: argocd-example-apps. A repo of infrastructure, not code. Kubernetes manifests are container yards on the piers, with ships moored between them.</td>
-<td width="50%" valign="top"><img src="docs/media/port-terraform-aws-eks.png" alt="terraform-aws-eks as a port city" width="100%"><br><b>Port city</b>: terraform-aws-eks. Terraform modules become factories and power plants, and the module everything points at is the lighthouse.</td>
-</tr>
-<tr>
-<td width="50%" valign="top"><img src="docs/media/university-ydkjs.png" alt="You Don't Know JS as a university town" width="100%"><br><b>University town</b>: You Don't Know JS. A book, not code. Each directory is a quad of colleges round a lawn, with footpaths between them and the library in the middle.</td>
-<td width="50%" valign="top"><img src="docs/media/university-vuejs-docs.png" alt="close-up of the Vue docs as a university town" width="100%"><br><b>University town</b>: the Vue docs, close up. Guides are brick colleges, API pages are domed halls, and the site's own components are a small town on the edge.</td>
-</tr>
-<tr>
-<td width="50%" valign="top"><img src="docs/media/mountain-commons-lang.png" alt="Apache Commons Lang as a mountain city" width="100%"><br><b>Mountain city</b>: Apache Commons Lang. Java's deep packages become terraced mountains, one terrace per package. The main code and the tests face each other across a river, with a cable car between their peaks.</td>
-<td width="50%" valign="top"><img src="docs/media/mountain-petclinic.png" alt="close-up of Spring PetClinic as a mountain city" width="100%"><br><b>Mountain city</b>: Spring PetClinic, close up. The empty directories on the way down to <code>src/main/java/org/springframework/samples/petclinic</code> are a stone stairway, one step each, up from the river.</td>
-</tr>
-<tr>
-<td width="50%" valign="top"><img src="docs/media/capital-service.png" alt="ardanlabs/service as a planned capital" width="100%"><br><b>Planned capital</b>: ardanlabs/service. A strictly layered design: no package depends on one that depends back on it. The foundation layer stands at the head of a monumental axis by a lake, each layer above steps back down the axis, and the biggest layer sweeps out as two wings.</td>
-<td width="50%" valign="top"><img src="docs/media/capital-service-close.png" alt="close-up of the capital's plaza" width="100%"><br><b>Planned capital</b>, close up. The most-depended-on file is the congress, the file that imports the most is the cathedral, and everything else is a white slab on columns in a green superblock.</td>
-</tr>
-<tr>
-<td width="50%" valign="top"><img src="docs/media/desert-openai-agents.png" alt="openai-agents-python as a desert boomtown" width="100%"><br><b>Desert boomtown</b>: openai-agents-python. A big city out of nothing in under two years. The biggest files are supertalls along the coast highway, the newest ones are still cranes, and the tests live in villas on a palm island.</td>
-<td width="50%" valign="top"><img src="docs/media/desert-flask.png" alt="flask drawn as a desert boomtown" width="100%"><br><b>Desert boomtown</b>: flask <sup>*</sup>, drawn small enough to see every piece. The needle is the most-depended-on file, with twisting, sail and crowned towers, empty plots of sand, and the palm with its crescent.</td>
-</tr>
-<tr>
-<td width="50%" valign="top"><img src="docs/media/farm-pdsh.png" alt="Python Data Science Handbook as a farm village" width="100%"><br><b>Farm village</b>: Python Data Science Handbook. Notebooks and data, not code. Notebooks are farmhouses (the biggest are barns), datasets are crop fields sized by their data, and a windmill stands on the village green.</td>
-<td width="50%" valign="top"><img src="docs/media/farm-538-data.png" alt="close-up of FiveThirtyEight's data repo as a farm village" width="100%"><br><b>Farm village</b>: FiveThirtyEight's data, close up. 635 datasets make a patchwork of fields, each a different crop with its furrows running one way or the other, and hay bales on it.</td>
-</tr>
-</table>
+<p>
+<img src="docs/media/paris.png" alt="flask as Paris" width="49%"> <img src="docs/media/manhattan.png" alt="redis as Manhattan" width="49%">
+</p>
+
+- **Paris** (left): flask. Many years of history, buildings of even height, avenues around one centre, a river through town.
+- **Manhattan** (right): redis. A flat, gridded layout, with most of the code in a few huge towers and a park in the middle.
+
+<p>
+<img src="docs/media/tokyo.png" alt="vite as Tokyo" width="49%"> <img src="docs/media/venice.png" alt="TanStack Query as Venice" width="49%">
+</p>
+
+- **Tokyo** (left): vite. Thousands of small buildings, wards inside wards, and everything imports everything.
+- **Venice** (right): TanStack Query. A monorepo of packages that rarely import each other, so each one is its own island.
+
+<p>
+<img src="docs/media/la.png" alt="shadcn/ui as Los Angeles" width="49%"> <img src="docs/media/hongkong.png" alt="axum as Hong Kong" width="49%">
+</p>
+
+- **Los Angeles** (left): shadcn/ui. Low-rise and spread wide, with almost no imports, so everyone drives alone.
+- **Hong Kong** (right): axum <sup>*</sup>. Long files packed into crowded directories become towers on a harbour.
+
+<p>
+<img src="docs/media/barcelona.png" alt="express as Barcelona" width="49%"> <img src="docs/media/smalltown.png" alt="ky as a small town" width="49%">
+</p>
+
+- **Barcelona** (left): express <sup>*</sup>. Directories of about the same size become a grid of identical blocks.
+- **Small town** (right): ky <sup>*</sup>. One main street, with a clock tower for the most-imported file.
+
+<p>
+<img src="docs/media/port-argocd-example-apps.png" alt="argocd-example-apps as a port city" width="49%"> <img src="docs/media/port-terraform-aws-eks.png" alt="terraform-aws-eks as a port city" width="49%">
+</p>
+
+- **Port city** (left): argocd-example-apps. A repo of infrastructure, not code. Kubernetes manifests are container yards on the piers, with ships moored between them.
+- **Port city** (right): terraform-aws-eks. Terraform modules become factories and power plants, and the module everything points at is the lighthouse.
+
+<p>
+<img src="docs/media/university-ydkjs.png" alt="You Don't Know JS as a university town" width="49%"> <img src="docs/media/university-vuejs-docs.png" alt="close-up of the Vue docs as a university town" width="49%">
+</p>
+
+- **University town** (left): You Don't Know JS. A book, not code. Each directory is a quad of colleges round a lawn, with footpaths between them and the library in the middle.
+- **University town** (right): the Vue docs, close up. Guides are brick colleges, API pages are domed halls, and the site's own components are a small town on the edge.
+
+<p>
+<img src="docs/media/mountain-commons-lang.png" alt="Apache Commons Lang as a mountain city" width="49%"> <img src="docs/media/mountain-petclinic.png" alt="close-up of Spring PetClinic as a mountain city" width="49%">
+</p>
+
+- **Mountain city** (left): Apache Commons Lang. Java's deep packages become terraced mountains, one terrace per package. The main code and the tests face each other across a river, with a cable car between their peaks.
+- **Mountain city** (right): Spring PetClinic, close up. The empty directories on the way down to `src/main/java/org/springframework/samples/petclinic` are a stone stairway, one step each, up from the river.
+
+<p>
+<img src="docs/media/capital-service.png" alt="ardanlabs/service as a planned capital" width="49%"> <img src="docs/media/capital-service-close.png" alt="close-up of the capital's plaza" width="49%">
+</p>
+
+- **Planned capital** (left): ardanlabs/service. A strictly layered design: no package depends on one that depends back on it. The foundation layer stands at the head of a monumental axis by a lake, each layer above steps back down the axis, and the biggest layer sweeps out as two wings.
+- **Planned capital** (right), close up. The most-depended-on file is the congress, the file that imports the most is the cathedral, and everything else is a white slab on columns in a green superblock.
+
+<p>
+<img src="docs/media/desert-openai-agents.png" alt="openai-agents-python as a desert boomtown" width="49%"> <img src="docs/media/desert-flask.png" alt="flask drawn as a desert boomtown" width="49%">
+</p>
+
+- **Desert boomtown** (left): openai-agents-python. A big city out of nothing in under two years. The biggest files are supertalls along the coast highway, the newest ones are still cranes, and the tests live in villas on a palm island.
+- **Desert boomtown** (right): flask <sup>*</sup>, drawn small enough to see every piece. The needle is the most-depended-on file, with twisting, sail and crowned towers, empty plots of sand, and the palm with its crescent.
+
+<p>
+<img src="docs/media/farm-pdsh.png" alt="Python Data Science Handbook as a farm village" width="49%"> <img src="docs/media/farm-538-data.png" alt="close-up of FiveThirtyEight's data repo as a farm village" width="49%">
+</p>
+
+- **Farm village** (left): Python Data Science Handbook. Notebooks and data, not code. Notebooks are farmhouses (the biggest are barns), datasets are crop fields sized by their data, and a windmill stands on the village green.
+- **Farm village** (right): FiveThirtyEight's data, close up. 635 datasets make a patchwork of fields, each a different crop with its furrows running one way or the other, and hay bales on it.
 
 <sub><sup>*</sup> These were forced with `--city`; left to itself, gitropolis plans these repos as Paris and Manhattan. Any repo can be drawn as any city.</sub>
 
