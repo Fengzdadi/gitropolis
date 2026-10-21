@@ -270,7 +270,11 @@ export function buildStudio(ctx) {
   if (layout) timed('terrain', () => buildTerrain(scene, layout, S, plateStep, shared, street, streets?.blockBorn));
   // district names appear with their land
   // (a district's name goes up with its land, ahead of its first building)
-  if (layout) for (const l of layout.labels) l.born = Math.max(0, (l.bornRaw != null ? t01(l.bornRaw) : streets ? streets.bornAt(l.x, l.z) : 0) - LAND_LEAD);
+  // (and not before the ground under the name itself has come up: a district's first file can be far off)
+  if (layout) for (const l of layout.labels) {
+    const land = streets ? streets.bornAt(l.x, l.z) : 0;
+    l.born = Math.max(0, Math.max(l.bornRaw != null ? t01(l.bornRaw) : 0, land) - LAND_LEAD);
+  }
   // traffic: lanes round every block, busier where the block's files import and are imported a lot
   // Venice has no cars, only boats
   if (streets && layout.paths) { streets.lanes = []; streets.boats = []; } // footpaths: no traffic

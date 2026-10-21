@@ -910,7 +910,8 @@ function updateLabels() {
     if (!show[k]) return;
     el.style.left = `${boxes[k].x}px`;
     el.style.top = `${boxes[k].y}px`;
-    el.style.opacity = Math.max(0.15, Math.min(1, 1.6 - camera.position.distanceTo(p) / SIZE));
+    // perspective views fade far names; the isometric pixel view has no near and far
+    el.style.opacity = camera.isOrthographicCamera ? 1 : Math.max(0.15, Math.min(1, 1.6 - camera.position.distanceTo(p) / SIZE));
   });
 }
 
