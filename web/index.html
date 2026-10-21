@@ -89,6 +89,15 @@
   body.style-pixel #bar { background: #f2efe9; border: 3px solid #14121c; border-radius: 0; box-shadow: 4px 4px 0 #14121c; backdrop-filter: none; padding: 8px 10px; gap: 10px; }
   body.style-pixel #bar button { width: 36px; height: 36px; border-radius: 0; border: 3px solid #14121c; background: #f2c14e; color: #14121c; font-family: var(--ui-font); font-size: 14px; box-sizing: border-box; }
   body.style-pixel #bar button:hover { background: #e8833a; }
+  #names .slash { display: none; }
+  #names.off .slash { display: block; }
+  body.style-pixel #bar #names.off { background: #cdc8d2; }
+  #names svg { display: block; }
+  /* a short note above the timeline when the names are switched */
+  #note { position: fixed; left: 50%; bottom: 96px; transform: translateX(-50%); padding: 4px 10px; font-size: 13px; pointer-events: none;
+    background: #f2efe9; color: #14121c; border: 2px solid #14121c; box-shadow: 2px 2px 0 #14121c; font-family: var(--ui-font, monospace);
+    opacity: 0; transition: opacity .25s; white-space: nowrap; }
+  #note.show { opacity: 1; }
   body.style-pixel #bar button:active { transform: translate(2px, 2px); }
   body.style-pixel #track { --on: #c0413b; --off: #cdc8d2; --head: #14121c; }
   body.style-pixel #spark { image-rendering: pixelated; }
@@ -184,7 +193,9 @@
     <div id="years"></div>
   </div>
   <button id="speed" title="Playback speed" aria-label="Playback speed">1×</button>
+  <button id="names" title="District names: show or hide (L)" aria-label="Show or hide district names" aria-pressed="true"><svg viewBox="0 0 16 16" width="16" height="16" shape-rendering="crispEdges" aria-hidden="true"><rect x="2" y="3" width="12" height="7" fill="none" stroke="currentColor" stroke-width="2"/><rect x="5" y="6" width="6" height="1" fill="currentColor"/><rect x="7" y="10" width="2" height="5" fill="currentColor"/><rect class="slash" x="1" y="7" width="14" height="2" fill="currentColor" transform="rotate(-45 8 8)"/></svg></button>
 </div>
+<div id="note" role="status" aria-live="polite"></div>
 <div id="links">
   <a id="gh-repo" target="_blank" rel="noopener" hidden>on GitHub ↗</a>
   <button id="share" title="Share this city: a card to post, or the link">share</button>

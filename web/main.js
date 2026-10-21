@@ -896,13 +896,17 @@ if (layout) files.forEach((f, i) => {
   if (best >= 0) labelMembers[best].push(i);
 });
 // pixel art plants each sign in the middle of its district (the planners put names on the edge, which
-// is out of view once you zoom in): the centre of its buildings, weighted by size
+// is out of view once you zoom in): at the district's own building nearest the centre of its buildings
+// (weighted by size), so a district in several pieces still gets its sign on one of them
 if (PIXEL) labelEls.forEach(({ p }, k) => {
   const m = labelMembers[k];
   if (!m.length) return;
-  let x = 0, z = 0, y = 0, w = 0;
-  for (const i of m) { const a = B[i].w * B[i].d + 1e-6; x += B[i].x * a; z += B[i].z * a; y += B[i].y * a; w += a; }
-  p.set(x / w, y / w + plateStep, z / w);
+  let x = 0, z = 0, w = 0;
+  for (const i of m) { const a = B[i].w * B[i].d + 1e-6; x += B[i].x * a; z += B[i].z * a; w += a; }
+  x /= w; z /= w;
+  let best = m[0], d = Infinity;
+  for (const i of m) { const e = (B[i].x - x) ** 2 + (B[i].z - z) ** 2; if (e < d) { d = e; best = i; } }
+  p.set(B[best].x, B[best].y + plateStep, B[best].z);
 });
 let hoverLabel = -1, labelsOn = true;
 function hoverDistrict(k) {
@@ -911,11 +915,24 @@ function hoverDistrict(k) {
   for (const i of labelMembers[k] || []) glowAttr[i] = 1;
   hoverLabel = k;
 }
-// L hides and shows the names (for a clean screenshot)
+// the names button on the timeline, or L, hides and shows the names (for a clean screenshot)
+let noteTimer = 0;
+function note(text) {
+  const n = $('#note');
+  n.textContent = text; n.classList.add('show');
+  clearTimeout(noteTimer); noteTimer = setTimeout(() => n.classList.remove('show'), 1800);
+}
+function setLabels(on) {
+  labelsOn = on;
+  $('#labels').style.display = on ? '' : 'none';
+  $('#names').classList.toggle('off', !on);
+  $('#names').setAttribute('aria-pressed', String(on));
+  note(on ? 'names shown · L to hide' : 'names hidden · L to show');
+}
+$('#names').onclick = () => setLabels(!labelsOn);
 addEventListener('keydown', e => {
   if (e.code !== 'KeyL' || e.metaKey || e.ctrlKey || e.target.closest?.('input, textarea')) return;
-  labelsOn = !labelsOn;
-  $('#labels').style.display = labelsOn ? '' : 'none';
+  setLabels(!labelsOn);
 });
 const tmp = new THREE.Vector3();
 // labels arrive biggest district first; each is shown only if it doesn't collide with one already placed

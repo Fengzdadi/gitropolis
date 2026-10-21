@@ -688,7 +688,7 @@ const PLANNERS = {
       taken.push([x0, z0, x0 + p.side, z0 + p.side]);
       blocks.push({ poly: rectPoly(x0, z0, x0 + p.side, z0 + p.side), type: 'lawn' });
       lots.push(...packRect(p.items, x0 + 0.2, z0 + 0.2, x0 + p.side - 0.2, z0 + p.side - 0.2, 0.14));
-      labels.push({ text: p.name.split('/').pop(), x: x0 + p.side / 2, z: z0 + p.side + 0.35, weight: p.area });
+      labels.push({ text: p.name.split('/').pop(), path: p.name, x: x0 + p.side / 2, z: z0 + p.side + 0.35, weight: p.area });
     };
     // the head: the congress on its plaza, the lake behind
     const PL = 6;
@@ -825,7 +825,7 @@ const PLANNERS = {
         const e = elev(n);
         blocks.push({ poly: circlePoly(x, z, n.r, Math.max(12, Math.min(48, Math.round(n.r * 10)))), type: 'lawn', h: e });
         if (!peak || e > peak.e || (e === peak.e && n.r > peak.r)) peak = { x, z, e, r: n.r };
-        if (n.depth === 1 || (n.depth === 0 && !n.children?.some(c => c.children))) labels.push({ text: n.data.name.split('/').pop() || n.data.name, x, z: z + n.r + 0.3, y: e, weight: n.value });
+        if (n.depth === 1 || (n.depth === 0 && !n.children?.some(c => c.children))) labels.push({ text: n.data.name.split('/').pop() || n.data.name, path: n.data.name, x, z: z + n.r + 0.3, y: e, weight: n.value });
       });
       tops.push(peak);
       placed.push({ cx, cz, R });
@@ -1145,6 +1145,17 @@ export function buildLayout(kind, { files, inDeg, hub, SIZE, frontAz }) {
       rails.push({ pts: tour.map(i => [lots[i].x, lots[i].z]), closed: L.rail.closed, h: L.rail.h * s, stations: tour });
     }
   }
+  // every district gets a name: a planner may leave some out (the desert's palm villas, a small
+  // town's single street), so those are named at the middle of their lots
+  const labelled = L.labels.map(l => ({ ...l, path: l.path ?? l.text.replace(/ \(downtown\)$| \+\d+$/, '') }));
+  const lotOf = new Map(L.lots.map(l => [l.i, l]));
+  for (const d of ds) {
+    if (d.name === '·' || d.items.length < 2) continue;
+    if (labelled.some(l => l.path === d.name || l.path.startsWith(d.name + '/') || d.name.startsWith(l.path + '/'))) continue;
+    const at = d.items.map(it => lotOf.get(it.i)).filter(Boolean);
+    if (!at.length) continue;
+    labelled.push({ text: d.name, path: d.name, x: sum(at.map(l => l.x)) / at.length, z: sum(at.map(l => l.z)) / at.length });
+  }
   return {
     kind,
     unit: s,
@@ -1169,7 +1180,7 @@ export function buildLayout(kind, { files, inDeg, hub, SIZE, frontAz }) {
     cables: (L.cables || []).map(c => ({ a: [...P(c.a), c.a[2] * s], b: [...P(c.b), c.b[2] * s] })),
     ships: (L.ships || []).map(sh => ({ ...sh, x: (sh.x - mx) * s, z: (sh.z - mz) * s, len: sh.len * s, beam: sh.beam * s })),
     // a label appears with its district: when the first file under that name was born
-    labels: L.labels.map(l => ({ bornRaw: districtBorn(files, l.text), path: l.text.replace(/ \(downtown\)$| \+\d+$/, ''), text: shortLabel(l.text), weight: l.weight ?? (areaOf.get(l.text.replace(' (downtown)', '')) || 0), x: (l.x - mx) * s, z: (l.z - mz) * s, y: (l.y || 0) * s }))
+    labels: labelled.map(l => ({ bornRaw: districtBorn(files, l.path), path: l.path, text: shortLabel(l.text), weight: l.weight ?? (areaOf.get(l.text.replace(' (downtown)', '')) || 0), x: (l.x - mx) * s, z: (l.z - mz) * s, y: (l.y || 0) * s }))
       .sort((a, b) => b.weight - a.weight),
   };
 }
