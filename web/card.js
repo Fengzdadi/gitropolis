@@ -75,7 +75,7 @@ function layout(g, format, info, { W, H, full, scale }) {
   let bands, paint;
   if (full) {
     // full bleed: the city is the picture, with a small name tag in one corner and the address in the other
-    const z = n => Math.round(n * (scale || (format === 'story' ? 1.7 : format === 'square' ? 1.25 : 1)));
+    const z = n => Math.round(n * (scale || (format === 'story' ? 1.7 : format === 'square' ? 1.25 : format === 'social' ? 1.6 : 1)));
     const name = info.owner ? `${info.owner}/${info.repo}` : info.repo;
     const np = fit(name, z(30), W * 0.6), tagW = Math.max(width(name, np, 600), width(`${lead}${info.phrase}`, z(20), 600)) + P * 2;
     const tagH = P * 2 + np + z(30), urlP = z(16), urlW = width(info.url, urlP, 600) + z(14) * 2, urlH = urlP + z(14) * 2;
