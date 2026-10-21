@@ -1342,10 +1342,12 @@ async function record() {
 // for it to be posted back (&post=1). ?card=brand is the site's own picture, no repo named.
 const CARD = params.get('card');
 if (CARD && pix && layout) {
-  const brand = CARD === 'brand', format = CARD === 'og' || brand ? 'landscape' : CARD;
+  // ?card=social is the site's own picture at GitHub's 1280×640 for the repository's social preview
+  const social = CARD === 'social', brand = CARD === 'brand' || social;
+  const format = social ? 'social' : CARD === 'og' || brand ? 'landscape' : CARD;
   const info = shareInfo().info;
   if (brand) Object.assign(info, { owner: '', repo: 'gitropolis', lead: 'your git repo as ', phrase: 'a pixel-art city', url: 'gitropolis.dev' });
-  drawCard(format, info, captureCity, { k: 2, full: brand || params.has('full') })
+  drawCard(format, info, captureCity, { k: social ? 1 : 2, full: brand || params.has('full') })
     .then(c => {
       if (!params.get('post')) { window.__card = c.toDataURL('image/png'); return; }
       c.toBlob(b => fetch('/frame', { method: 'POST', body: b }).then(() => fetch('/done', { method: 'POST', body: '1' })), 'image/png');

@@ -12,6 +12,8 @@ export const FORMATS = {
   square: { W: 1080, H: 1080, label: 'square post' },
   story: { W: 1080, H: 1920, label: 'story' },
 };
+// sizes that aren't offered in the dialog: GitHub's repository social preview (2:1)
+const EXTRA = { social: { W: 1280, H: 640 } };
 const M = 36, P = 22, BORDER = 4, SHADOW = 6;
 
 
@@ -161,7 +163,7 @@ function layout(g, format, info, { W, H, full, scale }) {
 // info: { owner, repo, phrase, reasons[], stats: [[n, word]…], years: [a, b], activity(n) → 0..1 bars, url }
 // capture(artW, artH, bands) → ImageData of the grown city framed inside the bands (fractions of the frame)
 export async function drawCard(format, info, capture, { k = 2, full = false } = {}) {
-  const { W, H } = FORMATS[format];
+  const { W, H } = FORMATS[format] || EXTRA[format];
   await fontsReady();
   const out = document.createElement('canvas');
   out.width = W * k; out.height = H * k;

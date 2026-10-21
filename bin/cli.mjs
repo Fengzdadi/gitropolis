@@ -58,7 +58,7 @@ const card = flag('--card'); // a share card instead of a photo
 const cardShape = flag('--shape', 'landscape');
 const cardFull = bool('--full');
 const still = flag('--still') || card;
-if (card && !['landscape', 'square', 'story', 'brand'].includes(cardShape)) { console.error(`gitropolis: --shape is landscape, square or story`); process.exit(1); }
+if (card && !['landscape', 'square', 'story', 'brand', 'social'].includes(cardShape)) { console.error(`gitropolis: --shape is landscape, square or story`); process.exit(1); }
 const shot = flag('--shot', 'hero');
 const noHud = bool('--no-hud');
 const fixedCam = bool('--static'); // films: hold the establishing shot instead of pushing in
