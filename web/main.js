@@ -40,7 +40,7 @@ if (STYLE === 'pixel') document.body.classList.add('waiting');
 let stopWaiting = () => {};
 if (route) stopWaiting = startWaiting(loadingEl, `surveying ${route[1]}/${route[2]}`);
 const resp = await fetch(dataSrc && !/^([a-z][\w+.-]*:|\/\/|\\)/i.test(dataSrc) ? dataSrc
-  : route ? `/api/city/${encodeURIComponent(route[1])}/${encodeURIComponent(route[2])}` : 'city.json');
+  : route ? `/api/city/${encodeURIComponent(route[1])}/${encodeURIComponent(route[2])}${params.get('card') ? '?for=card' : ''}` : 'city.json');
 const isJSON = (resp.headers.get('content-type') || '').includes('json');
 if (!route && !(resp.ok && isJSON)) {
   // no city here: the hosted site's front door

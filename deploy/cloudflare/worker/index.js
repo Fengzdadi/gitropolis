@@ -51,7 +51,10 @@ async function city(owner, repo, req, env, ctx) {
   const key = `cities/v${SCANNER}/${info.full.toLowerCase()}/${info.sha}.json`;
   const hit = await env.CITIES.get(key);
   const headers = { 'cache-control': 'public, max-age=300', 'x-city-commit': info.sha };
-  if (hit) return new Response(hit.body, { headers: { 'content-type': 'application/json', 'x-city-cache': 'hit', ...headers } });
+  if (hit) {
+    if (!new URL(req.url).searchParams.has('for')) ctx.waitUntil(prepareCard(info, req.url, env)); // not when it's the card being drawn
+    return new Response(hit.body, { headers: { 'content-type': 'application/json', 'x-city-cache': 'hit', ...headers } });
+  }
   // a new scan costs a container minute: a few per visitor per minute is plenty
   const ip = req.headers.get('cf-connecting-ip') || 'unknown';
   if (env.SCAN_LIMIT && !(await env.SCAN_LIMIT.limit({ key: ip })).success) return json(429, { error: 'too many new cities at once — try again in a minute' });
@@ -59,45 +62,62 @@ async function city(owner, repo, req, env, ctx) {
   const res = await scanner.fetch(`http://scanner/scan?repo=${encodeURIComponent(info.full)}`);
   if (!res.ok) return json(502, { error: `couldn't build the city: ${(await res.text()).slice(0, 300)}` });
   const body = await res.text();
-  ctx.waitUntil(env.CITIES.put(key, body, { httpMetadata: { contentType: 'application/json' }, customMetadata: { stars: String(info.stars) } }));
-  ctx.waitUntil(saveSummary(env, info, body));
+  // keep the city, then its summary and its share card (which reads the city back through the API)
+  ctx.waitUntil((async () => {
+    await env.CITIES.put(key, body, { httpMetadata: { contentType: 'application/json' }, customMetadata: { stars: String(info.stars) } });
+    await saveSummary(env, info, body);
+    await prepareCard(info, req.url, env);
+  })());
   return new Response(body, { headers: { 'content-type': 'application/json', 'x-city-cache': 'miss', ...headers } });
 }
 
 const CARD = 1;               // bump when the card's look changes
 const esc = t => t.replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const cardKey = info => `cards/v${SCANNER}.${CARD}/${info.full.toLowerCase()}/${info.sha}.png`;
 
-// the share card for a repo's current commit. Only cities that have been built get one: a link
-// preview mustn't set off a scan. Anything else gets the site's own picture.
+// Draw a repo's share card: the page itself, in a headless browser, in its ?card=og mode. Kept in R2.
+async function renderCard(info, origin, env) {
+  let browser;
+  try {
+    browser = await puppeteer.launch(env.BROWSER);
+    const page = await browser.newPage();
+    await page.goto(new URL(`/${info.full}?card=og`, origin).toString(), { waitUntil: 'domcontentloaded', timeout: 30_000 });
+    await page.waitForFunction('window.__card', { timeout: 60_000 });
+    const url = await page.evaluate(() => window.__card);
+    if (!url.startsWith('data:image/png;base64,')) throw new Error(url);
+    const png = Uint8Array.from(atob(url.slice(22)), c => c.charCodeAt(0));
+    await env.CITIES.put(cardKey(info), png, { httpMetadata: { contentType: 'image/png' } });
+    return png;
+  } finally {
+    await browser?.close().catch(() => {});
+  }
+}
+
+// Link-preview crawlers don't wait long, and one that times out remembers "no picture" for days. So a
+// card is drawn ahead of time: as soon as a city is built, or when a city built before cards existed
+// is next opened (once at a time per repo and commit).
+async function prepareCard(info, origin, env) {
+  if (!env.BROWSER || await env.CITIES.head(cardKey(info))) return;
+  const busy = new Request(`https://card.busy/${info.full.toLowerCase()}/${info.sha}`);
+  if (await caches.default.match(busy)) return;
+  await caches.default.put(busy, new Response('1', { headers: { 'cache-control': 'max-age=90' } }));
+  try { await renderCard(info, origin, env); } catch (err) { console.log('card failed', info.full, String(err)); }
+}
+
+// /api/card/owner/repo.png: the share card for a repo's current commit. Only cities that have been
+// built get one (a link preview mustn't set off a scan); anything else gets the site's own picture.
 async function card(owner, repo, req, env, ctx) {
   const fallback = () => Response.redirect(new URL('/og.png', req.url).toString(), 302);
   if (!NAME.test(owner) || !NAME.test(repo)) return fallback();
   let info;
   try { info = await lookup(owner, repo, env, ctx); } catch { return fallback(); }
   if (info.missing || info.private) return fallback();
-  const full = info.full.toLowerCase();
-  const key = `cards/v${SCANNER}.${CARD}/${full}/${info.sha}.png`;
   const headers = { 'content-type': 'image/png', 'cache-control': 'public, max-age=3600' };
-  const hit = await env.CITIES.get(key);
+  const hit = await env.CITIES.get(cardKey(info));
   if (hit) return new Response(hit.body, { headers });
-  if (!env.BROWSER || !(await env.CITIES.head(`cities/v${SCANNER}/${full}/${info.sha}.json`))) return fallback();
-  let browser;
-  try {
-    browser = await puppeteer.launch(env.BROWSER);
-    const page = await browser.newPage();
-    await page.goto(new URL(`/${info.full}?card=og`, req.url).toString(), { waitUntil: 'domcontentloaded', timeout: 30_000 });
-    await page.waitForFunction('window.__card', { timeout: 60_000 });
-    const url = await page.evaluate(() => window.__card);
-    if (!url.startsWith('data:image/png;base64,')) throw new Error(url);
-    const png = Uint8Array.from(atob(url.slice(22)), c => c.charCodeAt(0));
-    ctx.waitUntil(env.CITIES.put(key, png, { httpMetadata: { contentType: 'image/png' } }));
-    return new Response(png, { headers });
-  } catch (err) {
-    console.log('card failed', info.full, String(err));
-    return fallback();
-  } finally {
-    await browser?.close().catch(() => {});
-  }
+  if (!env.BROWSER || !(await env.CITIES.head(`cities/v${SCANNER}/${info.full.toLowerCase()}/${info.sha}.json`))) return fallback();
+  try { return new Response(await renderCard(info, req.url, env), { headers }); }
+  catch (err) { console.log('card failed', info.full, String(err)); return fallback(); }
 }
 
 // what a badge needs to know about a built city, kept beside it (a city file can run to megabytes)
