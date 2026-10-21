@@ -145,6 +145,7 @@ async function page(owner, repo, req, env) {
   ].map(([attr, k, v]) => `<meta ${attr}="${k}" content="${esc(v)}">`).join('');
   return new HTMLRewriter()
     .on('title', { element(e) { e.setInnerContent(`${name} · gitropolis`); } })
+    .on('meta[property^="og:"], meta[name^="twitter:"], meta[name="description"]', { element(e) { e.remove(); } }) // the front page's
     .on('head', { element(e) { e.append(tags, { html: true }); } })
     .transform(res);
 }

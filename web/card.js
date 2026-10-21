@@ -22,10 +22,17 @@ export const FILM = {
   story: { W: 1080, H: 1920, scale: 1.7, gif: 960 },
 };
 export const canFilmVideo = () => typeof VideoEncoder === 'function' && typeof VideoFrame === 'function';
-const fontsReady = () => Promise.race([document.fonts.load(`600 40px ${FONT}`), new Promise(r => setTimeout(r, 2500))]);
+// the web fonts' stylesheet loads without blocking the page (index.html marks it done): wait for it,
+// then for the pixel font itself, but never more than a few seconds (offline, there's no font to wait for)
+async function fontsReady() {
+  const sheet = document.getElementById('webfonts'), t0 = performance.now();
+  while (sheet && !sheet.dataset.done && performance.now() - t0 < 4000) await new Promise(r => setTimeout(r, 50));
+  await Promise.race([Promise.all([document.fonts.load(`600 40px ${FONT}`), document.fonts.load(`400 20px ${FONT}`)]), new Promise(r => setTimeout(r, 2500))]);
+}
 
 // where the text goes on a W × H design (and so the bands the city keeps clear of), and how to paint it
 function layout(g, format, info, { W, H, full, scale }) {
+  const lead = info.lead ?? 'built like '; // what comes before the phrase
   const font = (px, w = 400) => { g.font = `${w} ${px}px ${FONT}`; };
   const width = (txt, px, w) => { font(px, w); return g.measureText(txt).width; };
   // largest size (down to a floor) at which a line fits
@@ -68,7 +75,7 @@ function layout(g, format, info, { W, H, full, scale }) {
     // full bleed: the city is the picture, with a small name tag in one corner and the address in the other
     const z = n => Math.round(n * (scale || (format === 'story' ? 1.7 : format === 'square' ? 1.25 : 1)));
     const name = info.owner ? `${info.owner}/${info.repo}` : info.repo;
-    const np = fit(name, z(30), W * 0.6), tagW = Math.max(width(name, np, 600), width(`built like ${info.phrase}`, z(20), 600)) + P * 2;
+    const np = fit(name, z(30), W * 0.6), tagW = Math.max(width(name, np, 600), width(`${lead}${info.phrase}`, z(20), 600)) + P * 2;
     const tagH = P * 2 + np + z(30), urlP = z(16), urlW = width(info.url, urlP, 600) + z(14) * 2, urlH = urlP + z(14) * 2;
     bands = { top: 0, bottom: 0, fill: format === 'story' ? 2.8 : 1.8 }; // how far past 'fits' it may zoom
     paint = date => {
@@ -80,8 +87,8 @@ function layout(g, format, info, { W, H, full, scale }) {
       const x = M, y = H - M - tagH;
       panel(x, y, tagW, tagH);
       text(name, x + P, y + P + np * 0.9, np, INK, 600);
-      text('built like ', x + P, y + P + np + z(24), z(18), SOFT);
-      text(info.phrase, x + P + width('built like ', z(18)), y + P + np + z(24), z(20), ACCENT, 600);
+      text(lead, x + P, y + P + np + z(24), z(18), SOFT);
+      text(info.phrase, x + P + width(lead, z(18)), y + P + np + z(24), z(20), ACCENT, 600);
       panel(W - M - urlW, H - M - urlH, urlW, urlH);
       text(info.url, W - M - z(14), H - M - z(14) - urlP * 0.15, urlP, INK, 600, 'right');
     };
@@ -93,7 +100,7 @@ function layout(g, format, info, { W, H, full, scale }) {
       const x = M + P; let y = M + P + 18;
       if (info.owner) { text(`${info.owner} /`, x, y, 20, SOFT); y += 10; }
       const rp = fit(info.repo, 58, iw); y += rp; text(info.repo, x, y, rp, INK, 600);
-      y += 40; text('built like', x, y, 20, SOFT);
+      y += 40; text(lead.trim(), x, y, 20, SOFT);
       const pp = fit(info.phrase, 40, iw); y += pp + 8; text(info.phrase, x, y, pp, ACCENT, 600);
       y += 10;
       y += 6;
@@ -114,7 +121,7 @@ function layout(g, format, info, { W, H, full, scale }) {
     const topH = P * 2 + (info.owner ? z(26) : 0) + rp + z(16) + z(30) + reasons.length * z(26) + z(6);
     const sparkH = z(52), figH = story ? z(44) + z(24) + z(20) : 0;
     const botH = P * 2 + sparkH + z(24) + figH + z(36);
-    const topW = story ? W - M * 2 : Math.min(W - M * 2, Math.max(width(info.repo, rp, 600), width(`built like ${info.phrase}`, z(28), 600), ...reasons.map(r => width(r, z(17)))) + P * 2 + 8);
+    const topW = story ? W - M * 2 : Math.min(W - M * 2, Math.max(width(info.repo, rp, 600), width(`${lead}${info.phrase}`, z(28), 600), ...reasons.map(r => width(r, z(17)))) + P * 2 + 8);
     bands = { top: (M + topH + 12) / H, bottom: (M + botH + 12) / H };
     paint = () => {
       panel(M, M, topW, topH);
@@ -122,8 +129,8 @@ function layout(g, format, info, { W, H, full, scale }) {
       if (info.owner) { y += z(20); text(`${info.owner} /`, x, y, z(20), SOFT); y += z(6); }
       y += rp; text(info.repo, x, y, rp, INK, 600);
       y += z(16) + z(28);
-      text('built like ', x, y, z(24), SOFT);
-      text(info.phrase, x + width('built like ', z(24)), y, z(28), ACCENT, 600);
+      text(lead, x, y, z(24), SOFT);
+      text(info.phrase, x + width(lead, z(24)), y, z(28), ACCENT, 600);
       for (const r of reasons) { y += z(26); text(r, x, y, z(17), SOFT); }
       const by = H - M - botH;
       panel(M, by, W - M * 2, botH);

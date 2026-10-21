@@ -1235,12 +1235,20 @@ async function record() {
   progress.textContent = 'DONE — you can close this tab';
 }
 
-// ?card=og: the hosted site's link previews. A headless browser opens the city in this mode and
-// takes the finished landscape card from window.__card (a PNG data URL).
-if (params.get('card') === 'og' && pix && layout) {
-  drawCard('landscape', shareInfo().info, captureCity, { k: 2 })
-    .then(c => { window.__card = c.toDataURL('image/png'); })
-    .catch(err => { window.__card = `error: ${err?.message || err}`; });
+// ?card=og|landscape|square|story|brand: just the share card. The hosted site's link previews open a
+// city as ?card=og in a headless browser and take the PNG from window.__card; the CLI's --card asks
+// for it to be posted back (&post=1). ?card=brand is the site's own picture, no repo named.
+const CARD = params.get('card');
+if (CARD && pix && layout) {
+  const brand = CARD === 'brand', format = CARD === 'og' || brand ? 'landscape' : CARD;
+  const info = shareInfo().info;
+  if (brand) Object.assign(info, { owner: '', repo: 'gitropolis', lead: 'your git repo as ', phrase: 'a pixel-art city', url: 'gitropolis.dev' });
+  drawCard(format, info, captureCity, { k: 2, full: brand || params.has('full') })
+    .then(c => {
+      if (!params.get('post')) { window.__card = c.toDataURL('image/png'); return; }
+      c.toBlob(b => fetch('/frame', { method: 'POST', body: b }).then(() => fetch('/done', { method: 'POST', body: '1' })), 'image/png');
+    })
+    .catch(err => { window.__card = `error: ${err?.message || err}`; if (params.get('post')) fail(err?.message || err); });
 }
 
 // poke at the city from the console with ?debug

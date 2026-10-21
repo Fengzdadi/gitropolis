@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // gitropolis [repo] [--port 4173] [--out city.json] [--no-open]
 //           [--style pixel|maquette|plan|nocturne|neon] [--city auto|<archetype>] [--pixel 1] [--zoom 1]
-//           [--still frame.png] [--shot hero|aerial|street|plan] [--no-hud]
+//           [--still frame.png] [--shot hero|aerial|street|plan] [--no-hud] [--card card.png] [--shape landscape|square|story] [--full]
 //           [--video city.mp4] [--gif city.gif] [--static] [--duration 20] [--fps 30] [--size 1920x1080] [--max-mb 9.5] [--headed]
 //           [--bench] [--help] [--version]
 import { createServer } from 'node:http';
@@ -26,6 +26,7 @@ if (args.includes('--help') || args.includes('-h')) {
                                         city plan (default: picked from the code)
   --pixel <n>  --zoom <n>               art-pixel size (default 1, 2 for chunkier art), close-up factor
   --still <file.png> [--shot hero|aerial|street|plan] [--no-hud]
+  --card <file.png> [--shape landscape|square|story] [--full]   a share card (pixel style)
   --video <file.mp4>  --gif <file.gif>  film the city growing (needs ffmpeg and Chrome)
   --static  --duration <s>  --fps <n>  --size <WxH>  --max-mb <n>  --headed
   --port <n>  --no-open  --out <city.json>  --bench`);
@@ -53,7 +54,11 @@ const style = flag('--style', 'pixel');
 const pxOpt = flag('--pixel'); // pixel style: size of one art pixel (default 1; 2 for chunkier art)
 const zoomOpt = flag('--zoom'); // close-up factor (pixel style)
 const cityOpt = flag('--city', 'auto'); // auto | classic | farm | desert | capital | mountain | university | port | smalltown | manhattan | hongkong | tokyo | la | paris | venice | barcelona
-const still = flag('--still');
+const card = flag('--card'); // a share card instead of a photo
+const cardShape = flag('--shape', 'landscape');
+const cardFull = bool('--full');
+const still = flag('--still') || card;
+if (card && !['landscape', 'square', 'story', 'brand'].includes(cardShape)) { console.error(`gitropolis: --shape is landscape, square or story`); process.exit(1); }
 const shot = flag('--shot', 'hero');
 const noHud = bool('--no-hud');
 const fixedCam = bool('--static'); // films: hold the establishing shot instead of pushing in
@@ -231,9 +236,10 @@ server.on('listening', () => {
     if (!noOpen) openBrowser(view);
     return;
   }
-  const recUrl = `${link}/?record=1&w=${w}&h=${h}&fps=${fps}&dur=${duration}&style=${style}&city=${cityOpt}${pxOpt ? `&px=${pxOpt}` : ''}${zoomOpt ? `&zoom=${zoomOpt}` : ''}` +
+  const recUrl = card ? `${link}/?card=${encodeURIComponent(cardShape)}&post=1&city=${cityOpt}${cardFull ? '&full=1' : ''}`
+    : `${link}/?record=1&w=${w}&h=${h}&fps=${fps}&dur=${duration}&style=${style}&city=${cityOpt}${pxOpt ? `&px=${pxOpt}` : ''}${zoomOpt ? `&zoom=${zoomOpt}` : ''}` +
     (still ? `&still=1&shot=${shot}${noHud ? '&hud=0' : ''}` : '') + (fixedCam ? '&static=1' : '') + (benchMode ? '&bench=1' : '');
-  console.log(still ? `  photographing ${style} / ${shot} at ${w}x${h} …` : `  filming ${duration}s at ${w}x${h}@${fps}fps …`);
+  console.log(card ? `  drawing a ${cardShape} share card …` : still ? `  photographing ${style} / ${shot} at ${w}x${h} …` : `  filming ${duration}s at ${w}x${h}@${fps}fps …`);
   // a browser that never sends a frame (GPU trouble, blocked CDN) shouldn't hang the CLI forever;
   // a still is one frame, which on a software GPU can take a while for a big city
   setTimeout(() => {
@@ -254,7 +260,7 @@ server.on('listening', () => {
 
 async function finishRecording() {
   if (still) {
-    console.log(`\n  ${cyan('still')} ${path.resolve(still)} (${await size(still)})`);
+    console.log(`\n  ${cyan(card ? 'card' : 'still')} ${path.resolve(still)} (${await size(still)})`);
     return quit(0);
   }
   rec.ff.stdin.end();

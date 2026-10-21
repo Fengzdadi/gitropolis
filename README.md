@@ -110,7 +110,7 @@ The live view lets you drag to pan and scroll to zoom. Hover a building to see i
 npx gitropolis . --gif city.gif --static --duration 10
 ```
 
-This films the city growing along its git history and writes a GIF that fits GitHub's 10 MB limit. Pixel art compresses well, so every GIF pixel is exactly one art pixel, with no blur. Drop `--static` and the camera dives into the busiest junction instead. Use `--video city.mp4` for an MP4, or `--still city.png` for a single frame.
+This films the city growing along its git history and writes a GIF that fits GitHub's 10 MB limit. Pixel art compresses well, so every GIF pixel is exactly one art pixel, with no blur. Drop `--static` and the camera dives into the busiest junction instead. Use `--video city.mp4` for an MP4, `--still city.png` for a single frame, or `--card card.png` for a share card with the repo's name and what city it's built like.
 
 Filming runs in headless Chrome, so it looks the same on every machine. It needs [ffmpeg](https://ffmpeg.org) and Chrome, Chromium, Edge or Brave.
 
@@ -124,6 +124,7 @@ Filming runs in headless Chrome, so it looks the same on every machine. It needs
 | `--zoom <n>` | `1` | close-up factor; `3` frames the city centre |
 | `--gif <file>` · `--video <file>` | | film the city's history |
 | `--still <file>` | | one frame (`--shot hero\|aerial\|street\|plan`, `--no-hud`) |
+| `--card <file>` | | a share card PNG (`--shape landscape\|square\|story`, `--full` for full bleed) |
 | `--static` | | hold the establishing shot while filming |
 | `--duration <s>` · `--fps <n>` · `--size <WxH>` | `20` · `30` · `1920x1080` | |
 | `--max-mb <n>` | `9.5` | size cap for GIF and MP4 |
