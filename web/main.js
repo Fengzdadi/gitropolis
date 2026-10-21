@@ -895,6 +895,15 @@ if (layout) files.forEach((f, i) => {
   fileLabel[i] = best;
   if (best >= 0) labelMembers[best].push(i);
 });
+// pixel art plants each sign in the middle of its district (the planners put names on the edge, which
+// is out of view once you zoom in): the centre of its buildings, weighted by size
+if (PIXEL) labelEls.forEach(({ p }, k) => {
+  const m = labelMembers[k];
+  if (!m.length) return;
+  let x = 0, z = 0, y = 0, w = 0;
+  for (const i of m) { const a = B[i].w * B[i].d + 1e-6; x += B[i].x * a; z += B[i].z * a; y += B[i].y * a; w += a; }
+  p.set(x / w, y / w + plateStep, z / w);
+});
 let hoverLabel = -1, labelsOn = true;
 function hoverDistrict(k) {
   if (k === hoverLabel) return;
@@ -937,7 +946,10 @@ function updateLabels() {
   // the hovered district's name goes first, so it always gets its place
   const order = boxes.map((_, k) => k);
   if (hoverLabel >= 0) order.sort((a, b) => (b === hoverLabel) - (a === hoverLabel));
-  const placed = placeLabels(order.map(k => boxes[k])), show = [];
+  // and none goes under the title, the date, the timeline or the links
+  const hud = [...document.querySelectorAll('#hud, #date, #bar, #links')].map(e => e.getBoundingClientRect()).filter(r => r.width)
+    .map(r => ({ x: r.left + r.width / 2, y: r.top + r.height / 2, w: r.width, h: r.height }));
+  const placed = placeLabels(order.map(k => boxes[k]), hud), show = [];
   order.forEach((k, j) => { show[k] = placed[j]; });
   labelEls.forEach(({ el, p }, k) => {
     el.style.display = show[k] ? '' : 'none';
