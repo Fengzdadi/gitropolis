@@ -8,6 +8,7 @@
 // scanned before, and otherwise has a container clone and scan it (then keeps the result in R2).
 import { Container } from '@cloudflare/containers';
 import puppeteer from '@cloudflare/puppeteer';
+import { badgeSVG } from './badge.js';
 
 export class Scanner extends Container {
   defaultPort = 8080;
@@ -59,6 +60,7 @@ async function city(owner, repo, req, env, ctx) {
   if (!res.ok) return json(502, { error: `couldn't build the city: ${(await res.text()).slice(0, 300)}` });
   const body = await res.text();
   ctx.waitUntil(env.CITIES.put(key, body, { httpMetadata: { contentType: 'application/json' }, customMetadata: { stars: String(info.stars) } }));
+  ctx.waitUntil(saveSummary(env, info, body));
   return new Response(body, { headers: { 'content-type': 'application/json', 'x-city-cache': 'miss', ...headers } });
 }
 
@@ -98,6 +100,36 @@ async function card(owner, repo, req, env, ctx) {
   }
 }
 
+// what a badge needs to know about a built city, kept beside it (a city file can run to megabytes)
+const summaryKey = info => `meta/v${SCANNER}/${info.full.toLowerCase()}/${info.sha}.json`;
+async function saveSummary(env, info, body) {
+  const city = JSON.parse(body);
+  const summary = { kind: city.identity?.city || 'smalltown', buildings: city.files?.length || 0 };
+  await env.CITIES.put(summaryKey(info), JSON.stringify(summary), { httpMetadata: { contentType: 'application/json' } });
+  return summary;
+}
+async function summary(env, info) {
+  const hit = await env.CITIES.get(summaryKey(info));
+  if (hit) return hit.json();
+  const city = await env.CITIES.get(`cities/v${SCANNER}/${info.full.toLowerCase()}/${info.sha}.json`);
+  return city ? saveSummary(env, info, await city.text()) : null; // cities built before summaries existed
+}
+
+// /owner/repo/badge.svg[?style=pixel|card]: for READMEs. Never sets off a scan: a repo that hasn't
+// been built says "see the city" instead of what it's built like.
+async function badge(owner, repo, url, env, ctx) {
+  const style = url.searchParams.get('style');
+  let city = null;
+  if (NAME.test(owner) && NAME.test(repo)) {
+    try {
+      const info = await lookup(owner, repo, env, ctx);
+      if (!info.missing && !info.private) city = await summary(env, info);
+    } catch { /* GitHub or R2 hiccup: the plain badge */ }
+  }
+  // GitHub's image proxy keeps it for a while; an hour keeps badges current after new commits
+  return new Response(badgeSVG(style, city), { headers: { 'content-type': 'image/svg+xml; charset=utf-8', 'cache-control': `public, max-age=${city ? 3600 : 600}` } });
+}
+
 // /owner/repo: the page, with link-preview tags for this repo
 async function page(owner, repo, req, env) {
   const res = await env.ASSETS.fetch(new Request(new URL('/', req.url), req));
@@ -124,6 +156,8 @@ export default {
     if (m) return city(decodeURIComponent(m[1]), decodeURIComponent(m[2]), req, env, ctx);
     const c = /^\/api\/card\/([^/]+)\/([^/]+?)\.png$/.exec(url.pathname);
     if (c) return card(decodeURIComponent(c[1]), decodeURIComponent(c[2]), req, env, ctx);
+    const b = /^\/([^/]+)\/([^/]+)\/badge\.svg$/.exec(url.pathname);
+    if (b) return badge(decodeURIComponent(b[1]), decodeURIComponent(b[2]), url, env, ctx);
     if (url.pathname.startsWith('/api/')) return json(404, { error: 'no such endpoint' });
     // a repo page (two path segments that aren't one of the site's own files)
     const r = /^\/([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+?)(?:\.git)?\/?$/.exec(url.pathname);

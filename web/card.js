@@ -255,8 +255,9 @@ export async function filmCity(kind, format, info, stage, { progress = () => {},
 
 // the share dialog: pick a shape and a kind (picture, GIF, video), see it, download it, copy it,
 // or hand it to the phone's share sheet
-const KINDS = { png: 'image', gif: 'GIF', mp4: 'video' };
-export function openShareDialog({ info, capture, stage, link, filename }) {
+const KINDS = { png: 'image', gif: 'GIF', mp4: 'video', badge: 'README badge' };
+const BADGES = [['', 'shields style'], ['pixel', 'pixel'], ['card', 'info card']];
+export function openShareDialog({ info, capture, stage, link, filename, badge }) {
   document.getElementById('card-dialog')?.remove();
   const box = document.createElement('div');
   box.id = 'card-dialog';
@@ -264,7 +265,8 @@ export function openShareDialog({ info, capture, stage, link, filename }) {
     <div class="card-head"><b>share this city</b><button class="card-x" aria-label="Close">×</button></div>
     <div class="card-kinds">${Object.entries(KINDS).map(([id, l]) => `<button data-k="${id}">${l}</button>`).join('')}</div>
     <div class="card-formats">${Object.entries(FORMATS).map(([id, f]) => `<button data-f="${id}">${id}<small>${f.label}</small></button>`).join('')}</div>
-    <div class="card-view"><span>drawing…</span><img alt="Share card preview"><video muted loop playsinline controls hidden></video></div>
+    <div class="card-view"><span>drawing…</span><img alt="Share card preview"><video muted loop playsinline controls hidden></video>
+      <div class="card-badges" hidden>${BADGES.map(([st, l]) => `<div><img data-b="${st}" alt="${l} badge"><button data-md="${st}">copy Markdown</button><small>${l}</small></div>`).join('')}</div></div>
     <div class="card-actions">
       <label class="card-hd"><input type="checkbox" data-o="full"> full bleed</label>
       <label class="card-hd"><input type="checkbox" data-o="hd"> extra sharp (3×)</label>
@@ -274,6 +276,9 @@ export function openShareDialog({ info, capture, stage, link, filename }) {
   document.body.append(box);
   const $ = s => box.querySelector(s), img = $('img'), video = $('video'), status = $('.card-view span');
   if (!canFilmVideo()) $('[data-k=mp4]').hidden = true;
+  if (!badge) $('[data-k=badge]').hidden = true; // badges are served by gitropolis.dev, for public repos
+  const badgeUrl = st => `${badge}/badge.svg${st ? `?style=${st}` : ''}`;
+  const markdown = st => `[![gitropolis](${badgeUrl(st)})](${badge})`;
   let format = innerWidth < innerHeight ? 'story' : 'landscape', kind = 'png', blob = null, url = null, job = 0;
   const ext = () => kind;
   const name = () => `${filename}-${format}${kind === 'png' && $('[data-o=full]').checked ? '-full' : ''}.${ext()}`;
@@ -286,6 +291,16 @@ export function openShareDialog({ info, capture, stage, link, filename }) {
 
   async function render() {
     const mine = ++job;
+    const isBadge = kind === 'badge';
+    $('.card-formats').hidden = isBadge; $('.card-badges').hidden = !isBadge;
+    for (const sel of ['[data-a=download]', '[data-a=share]']) $(sel).hidden = isBadge || (sel === '[data-a=share]' && $(sel).hidden);
+    if (isBadge) {
+      box.querySelectorAll('[data-k]').forEach(b => b.classList.toggle('on', b.dataset.k === kind));
+      box.querySelectorAll('.card-hd').forEach(l => { l.hidden = true; });
+      $('[data-a=copy]').hidden = true; img.hidden = video.hidden = true; status.hidden = true;
+      box.querySelectorAll('[data-b]').forEach(i => { i.src = badgeUrl(i.dataset.b); });
+      return;
+    }
     box.querySelectorAll('[data-f]').forEach(b => b.classList.toggle('on', b.dataset.f === format));
     box.querySelectorAll('[data-k]').forEach(b => b.classList.toggle('on', b.dataset.k === kind));
     box.querySelectorAll('.card-hd').forEach(l => { l.hidden = kind !== 'png'; });
@@ -310,7 +325,7 @@ export function openShareDialog({ info, capture, stage, link, filename }) {
     if (url) URL.revokeObjectURL(url);
     url = URL.createObjectURL(b);
     const isVideo = kind === 'mp4';
-    img.hidden = isVideo; video.hidden = !isVideo;
+    img.hidden = isVideo; video.hidden = !isVideo; $('[data-a=download]').hidden = false;
     if (isVideo) { video.src = url; video.play().catch(() => {}); } else { video.removeAttribute('src'); img.src = url; }
     img.style.opacity = video.style.opacity = 1; status.hidden = true;
     $('[data-a=download]').textContent = `download ${KINDS[kind] === 'image' ? 'PNG' : KINDS[kind]} · ${(b.size / 1e6).toFixed(1)} MB`;
@@ -332,6 +347,12 @@ export function openShareDialog({ info, capture, stage, link, filename }) {
     try { await navigator.share({ files: [new File([blob], name(), { type: blob.type })], text: `${info.owner ? info.owner + '/' : ''}${info.repo} is built like ${info.phrase}`, url: link }); }
     catch { /* cancelled */ }
   };
+  box.querySelectorAll('[data-md]').forEach(b => {
+    b.onclick = async () => {
+      try { await navigator.clipboard.writeText(markdown(b.dataset.md)); flash(b, 'copied'); }
+      catch { prompt('Copy this into your README:', markdown(b.dataset.md)); }
+    };
+  });
   $('[data-a=link]').onclick = async e => {
     try { await navigator.clipboard.writeText(link); flash(e.target, 'link copied'); }
     catch { prompt('Copy this link:', link); }

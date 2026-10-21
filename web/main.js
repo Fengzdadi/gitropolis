@@ -791,6 +791,7 @@ function shareInfo() {
   const year = t => new Date(t * 1000).getFullYear();
   return {
     link: shareLink,
+    badge: route ? shareLink : null,
     filename: `gitropolis-${owner ? owner + '-' : ''}${repo}`.replace(/[^\w.-]+/g, '-'),
     capture: captureCity,
     stage: stageCity,
