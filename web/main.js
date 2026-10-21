@@ -243,7 +243,7 @@ function fitFrame(aspect = viewW() / viewH(), bands = clearBands()) {
 // the share of the screen height the overlays take at the top (title, date) and the bottom (timeline,
 // links); recordings have no overlays, only the title painted into the frame
 function clearBands() {
-  if (REC) return { top: 0.12, bottom: 0.05 };
+  if (REC) return REC.hud ? { top: 0.24, bottom: 0.04 } : { top: 0.05, bottom: 0.05 }; // the title block, painted into the frame
   const H = innerHeight, pad = 14;
   let top = 0, bottom = 0;
   for (const el of document.querySelectorAll('#hud, #date, #bar, #links')) {
@@ -1157,6 +1157,34 @@ async function record() {
   const stats = `${N.toLocaleString()} buildings · ${data.stats.loc.toLocaleString()} LOC · ${data.stats.commits.toLocaleString()} commits`;
   const v = new THREE.Vector3();
 
+  // pixel art: district names as the live view's signs (paper, ink edge, a post down to the spot),
+  // the biggest few on a whole-city shot and more on a close-up, clear of the title block
+  function pixelSigns() {
+    const fs = Math.round(16 * S), pad = Math.round(6 * S), bw = Math.max(2, Math.round(2 * S)), post = Math.round(10 * S);
+    g.font = `400 ${fs}px ${studio.style.uiFont || studio.style.font}`; g.textAlign = 'center'; g.textBaseline = 'middle'; g.letterSpacing = '0px';
+    const shown = ZOOM > 1.5 ? labelEls.length : 6, P0 = 72 * S;
+    const boxes = labelEls.map(({ n, p }, k) => {
+      if (k >= shown || shared.uTimeline.value < n.born) return null;
+      v.copy(p).project(camera);
+      if (v.z > 1 || Math.abs(v.x) > 0.95 || Math.abs(v.y) > 0.95) return null;
+      const w = g.measureText(n.data.name).width + pad * 2 + bw * 2, h = fs + pad + bw * 2;
+      const x = (v.x * 0.5 + 0.5) * REC.w, y = (-v.y * 0.5 + 0.5) * REC.h - post - h / 2;
+      return { txt: n.data.name, x, y, w, h, foot: y + h / 2 + post };
+    });
+    const reserved = REC.hud ? [{ x: P0 + 260 * S, y: P0 + 110 * S, w: 560 * S, h: 260 * S }] : [];
+    if (REC.hud && !REC.still) reserved.push({ x: REC.w - P0 - 150 * S, y: P0 + 50 * S, w: 340 * S, h: 120 * S }); // the date
+    placeLabels(boxes, reserved).forEach((ok, k) => {
+      if (!ok) return;
+      const b = boxes[k], x0 = Math.round(b.x - b.w / 2), y0 = Math.round(b.y - b.h / 2);
+      g.fillStyle = '#14121c';
+      g.fillRect(Math.round(b.x - bw / 2), y0 + b.h, bw, b.foot - y0 - b.h); // the post
+      g.fillRect(x0 + bw, y0 + bw, b.w, b.h); // shadow
+      g.fillRect(x0, y0, b.w, b.h);
+      g.fillStyle = '#f2efe9'; g.fillRect(x0 + bw, y0 + bw, b.w - bw * 2, b.h - bw * 2);
+      g.fillStyle = '#14121c'; g.fillText(b.txt, b.x, b.y + S);
+    });
+  }
+
   // quiet, print-like typography for the lit styles
   function studioOverlay() {
     const ST = studio.style;
@@ -1179,6 +1207,7 @@ async function record() {
         id.reasons.slice(0, 2).forEach((r, k) => g.fillText(r, pad, pad + (178 + k * 22) * S));
       }
     }
+    if (PIXEL) pixelSigns(); else {
     g.textAlign = 'center'; g.textBaseline = 'middle';
     g.font = `${ST.labelCase === 'upper' ? 500 : 400} ${Math.round((ST.labelCase === 'upper' ? 13 : 19) * S)}px ${ST.labelCase === 'upper' ? 'Inter, sans-serif' : ST.font}`;
     g.letterSpacing = ST.labelCase === 'upper' ? `${Math.round(3 * S)}px` : '0px';
@@ -1195,6 +1224,7 @@ async function record() {
     if (!REC.still) reserved.push({ x: REC.w - pad - 150 * S, y: pad + 50 * S, w: 340 * S, h: 120 * S });
     placeLabels(boxes, reserved).forEach((ok, k) => { if (ok) g.fillText(boxes[k].txt, boxes[k].x, boxes[k].y); });
     g.letterSpacing = '0px';
+    }
     if (!REC.still) {
       // films: the date and commit count tick along in the top-right corner
       g.textAlign = 'right'; g.textBaseline = 'alphabetic';

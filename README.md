@@ -7,6 +7,8 @@
 Every file is a building. Every directory is a neighbourhood.<br>
 Watch the city grow, commit by commit, from empty lots to a skyline.
 
+**[gitropolis.dev](https://gitropolis.dev)** for any public repo · `npx gitropolis` for your own
+
 <img src="docs/media/hero.gif" alt="vite growing from 2020 to 2026 as a pixel-art Tokyo" width="960">
 
 <sub>vite, 2,383 files and 7,419 commits, played back in 10 seconds.</sub>
@@ -15,11 +17,21 @@ Watch the city grow, commit by commit, from empty lots to a skyline.
 
 ## Quick start
 
+**In your browser**, for any public GitHub repo: swap `github.com` for `gitropolis.dev`.
+
+```text
+https://github.com/pallets/flask   →   https://gitropolis.dev/pallets/flask
+```
+
+The first visit surveys the repo (a minute at most), and the city is kept for everyone after that.
+
+**On your machine**, for any repo, private ones included:
+
 ```bash
 npx gitropolis /path/to/your/repo
 ```
 
-Your browser opens on the city. There's nothing to install or build and no dependencies; you only need Node 18+ and git.
+Your browser opens on the city. There's nothing to install or build and no dependencies; you only need Node 18+ and git. Nothing leaves your machine.
 
 ## Every repo gets its own city
 
@@ -89,6 +101,7 @@ Some repos also get a condition on top of their plan. A repo with no recent comm
 | Architectural era | when the file was born: old stone, mid-century, or new glass |
 | Materials and roof | the language: Rust, Go, Python, TypeScript, C and others each build in their own vernacular |
 | District colour | the directory; a neighbourhood is painted as one |
+| Signpost | a folder's name, planted in the middle of its district |
 | The tallest spire | the most-imported file |
 | City hall · courthouse · clock tower | README · LICENSE · CHANGELOG |
 | Port · power plant · airport | lockfile · package manifest · deploy config |
@@ -102,15 +115,31 @@ Some repos also get a condition on top of their plan. A repo with no recent comm
 | Ruin | a file nobody has touched in over two years |
 | Flash on a roof | touched by the commit now playing |
 
-The live view lets you drag to pan and scroll to zoom. Hover a building to see its file, and click it to light up its imports. <kbd>Space</kbd> plays or pauses the history, and <kbd>Esc</kbd> clears the selection.
+Drag to pan and scroll to zoom. The biggest districts carry signposts with their folder's name, and more appear as you zoom in. Hover a building to see its file and light up its whole district, and click it to light up its imports. The timeline under the city shows how busy each stretch of history was: click or drag it to jump, <kbd>Space</kbd> plays or pauses, <kbd>←</kbd> <kbd>→</kbd> step. The signpost button (or <kbd>L</kbd>) hides the names for a clean view, and <kbd>Esc</kbd> clears the selection.
 
-## Make a README film
+## Share your city
+
+The **share** button makes something to post, drawn in your browser:
+
+- **A card**: the finished city with its name, what it's built like and why, its history and its numbers. Landscape for X and LinkedIn, square, or a story; with the details, or full bleed with just a name tag. Every art pixel is a 2×2 block, so it stays sharp after a social network recompresses it.
+- **A GIF or a video** of the city growing: a GIF of about 800 pixels that fits in a chat, or an MP4 in 1080p, square or vertical.
+- **A README badge**, in three looks, with the Markdown to copy:
+
+  [![gitropolis](https://gitropolis.dev/pallets/flask/badge.svg)](https://gitropolis.dev/pallets/flask) &nbsp; [![gitropolis](https://gitropolis.dev/pallets/flask/badge.svg?style=pixel)](https://gitropolis.dev/pallets/flask) &nbsp; [![gitropolis](https://gitropolis.dev/pallets/flask/badge.svg?style=card)](https://gitropolis.dev/pallets/flask)
+
+  ```markdown
+  [![gitropolis](https://gitropolis.dev/OWNER/REPO/badge.svg)](https://gitropolis.dev/OWNER/REPO)
+  ```
+
+A `gitropolis.dev/owner/repo` link shows its city's card when you paste it into X, Slack, Discord or LinkedIn.
+
+## Make a film from the command line
 
 ```bash
 npx gitropolis . --gif city.gif --static --duration 10
 ```
 
-This films the city growing along its git history and writes a GIF that fits GitHub's 10 MB limit. Pixel art compresses well, so every GIF pixel is exactly one art pixel, with no blur. Drop `--static` and the camera dives into the busiest junction instead. Use `--video city.mp4` for an MP4, `--still city.png` for a single frame, or `--card card.png` for a share card with the repo's name and what city it's built like.
+This films the city growing along its git history and writes a GIF that fits GitHub's 10 MB limit. Pixel art compresses well, and every GIF pixel is a whole art pixel, so nothing is blurred. Drop `--static` and the camera dives into the busiest junction instead. Use `--video city.mp4` for an MP4, `--still city.png` for a single frame, or `--card card.png` for a share card with the repo's name and what city it's built like.
 
 Filming runs in headless Chrome, so it looks the same on every machine. It needs [ffmpeg](https://ffmpeg.org) and Chrome, Chromium, Edge or Brave.
 
@@ -147,6 +176,11 @@ Streets come from a distance field around the blocks, and cars, buses and boats 
 - Imports are found with regexes, not a parser, so some are missed.
 - The viewer's fonts come from Google Fonts; offline, the city still builds (three.js and d3-hierarchy ship in `web/vendor`) and the captions fall back to system fonts.
 - The view is fixed at one isometric angle; rotation is planned.
+- gitropolis.dev draws public repos up to 600 MB; for anything else, run `npx gitropolis` on your own copy.
+
+## The hosted site
+
+gitropolis.dev is this repo's `web/` folder on Cloudflare: a Worker in front, a few containers that clone and scan, and R2 keeping every city by commit. It's all in [`deploy/cloudflare`](deploy/cloudflare).
 
 ## License
 
