@@ -215,4 +215,4 @@ Bug reports, repos that come out looking wrong, and ideas for new city types are
 
 ## License
 
-MIT
+[MIT](LICENSE) for the code. The gitropolis name and logo aren't covered by the license: please don't use them for your own copy of the site or the tool.
