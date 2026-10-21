@@ -1344,7 +1344,7 @@ const CARD = params.get('card');
 if (CARD && pix && layout) {
   // ?card=social is the site's own picture at GitHub's 1280×640 for the repository's social preview
   const social = CARD === 'social', brand = CARD === 'brand' || social;
-  const format = social ? 'social' : CARD === 'og' || brand ? 'landscape' : CARD;
+  const format = social ? 'social' : CARD === 'brand' ? 'brand' : CARD === 'og' ? 'landscape' : CARD;
   const info = shareInfo().info;
   if (brand) Object.assign(info, { owner: '', repo: 'gitropolis', lead: 'your git repo as ', phrase: 'a pixel-art city', url: 'gitropolis.dev' });
   drawCard(format, info, captureCity, { k: social ? 1 : 2, full: brand || params.has('full') })
