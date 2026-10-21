@@ -209,6 +209,10 @@ Streets come from a distance field around the blocks, and cars, buses and boats 
 
 gitropolis.dev is this repo's `web/` folder on Cloudflare: a Worker in front, a few containers that clone and scan, and R2 keeping every city by commit. It's all in [`deploy/cloudflare`](deploy/cloudflare).
 
+## Contributing
+
+Bug reports, repos that come out looking wrong, and ideas for new city types are all welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for running gitropolis from a checkout and checking a change.
+
 ## License
 
 MIT

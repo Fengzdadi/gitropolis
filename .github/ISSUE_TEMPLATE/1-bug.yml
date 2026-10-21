@@ -1,0 +1,62 @@
+name: Bug report
+description: Something breaks, crashes, or doesn't do what the docs say.
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting! If the problem is how a particular repo is *drawn* (wrong city, buildings look off), the "My repo looks wrong" form fits better.
+  - type: dropdown
+    id: where
+    attributes:
+      label: Where did it happen?
+      options:
+        - gitropolis.dev (the website)
+        - npx gitropolis (the command line)
+        - Filming (--gif, --video, --still, --card)
+        - Share button (card, GIF, video, badge)
+    validations:
+      required: true
+  - type: input
+    id: repo
+    attributes:
+      label: Repository
+      description: A link to the repo, if it's public. For a private repo, roughly how many files and commits it has.
+      placeholder: https://github.com/owner/repo
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What you did, what you expected, and what happened instead.
+      placeholder: |
+        1. Ran `npx gitropolis .` in …
+        2. …
+        Expected: …
+        Got: …
+    validations:
+      required: true
+  - type: textarea
+    id: output
+    attributes:
+      label: Error output
+      description: Terminal output, or the browser console (View → Developer → JavaScript Console). Pasted text is formatted as code.
+      render: text
+  - type: textarea
+    id: screenshot
+    attributes:
+      label: Screenshots
+      description: Drag images here if they help.
+  - type: input
+    id: versions
+    attributes:
+      label: Versions
+      description: gitropolis version (`npx gitropolis --version`), Node version (`node -v`), browser and OS.
+      placeholder: gitropolis 0.2.0 · Node 22 · Chrome 141 · macOS 26
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before submitting
+      options:
+        - label: I searched the existing issues and this isn't one of them.
+          required: true

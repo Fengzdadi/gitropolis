@@ -1,0 +1,54 @@
+name: Idea or new city type
+description: A new city type, building, landmark, feature or option.
+title: "[Idea]: "
+labels: ["idea"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Ideas are discussed here before anyone writes code, so nobody's work goes to waste. Pictures and references help a lot.
+  - type: dropdown
+    id: area
+    attributes:
+      label: What kind of idea?
+      options:
+        - A new city type
+        - A new building, landmark or detail
+        - The page (timeline, names, controls)
+        - Sharing (cards, GIFs, videos, badges)
+        - The command line
+        - Something else
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: The idea
+      description: What would you see or be able to do?
+    validations:
+      required: true
+  - type: textarea
+    id: code
+    attributes:
+      label: What in the code would it show?
+      description: gitropolis draws code, so every visual should mean something. Which files, folders, imports or history would this be drawn from?
+      placeholder: "Example: repos where most files are generated code could be a factory town, with generators as the factories."
+  - type: input
+    id: examples
+    attributes:
+      label: Example repos
+      description: Public repos that would show it well.
+      placeholder: https://github.com/owner/repo, …
+  - type: textarea
+    id: references
+    attributes:
+      label: References
+      description: Real places, pixel art, games or sketches that capture the look.
+  - type: dropdown
+    id: help
+    attributes:
+      label: Would you like to build it?
+      options:
+        - Yes, I'd like to open a pull request
+        - Maybe, with some pointers
+        - No, just suggesting it

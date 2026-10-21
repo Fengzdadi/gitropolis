@@ -1,0 +1,48 @@
+name: My repo looks wrong
+description: A repo became the wrong city, or something in its city doesn't look right.
+title: "[Looks wrong]: "
+labels: ["looks wrong"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        These reports are how the classifier and the city plans get better. A link to the repo is the most useful thing you can give.
+  - type: input
+    id: repo
+    attributes:
+      label: Repository
+      description: A public repo link, or its gitropolis.dev link.
+      placeholder: https://gitropolis.dev/owner/repo
+    validations:
+      required: true
+  - type: dropdown
+    id: kind
+    attributes:
+      label: What looks wrong?
+      options:
+        - It became the wrong kind of city
+        - Buildings, landmarks or terrain look off
+        - District names or their positions
+        - The growth along the timeline
+        - Framing, zoom or performance
+        - Something else
+    validations:
+      required: true
+  - type: input
+    id: got
+    attributes:
+      label: City it became
+      description: The line that starts with "this repo is …" in the terminal, or what the page says it's built like.
+      placeholder: "this repo is Tokyo: mostly small buildings …"
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected, and why
+      description: For the wrong city, which one fits better and what about the code says so (a monorepo of separate packages, mostly docs, a strict layering…).
+    validations:
+      required: true
+  - type: textarea
+    id: screenshot
+    attributes:
+      label: Screenshot
+      description: Mark the spot if it's a detail.
