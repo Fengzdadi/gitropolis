@@ -1,15 +1,15 @@
 {
   "name": "gitropolis",
-  "version": "0.1.0",
-  "description": "Turn any git repo into a pixel-art isometric city that grows along its history.",
+  "version": "0.2.0",
+  "description": "Your git repo as a pixel-art city that grows along its history.",
   "keywords": ["git", "visualization", "code-city", "pixel-art", "isometric", "threejs", "cli"],
   "author": "Fengzdadi",
   "license": "MIT",
-  "homepage": "https://github.com/Fengzdadi/gitropolis#readme",
+  "homepage": "https://gitropolis.dev",
   "repository": { "type": "git", "url": "git+https://github.com/Fengzdadi/gitropolis.git" },
   "bugs": { "url": "https://github.com/Fengzdadi/gitropolis/issues" },
   "type": "module",
   "bin": { "gitropolis": "bin/cli.mjs" },
-  "files": ["bin", "src", "web"],
+  "files": ["bin", "src", "web", "!web/og.png"],
   "engines": { "node": ">=18" }
 }
