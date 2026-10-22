@@ -18,7 +18,7 @@ export class Scanner extends Container {
 const NAME = /^[A-Za-z0-9_.-]{1,100}$/;
 const POOL = 3;               // scanners; one repo always goes to the same one, so it's scanned once
 const MAX_KB = 600_000;       // GitHub's repo size (pack size, KB): bigger repos are turned away
-const SCANNER = 2;            // bump when the scanner changes what it finds: cities are cached per version
+const SCANNER = 3;            // bump when the scanner changes what it finds: cities are cached per version
 // the container gives up on its own (a slow clone or scan, too many waiting); this is for one that never answers
 const SCAN_WAIT = 12 * 60_000;
 const json = (status, body, headers = {}) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json', ...headers } });
