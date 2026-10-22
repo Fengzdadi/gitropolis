@@ -47,6 +47,7 @@ Filming (`--gif`, `--video`, `--still`, `--card`) also needs Chrome, Chromium, E
 | `web/pixel.js` | The pixel-art pass: palette, dithering, ink outlines |
 | `web/main.js` | The page: camera, timeline, labels, hover, recording |
 | `web/card.js` · `web/waiting.js` | Share cards, GIFs and videos; the waiting screen |
+| `web/png.js` | Palette PNGs for cards and stills (a quarter of the browser's own PNG) |
 | `web/vendor/` | three.js, d3-hierarchy, gifenc and mp4-muxer, vendored unmodified |
 | `deploy/cloudflare/` | The hosted site at gitropolis.dev |
 

@@ -12,6 +12,7 @@ import { createPixelPipeline } from './pixel.js';
 import { PERF, HEAP, timed } from './perf.js';
 import { startWaiting } from './waiting.js';
 import { openShareDialog, drawCard } from './card.js';
+import { canvasPNG } from './png.js';
 
 const params = new URLSearchParams(location.search);
 // when filming, any error on the page goes straight back to the CLI (rather than a silent 90s wait);
@@ -1305,7 +1306,7 @@ async function record() {
     stillCamera(REC.shot);
     for (let i = 0; i < 3; i++) { tick(0); renderFrame(); }
     overlay(0.5);
-    const blob = await new Promise(r => out.toBlob(r, 'image/png'));
+    const blob = await canvasPNG(out);
     await fetch('/frame?i=0', { method: 'POST', body: blob });
     await report('/done', '1');
     return;
@@ -1348,9 +1349,10 @@ if (CARD && pix && layout) {
   const info = shareInfo().info;
   if (brand) Object.assign(info, { owner: '', repo: 'gitropolis', lead: 'your git repo as ', phrase: 'a pixel-art city', url: 'gitropolis.dev' });
   drawCard(format, info, captureCity, { k: social ? 1 : 2, full: brand || params.has('full') })
-    .then(c => {
-      if (!params.get('post')) { window.__card = c.toDataURL('image/png'); return; }
-      c.toBlob(b => fetch('/frame', { method: 'POST', body: b }).then(() => fetch('/done', { method: 'POST', body: '1' })), 'image/png');
+    .then(canvasPNG)
+    .then(async b => {
+      if (params.get('post')) return fetch('/frame', { method: 'POST', body: b }).then(() => fetch('/done', { method: 'POST', body: '1' }));
+      window.__card = await new Promise(r => { const fr = new FileReader(); fr.onload = () => r(fr.result); fr.readAsDataURL(b); });
     })
     .catch(err => { window.__card = `error: ${err?.message || err}`; if (params.get('post')) fail(err?.message || err); });
 }

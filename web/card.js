@@ -4,6 +4,7 @@
 // pixels survive a social network's JPEG recompression and stay crisp on phone screens.
 import { GIFEncoder, quantize, applyPalette } from 'gifenc';
 import { Muxer, ArrayBufferTarget } from 'mp4-muxer';
+import { canvasPNG } from './png.js';
 
 const INK = '#14121c', SOFT = '#4a4458', PAPER = '#f2efe9', ACCENT = '#c0413b', BAR_OFF = '#cdc8d2';
 const FONT = "'Pixelify Sans', monospace";
@@ -320,7 +321,7 @@ export function openShareDialog({ info, capture, stage, link, filename, badge })
     let b;
     try {
       b = kind === 'png'
-        ? await drawCard(format, info, capture, { k: $('[data-o=hd]').checked ? 3 : 2, full: $('[data-o=full]').checked }).then(c => new Promise(r => c.toBlob(r, 'image/png')))
+        ? await drawCard(format, info, capture, { k: $('[data-o=hd]').checked ? 3 : 2, full: $('[data-o=full]').checked }).then(canvasPNG)
         : await filmCity(kind === 'gif' ? 'gif' : 'mp4', format, info, stage, {
           cancelled: () => mine !== job,
           progress: (i, n) => { status.textContent = `filming… ${Math.round(i / n * 100)}%`; },
