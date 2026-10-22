@@ -6,6 +6,8 @@ import { hierarchy, treemap, treemapSquarify, pack } from 'd3-hierarchy';
 const GROUP_RE = /^(packages|apps|libs|crates|modules|plugins|services|projects)\/[^/]+/;
 // tests, docs, examples… are the city's green edge rather than its core
 const PERIPH_RE = /(^|\/)(tests?|__tests__|specs?|e2e|testing|fixtures?|samples?|examples?|docs?|playground|benchmarks?|bench|scripts|website|site|\.github|\.devcontainer)(\/|$)/;
+// a JVM package (src/main/java/com/example/demo/…) is a namespace: its samples/ or demo/ isn't the green edge
+const outerPath = p => p.replace(/((?:^|\/)src\/[\w-]+\/(?:java|kotlin|scala|groovy)\/).*\/([^/]+)$/, '$1$2');
 const ground = d => d.periphery ? 'lawn' : 'block';
 const hash = n => { const s = Math.sin(n * 12.9898 + 78.233) * 43758.5453; return s - Math.floor(s); };
 const sum = xs => xs.reduce((s, x) => s + x, 0);
@@ -561,7 +563,7 @@ const PLANNERS = {
     const T = clamp(Math.round(N * 0.04), 4, 40);
     // (only code: a lockfile or a manifest is a landmark of its own, never a tower on the strip)
     const towers = new Set(items.filter(it => !['cfg', 'doc', 'lock'].includes(files[it.i].lang)).sort((a, b) => files[b.i].loc - files[a.i].loc).slice(0, T).map(it => it.i));
-    const villas = items.filter(it => !towers.has(it.i) && (PERIPH_RE.test(it.d.name + '/') || PERIPH_RE.test(files[it.i].p)));
+    const villas = items.filter(it => !towers.has(it.i) && (PERIPH_RE.test(it.d.name + '/') || PERIPH_RE.test(outerPath(files[it.i].p))));
     const villaSet = new Set(villas.map(it => it.i));
     const lots = [], blocks = [], labels = [], water = [], roads = [];
     // the strip: towers either side of the highway, the needle's plaza in the middle

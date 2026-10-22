@@ -1,5 +1,6 @@
 // Which city is this repo? Turn the scanned blueprint into a handful of metrics, score each
 // city archetype from them, and explain the winner in plain words. Same repo → same city.
+import { outerPath } from './anatomy.mjs';
 
 const NONCODE = new Set(['cfg', 'doc', 'lock']);
 // infrastructure as code: it makes a port, but never decides the shape of the code city
@@ -10,10 +11,10 @@ const FARM = new Set(['nb', 'data', 'model']);
 const PROSE = new Set(['md']);
 const INFRA_NAMES = { tf: 'Terraform', k8s: 'Kubernetes manifests', chart: 'Helm charts', values: 'Helm charts', kustomize: 'Kustomize', jsonnet: 'jsonnet', ansible: 'Ansible', nix: 'Nix', tmpl: 'templates', yaml: 'YAML' };
 const YEAR = 365.25 * 86400;
-const TEST_RE = /(^|\/)(tests?|__tests__|specs?|e2e|testing)(\/|$)|\.(test|spec)\.[a-z]+$|_test\.(go|py|rs)$|(^|\/)test_[^/]+\.py$/;
+const TEST_RE = /(^|\/)(tests?|__tests__|specs?|e2e|testing)(\/|$)|(^|\/)src\/\w*Test\w*\/|\.(test|spec)\.[a-z]+$|_test\.(go|py|rs)$|(^|\/)test_[^/]+\.py$/;
 const GROUP_RE = /^(packages|apps|libs|crates|modules|plugins|services|projects)\/[^/]+/;
 // tests, docs, examples, fixtures… are part of the city, but they don't decide which city it is
-const NONCORE_RE = /(^|\/)(tests?|__tests__|specs?|e2e|testing|fixtures?|__fixtures__|samples?|examples?|docs?|playground|benchmarks?|bench|scripts|website|site|\.github)(\/|$)|\.(test|spec|stories)\.[a-z]+$|_test\.(go|py|rs)$|(^|\/)test_[^/]+\.py$/;
+const NONCORE_RE = /(^|\/)(tests?|__tests__|specs?|e2e|testing|fixtures?|__fixtures__|samples?|examples?|docs?|playground|benchmarks?|bench|scripts|website|site|\.github)(\/|$)|(^|\/)src\/\w*Test\w*\/|\.(test|spec|stories)\.[a-z]+$|_test\.(go|py|rs)$|(^|\/)test_[^/]+\.py$/;
 
 const ramp = (x, a, b) => Math.min(1, Math.max(0, (x - a) / (b - a)));
 const sum = xs => xs.reduce((s, x) => s + x, 0);
@@ -44,7 +45,7 @@ export function cityMetrics(city, now = Date.now() / 1000) {
   const kindLoc = {};
   for (const i of infraIdx) { const k = INFRA_NAMES[all[i].a?.k] || 'YAML'; kindLoc[k] = (kindLoc[k] || 0) + all[i].loc; }
   const infraKinds = Object.keys(kindLoc).sort((a, b) => kindLoc[b] - kindLoc[a]).filter((k, n) => n === 0 || kindLoc[k] > infraLoc * 0.15);
-  const coreIdx = codeIdx.filter(i => !NONCORE_RE.test(all[i].p));
+  const coreIdx = codeIdx.filter(i => !NONCORE_RE.test(outerPath(all[i].p)));
   // re-index imports onto the core subset (fall back to everything for tiny / test-only repos)
   const useCore = coreIdx.length >= 20;
   const remap = new Map((useCore ? coreIdx : codeIdx).map((i, k) => [i, k]));
@@ -213,7 +214,7 @@ export function cityMetrics(city, now = Date.now() / 1000) {
     crossShare: edges ? cross / edges : 0,
     cycleShare: inCycles / Math.max(1, n),
     split,
-    testShare: sum(codeIdx.filter(i => TEST_RE.test(all[i].p)).map(i => all[i].loc)) / Math.max(1, sum(codeIdx.map(i => all[i].loc))),
+    testShare: sum(codeIdx.filter(i => TEST_RE.test(outerPath(all[i].p))).map(i => all[i].loc)) / Math.max(1, sum(codeIdx.map(i => all[i].loc))),
     coreFiles: n,
     totalFiles: codeIdx.length,
     history,
