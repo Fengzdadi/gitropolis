@@ -1,0 +1,32 @@
+name: test
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: [18, 22]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+      - name: Syntax check
+        run: git ls-files -z '*.mjs' '*.js' ':!web/vendor' | xargs -0 -n1 node --check
+      # the repos the snapshot test scans, pinned in test/repos.json: a new pin reuses the old clones
+      # and only fetches what's missing
+      - uses: actions/cache@v4
+        with:
+          path: test/.repos
+          key: snapshot-repos-${{ hashFiles('test/repos.json') }}
+          restore-keys: snapshot-repos-
+      - name: Snapshot test
+        run: npm test

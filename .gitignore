@@ -10,3 +10,6 @@ demo/
 .claude/
 !docs/media/*.gif
 .wrangler/
+
+# clones the snapshot test scans
+test/.repos/

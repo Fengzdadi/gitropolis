@@ -53,10 +53,14 @@ Filming (`--gif`, `--video`, `--still`, `--card`) also needs Chrome, Chromium, E
 
 ## Checking a change
 
-There's no test suite yet. Instead, gitropolis is checked against real repos. Before opening a pull request:
+gitropolis is checked against real repos. `npm test` scans seven public repos, each pinned to a commit in `test/repos.json`, and compares what the scanner found (every file, its imports and history, and which city it chose and why) with the snapshots in `test/snapshots/`. The first run clones the repos into `test/.repos` (about 90 MB); after that it takes a few seconds. When a repo no longer matches, it says what moved: the city type, the file count, and which files changed and how.
 
-1. **Pick repos that exercise your change.** Run at least one small repo (under 50 files) and one large one (over 1,000), plus any repo your change is about. Good public ones to try: `pallets/flask`, `vitejs/vite`, `TanStack/query`, `tokio-rs/axum`, `sindresorhus/ky`.
-2. **Compare with `main`.** For scanner or classifier changes, diff the `identity` from `--out city.json` before and after. Most repos shouldn't change city type unless that's the point of the change. For visual changes, take `--still` frames before and after.
+If your change is meant to move a repo, run `npm test -- --update`, read the snapshot diff, and commit it with your change. Say in the pull request why each repo moved. CI runs the same test on Node 18 and 22.
+
+Before opening a pull request:
+
+1. **Run `npm test`.** Most changes shouldn't move any of the pinned repos, and none should change city type unless that's the point of the change.
+2. **Pick repos that exercise your change.** The pinned repos are small to medium: also run at least one large repo (over 1,000 files), plus any repo your change is about. Good public ones to try: `vitejs/vite`, `TanStack/query`. For scanner or classifier changes, diff the `identity` from `--out city.json` against `main`. For visual changes, take `--still` frames before and after.
 3. **Watch the city grow.** Play the timeline once from the start, and check that land, buildings, names and traffic appear in order.
 4. **Keep it fast.** For anything in the render loop or the building merge, compare `--bench` on a big repo before and after.
 5. **Check the other styles still load** if you touched shared code: `--style maquette`, `--style plan`, `--style nocturne`.

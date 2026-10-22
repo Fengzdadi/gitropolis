@@ -1,0 +1,9 @@
+[
+  { "repo": "google/uuid", "ref": "v1.6.0", "sha": "0f11ee6918f41a04c201eceeadf612a377bc7fbc" },
+  { "repo": "sindresorhus/ky", "ref": "v2.2.0", "sha": "3541888878c4d303a8bc2ad61815f4e048f55a5d" },
+  { "repo": "pallets/flask", "ref": "3.1.3", "sha": "22d924701a6ae2e4cd01e9a15bbaf3946094af65" },
+  { "repo": "tokio-rs/axum", "ref": "axum-v0.8.9", "sha": "c59208c86fded335cd85e388030ad59347b0e5ae" },
+  { "repo": "google/gson", "ref": "gson-parent-2.14.0", "sha": "3ff35d6269894901ab8006258395aafc4b9765cd" },
+  { "repo": "getify/You-Dont-Know-JS", "ref": "2nd-ed", "sha": "044120ef55564939cd35f5ddaf3f6c0a45d7b02c" },
+  { "repo": "terraform-aws-modules/terraform-aws-eks", "ref": "v21.29.0", "sha": "91f11ea01656c26b8e6b8eb1b74f19863f60056c" }
+]
