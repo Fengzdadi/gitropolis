@@ -139,13 +139,14 @@ export async function scanRepo(repo, { maxCommits = 20000 } = {}) {
 
   const { tails, jvmUsed } = resolveImports(root, files, index, listed);
 
-  // ---- git history: one pass over `git log --numstat`, oldest first, following renames
-  // so a file moved into src/ keeps the birthday of its original path.
+  // ---- git history: one pass over `git log --name-status`, oldest first, following renames
+  // so a file moved into src/ keeps the birthday of its original path. (Only which files each commit
+  // touched matters, not how many lines: --numstat would diff every changed file, often 10x slower.)
   const commits = [];
   const alias = new Map(); // path at this point in history -> history record
   await new Promise((resolve, reject) => {
     // quotePath=false: non-ASCII names (中文.md, café.js) come back as raw UTF-8, matching ls-files
-    const proc = spawn('git', ['-C', root, '-c', 'core.quotePath=false', 'log', `--max-count=${maxCommits}`, '--numstat',
+    const proc = spawn('git', ['-C', root, '-c', 'core.quotePath=false', 'log', `--max-count=${maxCommits}`, '--name-status',
       '--format=@@%ct', '-M', '--reverse'], { stdio: ['ignore', 'pipe', 'ignore'] });
     const rl = readline.createInterface({ input: proc.stdout });
     let cur = null;
@@ -155,9 +156,10 @@ export async function scanRepo(repo, { maxCommits = 20000 } = {}) {
         commits.push(cur);
         return;
       }
+      // "M\tpath", or "R097\told\tnew" for a rename (a path with a tab in it comes quoted)
       const parts = line.split('\t');
-      if (!cur || parts.length < 3) return;
-      const [from, to] = renamePaths(parts.slice(2).join('\t'));
+      if (!cur || parts.length < 2) return;
+      const from = unquote(parts[1]), to = parts[0][0] === 'R' ? unquote(parts[2]) : from;
       let h = alias.get(from);
       if (from !== to) { alias.delete(from); }
       if (!h) h = { born: cur.t, last: 0, churn: 0 };
@@ -241,7 +243,6 @@ function fileStatus(files, start, end, tails, refs, jvmUsed) {
   return out;
 }
 
-// numstat rename forms: "a.py => b.py" and "src/{old => new}/x.py" (either side of the braces may be empty)
 // git still C-quotes a path with a tab, newline, quote or backslash in it: "a\"b.js", "x\303\251"
 function unquote(p) {
   if (!(p.length > 1 && p.startsWith('"') && p.endsWith('"'))) return p;
@@ -255,17 +256,6 @@ function unquote(p) {
     else bytes.push({ n: 10, t: 9, r: 13, a: 7, b: 8, f: 12, v: 11 }[n] ?? n.charCodeAt(0));
   }
   return Buffer.from(bytes).toString('utf8');
-}
-
-function renamePaths(raw) {
-  // a rename is "old => new" (each side quoted if it needs to be), or "dir/{old => new}/rest"
-  const p = raw.includes(' => ') ? raw : unquote(raw);
-  if (!p.includes(' => ')) return [p, p];
-  if (p.startsWith('"')) { const [a, b] = p.split(' => '); return [unquote(a), unquote(b)]; }
-  const m = /^(.*)\{(.*) => (.*)\}(.*)$/.exec(p);
-  if (!m) { const [a, b] = p.split(' => '); return [a, b]; }
-  const clean = s => s.replace(/\/{2,}/g, '/').replace(/^\//, '');
-  return [clean(m[1] + m[2] + m[4]), clean(m[1] + m[3] + m[4])];
 }
 
 // ---------------------------------------------------------------- imports
