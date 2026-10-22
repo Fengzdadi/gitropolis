@@ -32,38 +32,49 @@ if (args.includes('--help') || args.includes('-h')) {
   --port <n>  --no-open  --out <city.json>  --bench`);
   process.exit(0);
 }
+// a mistyped option should say so, not turn into a folder name or a silently ignored setting
+const fail = msg => { console.error(`gitropolis: ${msg}`); process.exit(1); };
 const flag = (name, def) => {
   const i = args.indexOf(name);
   if (i < 0) return def;
   const v = args[i + 1];
+  if (v === undefined || v.startsWith('--')) fail(`${name} needs a value (see --help)`);
   args.splice(i, 2);
   return v;
 };
 const bool = name => { const i = args.indexOf(name); if (i < 0) return false; args.splice(i, 1); return true; };
+const oneOf = (name, v, ok) => ok.includes(v) ? v : fail(`${name} is one of ${ok.join(', ')} (not ${v})`);
+const num = (name, v) => v === undefined || +v > 0 ? v : fail(`${name} takes a number above 0 (not ${v})`);
 const portGiven = args.includes('--port') || !!process.env.PORT;
-let port = +flag('--port', process.env.PORT || 4173);
+let port = +num('--port', flag('--port', process.env.PORT || 4173));
 const out = flag('--out');
 const video = flag('--video');
 const gif = flag('--gif');
-const duration = +flag('--duration', 20);
-const fps = +flag('--fps', 30);
-const [w, h] = flag('--size', '1920x1080').split('x').map(Number);
-const maxMB = +flag('--max-mb', 9.5); // GitHub README uploads cap at 10 MB
+const duration = +num('--duration', flag('--duration', 20));
+const fps = +num('--fps', flag('--fps', 30));
+const frame = flag('--size', '1920x1080');
+if (!/^[1-9]\d*x[1-9]\d*$/.test(frame)) fail(`--size is width x height, like 1920x1080 (not ${frame})`);
+const [w, h] = frame.split('x').map(Number);
+const maxMB = +num('--max-mb', flag('--max-mb', 9.5)); // GitHub README uploads cap at 10 MB
 const headed = bool('--headed');
-const style = flag('--style', 'pixel');
-const pxOpt = flag('--pixel'); // pixel style: size of one art pixel (default 1; 2 for chunkier art)
-const zoomOpt = flag('--zoom'); // close-up factor (pixel style)
-const cityOpt = flag('--city', 'auto'); // auto | classic | farm | desert | capital | mountain | university | port | smalltown | manhattan | hongkong | tokyo | la | paris | venice | barcelona
+const style = oneOf('--style', flag('--style', 'pixel'), ['pixel', 'maquette', 'plan', 'nocturne', 'neon']);
+const pxOpt = num('--pixel', flag('--pixel')); // pixel style: size of one art pixel (default 1; 2 for chunkier art)
+const zoomOpt = num('--zoom', flag('--zoom')); // close-up factor (pixel style)
+const cityOpt = oneOf('--city', flag('--city', 'auto'), ['auto', 'classic', 'farm', 'desert', 'capital', 'mountain', 'university', 'port',
+  'smalltown', 'manhattan', 'hongkong', 'tokyo', 'la', 'paris', 'venice', 'barcelona']);
 const card = flag('--card'); // a share card instead of a photo
 const cardShape = flag('--shape', 'landscape');
 const cardFull = bool('--full');
 const still = flag('--still') || card;
 if (card && !['landscape', 'square', 'story', 'brand', 'social'].includes(cardShape)) { console.error(`gitropolis: --shape is landscape, square or story`); process.exit(1); }
-const shot = flag('--shot', 'hero');
+const shot = oneOf('--shot', flag('--shot', 'hero'), ['hero', 'aerial', 'street', 'plan']);
 const noHud = bool('--no-hud');
 const fixedCam = bool('--static'); // films: hold the establishing shot instead of pushing in
 const benchMode = bool('--bench'); // measure setup and frame cost in headless Chrome
 const noOpen = bool('--no-open');
+const unknown = args.find(a => a.startsWith('-'));
+if (unknown) fail(`unknown option ${unknown} (see --help)`);
+if (args.length > 1) fail(`one repo at a time (got ${args.join(', ')})`);
 const repo = args[0] || process.cwd();
 if (!existsSync(repo)) { console.error(`gitropolis: no such folder ${repo}`); process.exit(1); }
 try { execFileSync('git', ['-C', repo, 'rev-parse', '--is-inside-work-tree'], { stdio: 'ignore' }); } catch {
