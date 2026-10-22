@@ -42,7 +42,7 @@ gitropolis reads the shape of your code and picks a plan to match it. A big mono
 </p>
 
 - **Paris** (left): flask. Many years of history, buildings of even height, avenues around one centre, a river through town.
-- **Manhattan** (right): redis. A flat, gridded layout, with most of the code in a few huge towers and a park in the middle.
+- **Manhattan** (right): redis <sup>*</sup>. A flat, gridded layout, with most of the code in a few huge towers and a park in the middle.
 
 <p>
 <img src="docs/media/tokyo.png" alt="vite as Tokyo" width="49%"> <img src="docs/media/venice.png" alt="TanStack Query as Venice" width="49%">
@@ -107,7 +107,35 @@ gitropolis reads the shape of your code and picks a plan to match it. A big mono
 - **Farm village** (left): Python Data Science Handbook. Notebooks and data, not code. Notebooks are farmhouses (the biggest are barns), datasets are crop fields sized by their data, and a windmill stands on the village green.
 - **Farm village** (right): FiveThirtyEight's data, close up. 635 datasets make a patchwork of fields, each a different crop with its furrows running one way or the other, and hay bales on it.
 
-<sub><sup>*</sup> These were forced with `--city`; left to itself, gitropolis plans these repos as Paris and Manhattan. Any repo can be drawn as any city.</sub>
+<p>
+<img src="docs/media/factory-redis.png" alt="redis as a factory town" width="49%"> <img src="docs/media/factory-jq.png" alt="jq as a factory town" width="49%">
+</p>
+
+- **Factory town** (left): redis. A codebase of C. Source files are saw-tooth works along a canal, some with a tall brick chimney (smoking where the code was edited a lot lately), headers are warehouses, and the most-included file is a pair of cooling towers at the end of the canal.
+- **Factory town** (right): jq, small enough to see every piece. The tests and docs are the workers' terraces across the water.
+
+<p>
+<img src="docs/media/science-litgpt.png" alt="litgpt as a science park" width="49%"> <img src="docs/media/science-nanogpt.png" alt="close-up of nanoGPT as a science park" width="49%">
+</p>
+
+- **Science park** (left): litgpt. Code that trains and runs models. Each district is an institute on a round lawn around a lake, with glass labs, greenhouses for the tests, and footpaths instead of roads. The most-imported file is a glass ring round a courtyard.
+- **Science park** (right): nanoGPT, close up. The training script is a data centre with fans along its roof.
+
+<p>
+<img src="docs/media/themepark-snkrx.png" alt="SNKRX as a theme park" width="49%"> <img src="docs/media/themepark-godot-demos.png" alt="Godot's demo projects as a theme park" width="49%">
+</p>
+
+- **Theme park** (left): SNKRX, a game made with LÖVE. The most-imported file is the castle on an island in a moat, and each district is a land around it. The biggest script is the Ferris wheel, big ones are striped big tops, the rest are carousels, and there are stalls along the paths.
+- **Theme park** (right): Godot's demo projects. Hundreds of little games make a crowded park, with a land for each kind of demo.
+
+<p>
+<img src="docs/media/resort-flutter-gallery.png" alt="the Flutter gallery as a seaside resort" width="49%"> <img src="docs/media/resort-nowinandroid.png" alt="Now in Android as a seaside resort" width="49%">
+</p>
+
+- **Seaside resort** (left): the Flutter gallery, a mobile app. Its code is white hotels with balconies to the sea, and the most-imported file is a sail-shaped hotel on its own island, with a causeway out to it.
+- **Seaside resort** (right): Now in Android. Small files are villas under hip roofs, and the tests are striped beach huts.
+
+<sub><sup>*</sup> These were forced with `--city`; left to itself, gitropolis plans axum, express and flask as Paris, ky as Manhattan, and redis as a factory town. Any repo can be drawn as any city.</sub>
 
 The terminal tells you why your repo got its plan:
 

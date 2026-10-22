@@ -25,7 +25,7 @@ Useful while working:
 | Command | What it's for |
 |---|---|
 | `node bin/cli.mjs <repo> --out city.json` | See what the scanner found, and which city it chose and why (`identity`) |
-| `node bin/cli.mjs <repo> --city <plan>` | Draw a repo as any of the 14 city plans |
+| `node bin/cli.mjs <repo> --city <plan>` | Draw a repo as any of the 18 city plans |
 | `node bin/cli.mjs <repo> --still before.png` | A frame to compare before and after a visual change |
 | `node bin/cli.mjs <repo> --bench` | Setup and frame timings, for anything that might slow things down |
 | `http://localhost:4173/gallery.html` (while the CLI runs) | Every building form side by side |
@@ -41,7 +41,7 @@ Filming (`--gif`, `--video`, `--still`, `--card`) also needs Chrome, Chromium, E
 | `src/scan.mjs` | Reads a repo: files, imports, links, and history from `git log` |
 | `src/classify.mjs` | Measures the code and picks the city type, with the reasons it prints |
 | `src/anatomy.mjs` | What each file is (source, test, config, docs, data...) |
-| `web/layouts.js` | The 14 city planners: streets, blocks, water, landmarks |
+| `web/layouts.js` | The 18 city planners: streets, blocks, water, landmarks |
 | `web/buildings.js` · `web/architecture.js` | Building forms, and which file gets which form |
 | `web/studio.js` · `web/surfaces.js` · `web/streets.js` · `web/trees.js` | Terrain, materials, roads and traffic, trees |
 | `web/pixel.js` | The pixel-art pass: palette, dithering, ink outlines |
