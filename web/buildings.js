@@ -1183,6 +1183,49 @@ function buildStall(M, S) {
   return null;
 }
 
+// ------------------------------------------------------------ the seaside resort
+// a beach hotel: a white slab, a balcony on every floor of its sea front, sun awnings along the top
+function buildHotel(M, S) {
+  const { w, d, h, u, rng } = S;
+  const white = rgb('#f4efe6'), glass = rgb(S.P.glass[1]), [c1] = fun(rng), e = u * 0.06;
+  const floors = clamp(Math.round(h / (u * 0.3)), 2, 30), fh = h / floors;
+  M.box(-w / 2, w / 2, 0, h, -d / 2, d / 2, [WALL, white], [ROOF, rgb('#e2dbcf')]);
+  for (let k = 1; k < floors; k++) { // balconies: a slab and a glass rail on the two faces towards the sea
+    const y = k * fh;
+    M.box(-w / 2, w / 2 + e, y - fh * 0.08, y, -d / 2, d / 2 + e, [TRIM, white], [TRIM, white], ['nx', 'nz']);
+    M.box(-w / 2 + e * 0.5, w / 2 + e * 0.6, y, y + fh * 0.32, d / 2 + e * 0.8, d / 2 + e, [GLASS, glass], null, ['top']);
+    M.box(w / 2 + e * 0.8, w / 2 + e, y, y + fh * 0.32, -d / 2 + e * 0.5, d / 2 + e * 0.6, [GLASS, glass], null, ['top']);
+  }
+  M.box(-w / 2, w / 2, 0, fh * 0.9, d / 2, d / 2 + e * 1.4, [GLASS, glass], [ACC, c1]); // the lobby, under an awning
+  M.box(-w * 0.3, w * 0.3, h, h + fh * 0.6, -d * 0.3, d * 0.2, [WALL, white], [ROOF, c1]); // the rooftop bar
+  return null;
+}
+
+// the resort's landmark: a sail-shaped grand hotel on its own island, its mast up the spine
+function buildSail(M, S) {
+  const { w, d, h, u } = S;
+  const white = rgb('#f4efe6'), glass = rgb(S.P.glass[1]);
+  const R = Math.min(w, d) * 0.5 * SQ * 0.8, base = h * 0.04;
+  M.loft(0, 0, [[0, R * 1.05, R * 1.05], [base, R * 1.05, R * 1.05]], 12, [POD, rgb('#e8dcc0')], { cap: [POD, rgb('#e8dcc0')] });
+  const prof = [[base, 1], [h * 0.4, 0.96], [h * 0.7, 0.72], [h * 0.9, 0.36], [h, 0.06]];
+  M.loft(0, 0, prof.map(([y, k]) => [y, R * k, R * k * 0.62]), 4, [GLASS, glass], { rot: Math.PI / 4, cap: [ROOF, white] });
+  M.strut([R * 0.5, base, R * 0.4], [R * 0.04, h * 1.05, R * 0.03], Math.max(u * 0.05, 0.02), TRIM, white); // the mast
+  M.strut([-R * 0.5, base, -R * 0.4], [R * 0.04, h * 1.05, R * 0.03], Math.max(u * 0.04, 0.02), TRIM, white);
+  M.loft(R * 0.42, R * 0.3, [[h * 0.78, R * 0.22, R * 0.22], [h * 0.8, R * 0.22, R * 0.22]], 12, [TRIM, white], { cap: [ROOF, rgb('#3aa3a0')] }); // the helipad
+  return null;
+}
+
+// a beach hut, where the tests change: a little striped box under a pitched roof
+function buildHut(M, S) {
+  const { w, d, h, u, rng } = S;
+  const [c1] = fun(rng), white = rgb('#f4efe6'), hw = w * 0.7, hd = d * 0.7, wh = Math.min(h, u * 0.6) * 0.65;
+  const n = 4;
+  for (let k = 0; k < n; k++) { const x0 = -hw / 2 + k * hw / n; M.box(x0, x0 + hw / n, 0, wh, -hd / 2, hd / 2, [WALL, k % 2 ? white : c1], null, ['top']); }
+  gable(M, 0, 0, hw * 1.1, hd * 1.1, wh, wh * 0.45, u * 0.02, 'x', white, WALL, c1);
+  M.box(-hw * 0.12, hw * 0.12, 0, wh * 0.7, hd / 2, hd / 2 + u * 0.01, [TRIM, rgb('#4a4458')], [TRIM, rgb('#4a4458')]);
+  return null;
+}
+
 function buildPlant(M, S) {
   const { w, d, h, u } = S, rt = S.roof;
   const cooling = S.rng() < 0.42, towers = d > w * 0.9 && S.rng() < 0.5 ? 2 : 1;
@@ -2106,7 +2149,8 @@ const BUILDERS = { slab: buildSlab, tower: buildTower, setback: buildSetback, po
   barn: buildBarn, silo: buildSilo, windmill: buildWindmill, bales: buildBales,
   factory: buildFactory, cooling: buildCooling,
   lab: buildLab, datacenter: buildDatacenter, greenhouse: buildGreenhouse, ring: buildRing,
-  castle: buildCastle, ferris: buildFerris, carousel: buildCarousel, bigtop: buildBigtop, droptower: buildDroptower, stall: buildStall };
+  castle: buildCastle, ferris: buildFerris, carousel: buildCarousel, bigtop: buildBigtop, droptower: buildDroptower, stall: buildStall,
+  hotel: buildHotel, sail: buildSail, hut: buildHut };
 
 const FLAT = { old: 'flat', mid: 'flat', new: 'flat' };
 const DEFAULT_ROOF = {
@@ -2128,6 +2172,7 @@ const DEFAULT_ROOF = {
   factory: FLAT, cooling: FLAT,
   lab: FLAT, datacenter: FLAT, greenhouse: FLAT, ring: FLAT,
   castle: FLAT, ferris: FLAT, carousel: FLAT, bigtop: FLAT, droptower: FLAT, stall: FLAT,
+  hotel: FLAT, sail: FLAT, hut: FLAT,
 };
 // landmarks that ignore the era: a ruin is always weathered, a building site is always raw
 const FORCE_ERA = { ruin: 'old', site: 'mid' };

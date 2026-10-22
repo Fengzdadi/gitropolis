@@ -38,6 +38,10 @@ export function cityMetrics(city, now = Date.now() / 1000) {
   const farmCount = l => farmIdx.filter(i => all[i].lang === l).length;
   // the factory town: how much of the code is C, C++ or Zig (CUDA kernels are model code: they make a campus)
   const cIdx = plainIdx.filter(i => ['c', 'cpp', 'zig'].includes(all[i].lang) && all[i].g !== 'ml');
+  // the seaside resort: an app the scanner found, and how much of the code is in its platforms' languages
+  const APP_LANG = { Flutter: ['dart'], 'React Native': ['js', 'ts'], Android: ['kt', 'java'], iOS: ['swift'] };
+  const app = city.extras?.app || [];
+  const appLangs = new Set(app.flatMap(p => APP_LANG[p] || []));
   // the science park: model code (torch, jax and the like, and CUDA kernels; the scanner marks it)
   const mlIdx = plainIdx.filter(i => all[i].g === 'ml');
   // in a port the infrastructure *is* the codebase, in a university the pages are; anywhere else they don't shape the city
@@ -244,6 +248,8 @@ export function cityMetrics(city, now = Date.now() / 1000) {
     usedCore: useCore,
     cShare: sum(cIdx.map(i => all[i].loc)) / Math.max(1, codeLoc),
     headers: cIdx.filter(i => /\.(h|hh|hpp|hxx)$/.test(all[i].p)).length,
+    app,
+    appShare: sum(plainIdx.filter(i => appLangs.has(all[i].lang)).map(i => all[i].loc)) / Math.max(1, codeLoc),
     // the theme park: the game engine the scanner found, and how many of the project's files are written for it
     engine: city.extras?.engine?.name || null,
     engineFiles: city.extras?.engine?.files || 0,
@@ -293,6 +299,11 @@ const ARCHETYPES = {
   themepark: m => [
     [m.engine ? ramp(m.engineFiles, 3, 40) : 0, `made with ${m.engine}: ${m.engineFiles} rides, stalls and shows`],
   ],
+  resort: m => {
+    const fw = m.app.find(p => p === 'Flutter' || p === 'React Native'), on = m.app.filter(p => p !== fw);
+    const what = fw ? `a ${fw} app${on.length ? ` for ${on.join(' and ')}` : ''}` : `an ${m.app.join(' and ')} app`;
+    return [[m.app.length ? ramp(m.appShare, 0.3, 0.7) : 0, `${what}: hotels along the beach`]];
+  },
   science: m => [
     [ramp(m.mlShare, 0.2, 0.5), `${pct(m.mlShare)} of the code trains or runs models`],
     [ramp(m.mlFiles, 3, 40), `${m.mlFiles} labs${m.trainFiles ? `, ${m.trainFiles} of them data centres running training` : ''}`],
@@ -349,7 +360,7 @@ const STATES = {
 };
 
 export const CITY_NAMES = {
-  farm: 'Farm Village', desert: 'Desert Boomtown', industrial: 'Factory Town', science: 'Science Park', themepark: 'Theme Park', capital: 'Planned Capital', mountain: 'Mountain City', university: 'University Town', port: 'Port City', smalltown: 'Small Town', manhattan: 'Manhattan', hongkong: 'Hong Kong', tokyo: 'Tokyo',
+  farm: 'Farm Village', desert: 'Desert Boomtown', industrial: 'Factory Town', science: 'Science Park', themepark: 'Theme Park', resort: 'Seaside Resort', capital: 'Planned Capital', mountain: 'Mountain City', university: 'University Town', port: 'Port City', smalltown: 'Small Town', manhattan: 'Manhattan', hongkong: 'Hong Kong', tokyo: 'Tokyo',
   la: 'Los Angeles', paris: 'Paris', venice: 'Venice', barcelona: 'Barcelona',
 };
 
@@ -366,6 +377,7 @@ export function classify(city) {
     : m.farmShare >= 0.4 && m.farmFiles >= 10 ? scored.find(s => s.id === 'farm')
     // what the code is made of decides before how old it is: a game, an app, model code, C
     : m.engine && m.engineFiles >= 5 ? scored.find(s => s.id === 'themepark')
+    : m.app.length && m.appShare >= 0.4 && m.files >= 10 ? scored.find(s => s.id === 'resort')
     : m.mlShare >= 0.35 && m.mlFiles >= 3 ? scored.find(s => s.id === 'science')
     : m.cShare >= 0.6 && m.files >= 20 ? scored.find(s => s.id === 'industrial')
     // a big city out of nothing in under two years is a boomtown, whatever its streets look like

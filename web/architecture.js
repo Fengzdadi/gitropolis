@@ -6,7 +6,7 @@ import { addFacadeDetail } from './surfaces.js';
 const PERIPHERY = /(^|\/)(tests?|__tests__|specs?|e2e|fixtures?|samples?|examples?|docs?|playgrounds?|templates?|benchmarks?)(\/|$)/;
 // a training run, a fine-tune (as the classifier counts them)
 const TRAIN_RE = /(^|\/)(train|finetune|fine_tune|pretrain)[^/]*\.(py|c|cu)$/i;
-const ROOF_BY_CITY = { farm: 'gable', port: 'flat', paris: 'mansard', smalltown: 'gable', la: 'flat', venice: 'hip', barcelona: 'flat' };
+const ROOF_BY_CITY = { farm: 'gable', port: 'flat', paris: 'mansard', smalltown: 'gable', la: 'flat', venice: 'hip', barcelona: 'flat', resort: 'hip' };
 // each language builds in its own vernacular
 // kinds of infrastructure as code → port industry (Terraform is decided by size: plant or factory)
 // kinds of page → campus buildings
@@ -113,7 +113,7 @@ export function buildingSpecs({ files, B, inDeg, hub: hubIdx, unit, kind, t01 })
     const hub = i === hubIdx;
     const status = new Set(f.s || []);
     if (status.has('giant') && role === 'source') form = 'mega';
-    else if (hub) form = town ? 'clocktower' : kind === 'port' ? 'lighthouse' : kind === 'university' ? 'library' : kind === 'capital' ? 'congress' : kind === 'desert' ? 'needle' : kind === 'farm' ? 'windmill' : kind === 'industrial' ? 'cooling' : kind === 'science' ? 'ring' : kind === 'themepark' ? 'castle' : (a.c || 0) >= 2 ? 'setback' : 'tower';
+    else if (hub) form = town ? 'clocktower' : kind === 'port' ? 'lighthouse' : kind === 'university' ? 'library' : kind === 'capital' ? 'congress' : kind === 'desert' ? 'needle' : kind === 'farm' ? 'windmill' : kind === 'industrial' ? 'cooling' : kind === 'science' ? 'ring' : kind === 'themepark' ? 'castle' : kind === 'resort' ? 'sail' : (a.c || 0) >= 2 ? 'setback' : 'tower';
     else if (kind === 'capital' && i === entry) form = 'cathedral'; // the file that imports the most: where the plan is read from
     else if (status.has('dead')) form = 'ruin';
     else if (sites.has(i)) form = 'site';
@@ -138,6 +138,12 @@ export function buildingSpecs({ files, B, inDeg, hub: hubIdx, unit, kind, t01 })
       else if (!f.g || role === 'test' || role === 'docs') form = 'stall';
       else form = f.loc > medLoc * 2.2 ? 'bigtop' : slender && i % 4 === 0 ? 'droptower' : 'carousel';
     }
+    // the seaside resort: the app's bigger files are hotels with balconies to the sea, its small ones
+    // villas, and its tests and docs the beach huts on the sand
+    if (kind === 'resort' && !hub) {
+      if (role === 'test' || role === 'docs') form = 'hut';
+      else if (['slab', 'tower', 'setback', 'podium', 'hall', 'frame', 'mega'].includes(form)) form = 'hotel';
+    }
     // the science park: code works in glass labs, training runs (and giants) in data centres, and the
     // tests are the greenhouses the experiments grow in
     if (kind === 'science' && !hub) {
@@ -156,6 +162,7 @@ export function buildingSpecs({ files, B, inDeg, hub: hubIdx, unit, kind, t01 })
     if (form === 'windmill') h = Math.max(b.h, unit * 2.2);
     if (form === 'cooling') h = Math.max(b.h, unit * 3.5);
     if (form === 'ferris') h = Math.max(b.h, unit * 3.2);
+    if (form === 'hut') h = Math.min(b.h, unit * 0.6);
     if (form === 'stall') h = Math.min(b.h, unit * 0.8);
     if (form === 'bigtop' || form === 'carousel') h = Math.min(b.h, Math.min(b.w, b.d) * (form === 'bigtop' ? 0.85 : 0.75)); // tents are squat
     if (form === 'datacenter' || form === 'greenhouse') h = Math.min(b.h, unit * 1.1);

@@ -22,7 +22,7 @@ if (args.includes('--help') || args.includes('-h')) {
   gitropolis [repo]                     open the city in your browser (repo defaults to .)
 
   --style pixel|maquette|plan|nocturne  look (default pixel)
-  --city auto|farm|desert|capital|mountain|university|port|industrial|science|themepark|smalltown|manhattan|hongkong|tokyo|la|paris|venice|barcelona
+  --city auto|farm|desert|capital|mountain|university|port|industrial|science|themepark|resort|smalltown|manhattan|hongkong|tokyo|la|paris|venice|barcelona
                                         city plan (default: picked from the code)
   --pixel <n>  --zoom <n>               art-pixel size (default 1, 2 for chunkier art), close-up factor
   --still <file.png> [--shot hero|aerial|street|plan] [--no-hud]
@@ -60,7 +60,7 @@ const headed = bool('--headed');
 const style = oneOf('--style', flag('--style', 'pixel'), ['pixel', 'maquette', 'plan', 'nocturne', 'neon']);
 const pxOpt = num('--pixel', flag('--pixel')); // pixel style: size of one art pixel (default 1; 2 for chunkier art)
 const zoomOpt = num('--zoom', flag('--zoom')); // close-up factor (pixel style)
-const cityOpt = oneOf('--city', flag('--city', 'auto'), ['auto', 'classic', 'farm', 'desert', 'capital', 'mountain', 'university', 'port', 'industrial', 'science', 'themepark',
+const cityOpt = oneOf('--city', flag('--city', 'auto'), ['auto', 'classic', 'farm', 'desert', 'capital', 'mountain', 'university', 'port', 'industrial', 'science', 'themepark', 'resort',
   'smalltown', 'manhattan', 'hongkong', 'tokyo', 'la', 'paris', 'venice', 'barcelona']);
 const card = flag('--card'); // a share card instead of a photo
 const cardShape = flag('--shape', 'landscape');

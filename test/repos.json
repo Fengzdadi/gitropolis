@@ -8,5 +8,6 @@
   { "repo": "terraform-aws-modules/terraform-aws-eks", "ref": "v21.29.0", "sha": "91f11ea01656c26b8e6b8eb1b74f19863f60056c" },
   { "repo": "jqlang/jq", "ref": "jq-1.8.2", "sha": "34f7186b86743a083a589741b6cea95293524108" },
   { "repo": "karpathy/nanoGPT", "ref": "master", "sha": "3adf61e154c3fe3fca428ad6bc3818b27a3b8291" },
-  { "repo": "a327ex/SNKRX", "ref": "master", "sha": "6b93a64d694d59472375467648868ae4521d6706" }
+  { "repo": "a327ex/SNKRX", "ref": "master", "sha": "6b93a64d694d59472375467648868ae4521d6706" },
+  { "repo": "flutter/gallery", "ref": "main", "sha": "d12640d4b08ee6e706fd8c64a83fba0620c9aa8d" }
 ]

@@ -24,7 +24,7 @@ function shortLabel(t) {
   return s.length > 22 ? s.slice(0, 21) + '…' : s;
 }
 
-export const CITY_KINDS = ['farm', 'desert', 'capital', 'mountain', 'university', 'port', 'industrial', 'science', 'themepark', 'smalltown', 'manhattan', 'hongkong', 'tokyo', 'la', 'paris', 'venice', 'barcelona'];
+export const CITY_KINDS = ['farm', 'desert', 'capital', 'mountain', 'university', 'port', 'industrial', 'science', 'themepark', 'resort', 'smalltown', 'manhattan', 'hongkong', 'tokyo', 'la', 'paris', 'venice', 'barcelona'];
 
 // ---------------------------------------------------------------- shared helpers
 
@@ -668,6 +668,47 @@ const PLANNERS = {
       land: [rectPoly(-R - 1.2, -R - 1.2, R + 1.2, R + 1.2)],
       camera: { az: 45, el: 32, dist: 0.9 },
       height: (i, rel) => i === ctx.hub ? r0 * 1.15 : Math.min(0.6 + 0.85 * Math.sqrt(rel), 3.2),
+    };
+  },
+
+  // a seaside resort (an app): the town in a strip behind the promenade, its tests and docs a row of
+  // beach huts on the sand, and the most-imported file the grand hotel out on its own island
+  resort(ds, ctx) {
+    const parts = ds.map(d => ({ d, items: d.items.filter(it => it.i !== ctx.hub) })).filter(x => x.items.length);
+    const town = parts.filter(x => !x.d.periphery), sand = parts.filter(x => x.d.periphery);
+    const tv = x => sum(x.items.map(it => it.a)) / 0.85;
+    const total = sum(town.map(tv)) || 4;
+    const W = Math.sqrt(total * 3.2), D = total / W; // a long seafront
+    const lots = [], blocks = [], labels = [];
+    if (town.length) {
+      const root = hierarchy({ children: town.map(x => ({ x, v: tv(x) })) }).sum(n => n.v || 0).sort((a, b) => b.value - a.value);
+      treemap().tile(treemapSquarify.ratio(1.2)).size([W, D]).paddingInner(0.35)(root);
+      for (const l of root.leaves()) {
+        const { d, items } = l.data.x;
+        blocks.push({ poly: rectPoly(l.x0, l.y0, l.x1, l.y1), type: ground(d) });
+        lots.push(...packRect(items, l.x0, l.y0, l.x1, l.y1, 0.1));
+        if (d.name !== '·') labels.push({ text: d.name, x: (l.x0 + l.x1) / 2, z: l.y0 - 0.4 });
+      }
+    }
+    // the beach: deep enough for its huts, which stand in loose rows along the sand
+    const huts = sand.flatMap(x => x.items), hutA = sum(huts.map(it => Math.min(it.a, 0.6)));
+    const z0 = D + 0.45, B = Math.max(1.6, hutA / 0.3 / W + 0.6);
+    blocks.push({ poly: rectPoly(-0.6, z0, W + 0.6, z0 + B), type: 'beach' });
+    if (huts.length) {
+      const rows = Math.max(1, Math.round(Math.sqrt(huts.length * (B - 0.6) / W))), cols = Math.ceil(huts.length / rows);
+      const cw = W / cols, cd = (B - 0.6) / rows, sq = Math.min(cw, cd) * 0.7;
+      huts.forEach((it, m) => lots.push({ i: it.i, x: (m % cols + 0.5) * cw, z: z0 + 0.15 + (Math.floor(m / cols) + 0.5) * cd, w: sq, d: sq, rot: 0 }));
+      for (const x of sand) if (x.d.name !== '·') { const at = huts.indexOf(x.items[0]); labels.push({ text: x.d.name, x: (at % cols + 0.5) * cw, z: z0 + B + 0.3 }); }
+    }
+    // the grand hotel's island, and the causeway out to it
+    const rI = clamp(Math.sqrt(total) * 0.12, 1.4, 5), iz = z0 + B + 1.6 + rI, ix = W * 0.62;
+    lots.push({ i: ctx.hub, x: ix, z: iz, w: rI * 1.2, d: rI * 1.2, rot: 0 });
+    return {
+      lots, blocks, labels, ground: 'water',
+      land: [rectPoly(-0.6, -0.6, W + 0.6, z0 + B), circlePoly(ix, iz, rI, 32)],
+      bridges: [{ a: [ix, z0 + B - 0.2], b: [ix, iz - rI + 0.2], w: 0.4 }],
+      camera: { az: 60, el: 26, dist: 0.95 },
+      height: (i, rel) => i === ctx.hub ? rI * 3.2 : Math.min(0.7 + 1.4 * Math.sqrt(rel), 7),
     };
   },
 

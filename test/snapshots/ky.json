@@ -10,7 +10,7 @@
     "score": 0.83,
     "reasons": ["a flat, gridded directory layout","31% of imports point at just 3 files","45% of all code lives in the biggest 5% of files"],
     "runnerUp": "tokyo",
-    "ranking": [["manhattan",0.83],["tokyo",0.5],["paris",0.45],["venice",0.43],["la",0.33],["barcelona",0.13],["hongkong",0.07],["farm",0],["desert",0],["capital",0],["mountain",0],["university",0],["port",0],["industrial",0],["themepark",0],["science",0],["smalltown",0]],
+    "ranking": [["manhattan",0.83],["tokyo",0.5],["paris",0.45],["venice",0.43],["la",0.33],["barcelona",0.13],["hongkong",0.07],["farm",0],["desert",0],["capital",0],["mountain",0],["university",0],["port",0],["industrial",0],["themepark",0],["resort",0],["science",0],["smalltown",0]],
     "states": [{"id":"boom","reason":"boomtown: 9.7× the usual commit rate lately"},{"id":"garden","reason":"garden city: 86% of the code is tests"}],
     "chip": false,
     "metrics": {
@@ -62,6 +62,8 @@
       "usedCore": true,
       "cShare": 0,
       "headers": 0,
+      "app": [],
+      "appShare": 0,
       "engine": null,
       "engineFiles": 0,
       "mlShare": 0,

@@ -10,7 +10,7 @@
     "score": 1,
     "reasons": ["2 empty directories of stairs up to gson/src/main/java/com/google/gson/","terraces 7.6 directories up"],
     "runnerUp": "paris",
-    "ranking": [["mountain",1],["paris",0.77],["tokyo",0.7],["manhattan",0.27],["la",0.27],["venice",0.17],["barcelona",0.15],["hongkong",0.04],["industrial",0.01],["farm",0],["desert",0],["capital",0],["university",0],["port",0],["themepark",0],["science",0],["smalltown",0]],
+    "ranking": [["mountain",1],["paris",0.77],["tokyo",0.7],["manhattan",0.27],["la",0.27],["venice",0.17],["barcelona",0.15],["hongkong",0.04],["industrial",0.01],["farm",0],["desert",0],["capital",0],["university",0],["port",0],["themepark",0],["resort",0],["science",0],["smalltown",0]],
     "states": [],
     "chip": false,
     "metrics": {
@@ -62,6 +62,8 @@
       "usedCore": true,
       "cShare": 0,
       "headers": 0,
+      "app": [],
+      "appShare": 0,
       "engine": null,
       "engineFiles": 0,
       "mlShare": 0,
