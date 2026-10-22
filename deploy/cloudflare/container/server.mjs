@@ -9,6 +9,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { SCANNER } from './version.mjs';
 
 const PORT = 8080;
 const CLONE_TIMEOUT = 90_000;
@@ -74,7 +75,7 @@ createServer(async (req, res) => {
   if (!job) return res.writeHead(503, { 'content-type': 'text/plain' }).end('busy');
   try {
     const json = await job;
-    res.writeHead(200, { 'content-type': 'application/json', 'x-scan-ms': String(Date.now() - t0) });
+    res.writeHead(200, { 'content-type': 'application/json', 'x-scan-ms': String(Date.now() - t0), 'x-scanner-version': String(SCANNER) });
     res.end(json);
   } catch (err) {
     console.error(`scan ${repo} failed: ${err.message}`);

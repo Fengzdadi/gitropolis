@@ -9,6 +9,7 @@
 import { Container } from '@cloudflare/containers';
 import puppeteer from '@cloudflare/puppeteer';
 import { badgeSVG } from './badge.js';
+import { SCANNER } from '../container/version.mjs';
 
 export class Scanner extends Container {
   defaultPort = 8080;
@@ -18,7 +19,6 @@ export class Scanner extends Container {
 const NAME = /^[A-Za-z0-9_.-]{1,100}$/;
 const POOL = 3;               // scanners; one repo always goes to the same one, so it's scanned once
 const MAX_KB = 600_000;       // GitHub's repo size (pack size, KB): bigger repos are turned away
-const SCANNER = 3;            // bump when the scanner changes what it finds: cities are cached per version
 // the container gives up on its own (a slow clone or scan, too many waiting); this is for one that never answers
 const SCAN_WAIT = 12 * 60_000;
 const json = (status, body, headers = {}) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json', ...headers } });
@@ -71,6 +71,8 @@ async function city(owner, repo, req, env, ctx) {
   if (res.status === 503) return json(503, { error: 'every city builder is busy — try again in a few minutes' }, { 'retry-after': '120' });
   if (!res.ok) return json(502, { error: `couldn't build the city: ${(await res.text()).slice(0, 300)}` });
   const body = await res.text();
+  // a container still on the image from before a deploy: its city is shown, but not kept as this version's
+  if (res.headers.get('x-scanner-version') !== String(SCANNER)) return new Response(body, { headers: { 'content-type': 'application/json', 'x-city-cache': 'old-scanner', ...headers, 'cache-control': 'no-store' } });
   // keep the city, then its summary and its share card (which reads the city back through the API)
   ctx.waitUntil((async () => {
     await env.CITIES.put(key, body, { httpMetadata: { contentType: 'application/json' }, customMetadata: { stars: String(info.stars) } });
