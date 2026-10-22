@@ -177,6 +177,28 @@ renderer.setSize(viewW(), viewH(), !REC);
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 1.0;
 document.body.prepend(renderer.domElement);
+// A phone that sends the tab to the background (or a GPU reset) can take the WebGL context away. The
+// city's geometry lives only on the GPU once uploaded (see buildCityMesh), so it can't be put back as
+// it was: reload the page instead, once it's in view again (but not round and round).
+renderer.domElement.addEventListener('webglcontextlost', () => {
+  if (REC) return fail('the browser lost the WebGL context');
+  let last = 0;
+  try { last = +sessionStorage.getItem('gitropolis.lost') || 0; } catch { /* no storage: reload anyway */ }
+  if (Date.now() - last < 15_000) {
+    const n = document.getElementById('note');
+    n.textContent = 'the graphics card keeps resetting — reload the page to see the city again';
+    n.classList.add('show');
+    return;
+  }
+  const reload = () => {
+    if (document.hidden) return;
+    try { sessionStorage.setItem('gitropolis.lost', String(Date.now())); } catch { /* as above */ }
+    location.reload();
+  };
+  renderer.domElement.addEventListener('webglcontextrestored', reload);
+  document.addEventListener('visibilitychange', () => setTimeout(reload, 500));
+  setTimeout(reload, 1000);
+});
 
 const scene = new THREE.Scene();
 const FOG = new THREE.Color(0.055, 0.02, 0.1);
