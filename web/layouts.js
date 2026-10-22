@@ -558,7 +558,7 @@ const PLANNERS = {
   industrial(ds, ctx) {
     const items = ds.map(d => ({ d, items: d.items.filter(it => it.i !== ctx.hub) })).filter(x => x.items.length)
       .map(x => ({ ...x, v: sum(x.items.map(it => it.a)) * 1.12 + 1 })); // a little room to load; packRect's padding does the rest
-    const total = sum(items.map(x => x.v)), W = Math.sqrt(total * 2.4), C = 2.4; // C: the canal and its two quays
+    const total = sum(items.map(x => x.v)), W = Math.max(2, Math.sqrt(total * 2.4)), C = 2.4; // C: the canal and its two quays (W: never zero, even when the hub is the only file)
     // biggest compounds first, each to the lighter bank, so the two banks come out even
     const banks = [[], []], load = [0, 0];
     for (const x of [...items].sort((a, b) => b.v - a.v)) { const k = load[0] <= load[1] ? 0 : 1; banks[k].push(x); load[k] += x.v; }
@@ -602,7 +602,7 @@ const PLANNERS = {
     const lake = { lake: true, v: A * 0.14 + 6 }, ring = { ring: true, v: Math.max(8, A * 0.07) }; // both grow with the park
     // the lake goes in first, so it's the middle of the park, and the ring building beside it
     const root = hierarchy({ children: [lake, ring, ...plots.sort((a, b) => b.v - a.v)] }).sum(x => x.v || 0);
-    const S0 = Math.sqrt(A) * 1.5;
+    const S0 = Math.max(4, Math.sqrt(A) * 1.5); // a park of just its ring building still has room for the lake
     pack().size([S0, S0]).padding(0.5)(root);
     let k = 1; // scale so each institute's square of labs fits inside its lawn
     for (const l of root.leaves()) if (l.data.d) k = Math.max(k, Math.sqrt(l.data.v * FILL / (2 * 0.5 * l.r * l.r)));

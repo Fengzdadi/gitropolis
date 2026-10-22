@@ -991,9 +991,8 @@ function buildCooling(M, S) {
   const prof = [[0, 1], [0.22, 0.9], [0.45, 0.78], [0.68, 0.7], [0.85, 0.73], [1, 0.8]];
   M.box(-w / 2, w / 2, 0, u * 0.03, -d / 2, d / 2, [POD, S.base], [POD, rgb(S.P.concrete[2])]);
   // a real cooling tower is about as tall as 1.3 times its base is wide
-  const R = u * 0.3;
-  for (const [cx, cz, r, Ht] of [[-w * 0.17, -d * 0.12, R, Math.min(h, R * 2.7)], [w * 0.27, d * 0.25, R * 0.72, Math.min(h, R * 2.7) * 0.78]]) {
-    const R = r;
+  const R0 = u * 0.3;
+  for (const [cx, cz, R, Ht] of [[-w * 0.17, -d * 0.12, R0, Math.min(h, R0 * 2.7)], [w * 0.27, d * 0.25, R0 * 0.72, Math.min(h, R0 * 2.7) * 0.78]]) {
     M.loft(cx, cz, prof.map(([f, k]) => [Ht * f, R * k, R * k]), 12, [TRIM, conc], { cap: [TRIM, S.dark] });
     M.loft(cx, cz, [[Ht, R * 0.8, R * 0.8], [Ht + R * 0.06, R * 0.84, R * 0.84]], 12, [TRIM, S.steel]);
     let py = Ht + R * 0.1;
