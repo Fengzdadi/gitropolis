@@ -19,6 +19,8 @@ const NAME = /^[A-Za-z0-9_.-]{1,100}$/;
 const POOL = 3;               // scanners; one repo always goes to the same one, so it's scanned once
 const MAX_KB = 600_000;       // GitHub's repo size (pack size, KB): bigger repos are turned away
 const SCANNER = 2;            // bump when the scanner changes what it finds: cities are cached per version
+// the container gives up on its own (a slow clone or scan, too many waiting); this is for one that never answers
+const SCAN_WAIT = 12 * 60_000;
 const json = (status, body, headers = {}) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json', ...headers } });
 
 // default branch, its head commit and the repo's size, from GitHub (cached for ten minutes)
@@ -59,7 +61,14 @@ async function city(owner, repo, req, env, ctx) {
   const ip = req.headers.get('cf-connecting-ip') || 'unknown';
   if (env.SCAN_LIMIT && !(await env.SCAN_LIMIT.limit({ key: ip })).success) return json(429, { error: 'too many new cities at once — try again in a minute' });
   const scanner = env.SCANNER.getByName(slot(info.full.toLowerCase()));
-  const res = await scanner.fetch(`http://scanner/scan?repo=${encodeURIComponent(info.full)}`);
+  let res;
+  try {
+    res = await Promise.race([
+      scanner.fetch(`http://scanner/scan?repo=${encodeURIComponent(info.full)}`),
+      new Promise((_, reject) => setTimeout(() => reject(new Error('the scanner took too long to answer')), SCAN_WAIT)),
+    ]);
+  } catch (err) { return json(502, { error: `couldn't build the city: ${err.message}` }); }
+  if (res.status === 503) return json(503, { error: 'every city builder is busy — try again in a few minutes' }, { 'retry-after': '120' });
   if (!res.ok) return json(502, { error: `couldn't build the city: ${(await res.text()).slice(0, 300)}` });
   const body = await res.text();
   // keep the city, then its summary and its share card (which reads the city back through the API)
@@ -71,9 +80,11 @@ async function city(owner, repo, req, env, ctx) {
   return new Response(body, { headers: { 'content-type': 'application/json', 'x-city-cache': 'miss', ...headers } });
 }
 
-const CARD = 1;               // bump when the card's look changes
+const CARD = 2;               // bump when the card's look (or its encoding) changes
 const esc = t => t.replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
-const cardKey = info => `cards/v${SCANNER}.${CARD}/${info.full.toLowerCase()}/${info.sha}.png`;
+const cardKey = (info, v = CARD) => `cards/v${SCANNER}.${v}/${info.full.toLowerCase()}/${info.sha}.png`;
+const cityKey = info => `cities/v${SCANNER}/${info.full.toLowerCase()}/${info.sha}.json`;
+const sleep = ms => new Promise(r => setTimeout(r, ms));
 
 // Draw a repo's share card: the page itself, in a headless browser, in its ?card=og mode. Kept in R2.
 async function renderCard(info, origin, env) {
@@ -93,15 +104,23 @@ async function renderCard(info, origin, env) {
   }
 }
 
+// One drawing per repo and commit at a time: a link posted in a chat brings several preview crawlers
+// at once, and each would otherwise start a headless browser of its own. The card, BUSY when it's
+// already being drawn, or null when it couldn't be. (The mark is in this data centre's cache, so
+// crawlers arriving through different data centres can still each draw one.)
+const BUSY = Symbol('busy');
+async function drawOnce(info, origin, env) {
+  const busy = new Request(`https://card.busy/${info.full.toLowerCase()}/${info.sha}`);
+  if (await caches.default.match(busy)) return BUSY;
+  await caches.default.put(busy, new Response('1', { headers: { 'cache-control': 'max-age=90' } }));
+  try { return await renderCard(info, origin, env); } catch (err) { console.log('card failed', info.full, String(err)); return null; }
+}
+
 // Link-preview crawlers don't wait long, and one that times out remembers "no picture" for days. So a
 // card is drawn ahead of time: as soon as a city is built, or when a city built before cards existed
-// is next opened (once at a time per repo and commit).
+// is next opened.
 async function prepareCard(info, origin, env) {
-  if (!env.BROWSER || await env.CITIES.head(cardKey(info))) return;
-  const busy = new Request(`https://card.busy/${info.full.toLowerCase()}/${info.sha}`);
-  if (await caches.default.match(busy)) return;
-  await caches.default.put(busy, new Response('1', { headers: { 'cache-control': 'max-age=90' } }));
-  try { await renderCard(info, origin, env); } catch (err) { console.log('card failed', info.full, String(err)); }
+  if (env.BROWSER && !(await env.CITIES.head(cardKey(info)))) await drawOnce(info, origin, env);
 }
 
 // /api/card/owner/repo.png: the share card for a repo's current commit. Only cities that have been
@@ -115,35 +134,57 @@ async function card(owner, repo, req, env, ctx) {
   const headers = { 'content-type': 'image/png', 'cache-control': 'public, max-age=3600' };
   const hit = await env.CITIES.get(cardKey(info));
   if (hit) return new Response(hit.body, { headers });
-  if (!env.BROWSER || !(await env.CITIES.head(`cities/v${SCANNER}/${info.full.toLowerCase()}/${info.sha}.json`))) return fallback();
-  try { return new Response(await renderCard(info, req.url, env), { headers }); }
-  catch (err) { console.log('card failed', info.full, String(err)); return fallback(); }
+  if (!env.BROWSER || !(await env.CITIES.head(cityKey(info)))) return fallback();
+  // a card drawn before its look last changed stands in, briefly, while the new one is drawn
+  const old = await env.CITIES.get(cardKey(info, CARD - 1));
+  if (old) {
+    ctx.waitUntil(prepareCard(info, req.url, env));
+    return new Response(old.body, { headers: { ...headers, 'cache-control': 'public, max-age=600' } });
+  }
+  let png = await drawOnce(info, req.url, env);
+  // someone else is drawing it: wait for it to land rather than draw it again
+  for (let i = 0; png === BUSY && i < 12; i++) {
+    await sleep(2000);
+    const done = await env.CITIES.get(cardKey(info));
+    if (done) png = await done.arrayBuffer();
+  }
+  return png && png !== BUSY ? new Response(png, { headers }) : fallback();
 }
 
-// what a badge needs to know about a built city, kept beside it (a city file can run to megabytes)
+// what a badge needs to know about a built city, kept beside it (a city file can run to megabytes),
+// and again as the repo's latest, which a badge can read without asking GitHub for the head commit
 const summaryKey = info => `meta/v${SCANNER}/${info.full.toLowerCase()}/${info.sha}.json`;
+const latestKey = full => `meta/v${SCANNER}/${full.toLowerCase()}/latest.json`;
+const putJSON = (env, key, value) => env.CITIES.put(key, JSON.stringify(value), { httpMetadata: { contentType: 'application/json' } });
 async function saveSummary(env, info, body) {
   const city = JSON.parse(body);
   const summary = { kind: city.identity?.city || 'smalltown', buildings: city.files?.length || 0 };
-  await env.CITIES.put(summaryKey(info), JSON.stringify(summary), { httpMetadata: { contentType: 'application/json' } });
+  await Promise.all([putJSON(env, summaryKey(info), summary), putJSON(env, latestKey(info.full), summary)]);
   return summary;
 }
 async function summary(env, info) {
   const hit = await env.CITIES.get(summaryKey(info));
   if (hit) return hit.json();
-  const city = await env.CITIES.get(`cities/v${SCANNER}/${info.full.toLowerCase()}/${info.sha}.json`);
+  const city = await env.CITIES.get(cityKey(info));
   return city ? saveSummary(env, info, await city.text()) : null; // cities built before summaries existed
 }
 
 // /owner/repo/badge.svg[?style=pixel|card]: for READMEs. Never sets off a scan: a repo that hasn't
-// been built says "see the city" instead of what it's built like.
+// been built says "see the city" instead of what it's built like. Badges are fetched far more often
+// than cities are opened, so they show the last city built (a repo's type rarely changes between
+// commits) and only ask GitHub when there's none on record yet.
 async function badge(owner, repo, url, env, ctx) {
   const style = url.searchParams.get('style');
   let city = null;
   if (NAME.test(owner) && NAME.test(repo)) {
     try {
-      const info = await lookup(owner, repo, env, ctx);
-      if (!info.missing && !info.private) city = await summary(env, info);
+      const latest = await env.CITIES.get(latestKey(`${owner}/${repo}`));
+      if (latest) city = await latest.json();
+      else {
+        const info = await lookup(owner, repo, env, ctx);
+        if (!info.missing && !info.private) city = await summary(env, info);
+        if (city) ctx.waitUntil(putJSON(env, latestKey(info.full), city)); // built before latest existed
+      }
     } catch { /* GitHub or R2 hiccup: the plain badge */ }
   }
   // GitHub's image proxy keeps it for a while; an hour keeps badges current after new commits

@@ -5,7 +5,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends git ca-certific
 WORKDIR /app
 COPY package.json ./
 COPY src ./src
-COPY deploy/cloudflare/container/server.mjs ./container/server.mjs
+COPY deploy/cloudflare/container/*.mjs ./container/
 # scans run as an unprivileged user
 RUN useradd -m scanner
 USER scanner
