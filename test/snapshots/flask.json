@@ -10,7 +10,7 @@
     "score": 0.92,
     "reasons": ["15 years of history","avenues radiating from one centre","buildings of a fairly even height"],
     "runnerUp": "smalltown",
-    "ranking": [["paris",0.92],["smalltown",0.6],["manhattan",0.6],["mountain",0.5],["venice",0.43],["tokyo",0.42],["industrial",0.18],["hongkong",0.1],["barcelona",0.07],["la",0.06],["farm",0],["desert",0],["capital",0],["university",0],["port",0]],
+    "ranking": [["paris",0.92],["smalltown",0.6],["manhattan",0.6],["mountain",0.5],["venice",0.43],["tokyo",0.42],["industrial",0.18],["hongkong",0.1],["barcelona",0.07],["la",0.06],["farm",0],["desert",0],["capital",0],["university",0],["port",0],["science",0]],
     "states": [{"id":"maze","reason":"old medina: 80% of files sit in import cycles"}],
     "chip": false,
     "metrics": {
@@ -61,7 +61,10 @@
       "infraKinds": [],
       "usedCore": true,
       "cShare": 0,
-      "headers": 0
+      "headers": 0,
+      "mlShare": 0,
+      "mlFiles": 0,
+      "trainFiles": 0
     }
   },
   "commits": {"count":1935,"digest":"05ed2d027835eba0"},

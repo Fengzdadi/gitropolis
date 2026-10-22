@@ -16,6 +16,8 @@ const GROUP_RE = /^(packages|apps|libs|crates|modules|plugins|services|projects)
 // tests, docs, examples, fixtures… are part of the city, but they don't decide which city it is
 const NONCORE_RE = /(^|\/)(tests?|__tests__|specs?|e2e|testing|fixtures?|__fixtures__|samples?|examples?|docs?|playground|benchmarks?|bench|scripts|website|site|\.github)(\/|$)|(^|\/)src\/\w*Test\w*\/|\.(test|spec|stories)\.[a-z]+$|_test\.(go|py|rs)$|(^|\/)test_[^/]+\.py$/;
 
+// a training run, a fine-tune: the science park's data centres
+export const TRAIN_RE = /(^|\/)(train|finetune|fine_tune|pretrain)[^/]*\.(py|c|cu)$/i;
 const ramp = (x, a, b) => Math.min(1, Math.max(0, (x - a) / (b - a)));
 const sum = xs => xs.reduce((s, x) => s + x, 0);
 const mean = xs => xs.length ? sum(xs) / xs.length : 0;
@@ -36,6 +38,8 @@ export function cityMetrics(city, now = Date.now() / 1000) {
   const farmCount = l => farmIdx.filter(i => all[i].lang === l).length;
   // the factory town: how much of the code is C, C++ or Zig (CUDA kernels are model code: they make a campus)
   const cIdx = plainIdx.filter(i => ['c', 'cpp', 'zig'].includes(all[i].lang) && all[i].g !== 'ml');
+  // the science park: model code (torch, jax and the like, and CUDA kernels; the scanner marks it)
+  const mlIdx = plainIdx.filter(i => all[i].g === 'ml');
   // in a port the infrastructure *is* the codebase, in a university the pages are; anywhere else they don't shape the city
   const isPort = infraLoc / workLoc >= 0.5 && infraIdx.length >= 8;
   const isCampus = !isPort && proseLoc / workLoc >= 0.5 && proseIdx.length >= 10;
@@ -240,6 +244,9 @@ export function cityMetrics(city, now = Date.now() / 1000) {
     usedCore: useCore,
     cShare: sum(cIdx.map(i => all[i].loc)) / Math.max(1, codeLoc),
     headers: cIdx.filter(i => /\.(h|hh|hpp|hxx)$/.test(all[i].p)).length,
+    mlShare: sum(mlIdx.map(i => all[i].loc)) / Math.max(1, codeLoc),
+    mlFiles: mlIdx.length,
+    trainFiles: mlIdx.filter(i => TRAIN_RE.test(all[i].p)).length,
   };
 }
 
@@ -279,6 +286,10 @@ const ARCHETYPES = {
     [ramp(m.cShare, 0.4, 0.7), `${pct(m.cShare)} of it is C and C++: works, not storefronts`],
     [ramp(m.headers, 5, 60), `${m.headers} headers stacked in the warehouses`],
     [ramp(m.medianLoc, 80, 250), `heavy machinery: the median file is ${m.medianLoc} lines`],
+  ],
+  science: m => [
+    [ramp(m.mlShare, 0.2, 0.5), `${pct(m.mlShare)} of the code trains or runs models`],
+    [ramp(m.mlFiles, 3, 40), `${m.mlFiles} labs${m.trainFiles ? `, ${m.trainFiles} of them data centres running training` : ''}`],
   ],
   smalltown: m => [
     [1 - ramp(m.files, 15, 40), `only ${m.files} file${m.files === 1 ? "" : "s"} — one main street`],
@@ -332,7 +343,7 @@ const STATES = {
 };
 
 export const CITY_NAMES = {
-  farm: 'Farm Village', desert: 'Desert Boomtown', industrial: 'Factory Town', capital: 'Planned Capital', mountain: 'Mountain City', university: 'University Town', port: 'Port City', smalltown: 'Small Town', manhattan: 'Manhattan', hongkong: 'Hong Kong', tokyo: 'Tokyo',
+  farm: 'Farm Village', desert: 'Desert Boomtown', industrial: 'Factory Town', science: 'Science Park', capital: 'Planned Capital', mountain: 'Mountain City', university: 'University Town', port: 'Port City', smalltown: 'Small Town', manhattan: 'Manhattan', hongkong: 'Hong Kong', tokyo: 'Tokyo',
   la: 'Los Angeles', paris: 'Paris', venice: 'Venice', barcelona: 'Barcelona',
 };
 
@@ -348,6 +359,7 @@ export function classify(city) {
     : m.proseShare >= 0.5 && m.proseFiles >= 10 ? scored.find(s => s.id === 'university')
     : m.farmShare >= 0.4 && m.farmFiles >= 10 ? scored.find(s => s.id === 'farm')
     // what the code is made of decides before how old it is: a young C project is a factory town
+    : m.mlShare >= 0.35 && m.mlFiles >= 3 ? scored.find(s => s.id === 'science')
     : m.cShare >= 0.6 && m.files >= 20 ? scored.find(s => s.id === 'industrial')
     // a big city out of nothing in under two years is a boomtown, whatever its streets look like
     : m.ageYears < 2 && m.commitsPerWeek >= 15 && m.files >= 150 ? scored.find(s => s.id === 'desert')

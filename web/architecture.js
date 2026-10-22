@@ -4,6 +4,8 @@ import * as THREE from 'three';
 import { addFacadeDetail } from './surfaces.js';
 
 const PERIPHERY = /(^|\/)(tests?|__tests__|specs?|e2e|fixtures?|samples?|examples?|docs?|playgrounds?|templates?|benchmarks?)(\/|$)/;
+// a training run, a fine-tune (as the classifier counts them)
+const TRAIN_RE = /(^|\/)(train|finetune|fine_tune|pretrain)[^/]*\.(py|c|cu)$/i;
 const ROOF_BY_CITY = { farm: 'gable', port: 'flat', paris: 'mansard', smalltown: 'gable', la: 'flat', venice: 'hip', barcelona: 'flat' };
 // each language builds in its own vernacular
 // kinds of infrastructure as code → port industry (Terraform is decided by size: plant or factory)
@@ -110,7 +112,7 @@ export function buildingSpecs({ files, B, inDeg, hub: hubIdx, unit, kind, t01 })
     const hub = i === hubIdx;
     const status = new Set(f.s || []);
     if (status.has('giant') && role === 'source') form = 'mega';
-    else if (hub) form = town ? 'clocktower' : kind === 'port' ? 'lighthouse' : kind === 'university' ? 'library' : kind === 'capital' ? 'congress' : kind === 'desert' ? 'needle' : kind === 'farm' ? 'windmill' : kind === 'industrial' ? 'cooling' : (a.c || 0) >= 2 ? 'setback' : 'tower';
+    else if (hub) form = town ? 'clocktower' : kind === 'port' ? 'lighthouse' : kind === 'university' ? 'library' : kind === 'capital' ? 'congress' : kind === 'desert' ? 'needle' : kind === 'farm' ? 'windmill' : kind === 'industrial' ? 'cooling' : kind === 'science' ? 'ring' : (a.c || 0) >= 2 ? 'setback' : 'tower';
     else if (kind === 'capital' && i === entry) form = 'cathedral'; // the file that imports the most: where the plan is read from
     else if (status.has('dead')) form = 'ruin';
     else if (sites.has(i)) form = 'site';
@@ -127,6 +129,13 @@ export function buildingSpecs({ files, B, inDeg, hub: hubIdx, unit, kind, t01 })
       else if (form === 'house') form = 'shed';
       else if (form === 'mega') form = 'plant';
     }
+    // the science park: code works in glass labs, training runs (and giants) in data centres, and the
+    // tests are the greenhouses the experiments grow in
+    if (kind === 'science' && !hub) {
+      if (role === 'test') form = 'greenhouse';
+      else if (role !== 'docs' && (TRAIN_RE.test(f.p) || form === 'mega')) form = 'datacenter';
+      else if (role !== 'docs' && ['slab', 'tower', 'setback', 'podium', 'hall', 'frame', 'house'].includes(form)) form = 'lab';
+    }
     const era = town && hub ? 'old' : bornRank[i] < 0.34 ? 'old' : bornRank[i] < 0.67 ? 'mid' : 'new';
     const LOW = { house: 1.1, shed: 1.4, hall: 1.4, plant: 1.4, cityhall: 1.8, courthouse: 1.4, port: 0.6, airport: 0.9, containers: 0.5, tanks: 0.7, warehouse: 0.8 };
     let h = LOW[form] ? Math.min(b.h, unit * LOW[form]) : b.h;
@@ -137,6 +146,7 @@ export function buildingSpecs({ files, B, inDeg, hub: hubIdx, unit, kind, t01 })
     if (form === 'needle') h = Math.max(b.h, unit * 8);
     if (form === 'windmill') h = Math.max(b.h, unit * 2.2);
     if (form === 'cooling') h = Math.max(b.h, unit * 3.5);
+    if (form === 'datacenter' || form === 'greenhouse') h = Math.min(b.h, unit * 1.1);
     if (form === 'cathedral') h = Math.max(b.h * 0.8, unit * 1.3);
     if (form === 'ruin') h *= 0.6;
     if (form === 'site') h *= 0.35;

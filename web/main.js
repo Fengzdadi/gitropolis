@@ -798,7 +798,7 @@ if (route) {
   $('#hud h1').replaceChildren(a);
   $('#gh-repo').href = gh; $('#gh-repo').hidden = false; $('#another').hidden = false;
 }
-const CITY_PHRASE = { farm: 'a farm village', desert: 'a desert boomtown', industrial: 'a factory town', capital: 'a planned capital', mountain: 'a mountain city', university: 'a university town', port: 'a port city', smalltown: 'a small town', manhattan: 'Manhattan', hongkong: 'Hong Kong', tokyo: 'Tokyo', la: 'Los Angeles', paris: 'Paris', venice: 'Venice', barcelona: 'Barcelona' };
+const CITY_PHRASE = { farm: 'a farm village', desert: 'a desert boomtown', industrial: 'a factory town', science: 'a science park', capital: 'a planned capital', mountain: 'a mountain city', university: 'a university town', port: 'a port city', smalltown: 'a small town', manhattan: 'Manhattan', hongkong: 'Hong Kong', tokyo: 'Tokyo', la: 'Los Angeles', paris: 'Paris', venice: 'Venice', barcelona: 'Barcelona' };
 const shareLink = route ? `https://gitropolis.dev/${route[1]}/${route[2]}` : 'https://gitropolis.dev';
 $('#share').onclick = async () => {
   if (!pix || !layout) { // share cards are drawn in the pixel style; elsewhere, the link

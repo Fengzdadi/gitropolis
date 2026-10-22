@@ -24,7 +24,7 @@ function shortLabel(t) {
   return s.length > 22 ? s.slice(0, 21) + '…' : s;
 }
 
-export const CITY_KINDS = ['farm', 'desert', 'capital', 'mountain', 'university', 'port', 'industrial', 'smalltown', 'manhattan', 'hongkong', 'tokyo', 'la', 'paris', 'venice', 'barcelona'];
+export const CITY_KINDS = ['farm', 'desert', 'capital', 'mountain', 'university', 'port', 'industrial', 'science', 'smalltown', 'manhattan', 'hongkong', 'tokyo', 'la', 'paris', 'venice', 'barcelona'];
 
 // ---------------------------------------------------------------- shared helpers
 
@@ -589,6 +589,41 @@ const PLANNERS = {
       camera: { az: 125, el: 26, dist: 0.9 },
       // works are low and wide; their chimneys and the cooling tower give the skyline
       height: (i, rel) => i === ctx.hub ? pad * 0.9 : Math.min(0.55 + 0.75 * Math.sqrt(rel), 2.6),
+    };
+  },
+
+  // a science park (model code): institutes on round lawns around a lake, footpaths between them and no
+  // traffic. The most-imported file is the ring building, beside the lake
+  science(ds, ctx) {
+    const FILL = 0.5; // a lab stands in its own grounds
+    const plots = ds.map(d => ({ d, items: d.items.filter(it => it.i !== ctx.hub) })).filter(x => x.items.length)
+      .map(x => ({ ...x, v: sum(x.items.map(it => it.a)) / FILL }));
+    const A = sum(plots.map(p => p.v));
+    const lake = { lake: true, v: A * 0.14 + 6 }, ring = { ring: true, v: Math.max(8, A * 0.07) }; // both grow with the park
+    // the lake goes in first, so it's the middle of the park, and the ring building beside it
+    const root = hierarchy({ children: [lake, ring, ...plots.sort((a, b) => b.v - a.v)] }).sum(x => x.v || 0);
+    const S0 = Math.sqrt(A) * 1.5;
+    pack().size([S0, S0]).padding(0.5)(root);
+    let k = 1; // scale so each institute's square of labs fits inside its lawn
+    for (const l of root.leaves()) if (l.data.d) k = Math.max(k, Math.sqrt(l.data.v * FILL / (2 * 0.5 * l.r * l.r)));
+    const lots = [], blocks = [], labels = [], water = [];
+    let x0 = Infinity, x1 = -Infinity, z0 = Infinity, z1 = -Infinity;
+    for (const l of root.leaves()) {
+      const q = l.data, cx = l.x * k, cz = l.y * k, R = l.r * k;
+      x0 = Math.min(x0, cx - R); x1 = Math.max(x1, cx + R); z0 = Math.min(z0, cz - R); z1 = Math.max(z1, cz + R);
+      if (q.lake) { water.push(circlePoly(cx, cz, R * 0.94, 48)); continue; }
+      blocks.push({ poly: circlePoly(cx, cz, R, 40), type: q.d?.periphery ? 'park' : 'lawn' });
+      if (q.ring) { lots.push({ i: ctx.hub, x: cx, z: cz, w: R * 1.45, d: R * 1.45, rot: 0 }); continue; }
+      // the labs fill a square sized to them, in the middle of their lawn (not a corner of a bigger one)
+      const s = Math.min(R * 0.7, Math.sqrt(sum(q.items.map(it => it.a)) / 0.62) / 2);
+      lots.push(...packRect(q.items, cx - s, cz - s, cx + s, cz + s, 0.24));
+      if (q.d.name !== '·') labels.push({ text: q.d.name, x: cx, z: cz + R + 0.4 });
+    }
+    return {
+      lots, blocks, labels, water, ground: 'land', paths: 'paved',
+      land: [rectPoly(x0 - 1, z0 - 1, x1 + 1, z1 + 1)],
+      camera: { az: 45, el: 30, dist: 0.95 },
+      height: (i, rel) => i === ctx.hub ? 1.1 : Math.min(0.5 + 0.55 * Math.sqrt(rel), 2),
     };
   },
 

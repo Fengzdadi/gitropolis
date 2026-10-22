@@ -174,7 +174,7 @@ Filming runs in headless Chrome, so it looks the same on every machine. It needs
 
 | Option | Default | |
 |---|---|---|
-| `--city <plan>` | `auto` | `farm` `desert` `capital` `mountain` `university` `port` `industrial` `smalltown` `manhattan` `hongkong` `tokyo` `la` `paris` `venice` `barcelona` |
+| `--city <plan>` | `auto` | `farm` `desert` `capital` `mountain` `university` `port` `industrial` `science` `smalltown` `manhattan` `hongkong` `tokyo` `la` `paris` `venice` `barcelona` |
 | `--style <look>` | `pixel` | `maquette` `plan` `nocturne` are smooth-shaded alternatives |
 | `--pixel <n>` | `1` | size of one art pixel, in screen pixels (`2` for chunkier art) |
 | `--zoom <n>` | `1` | close-up factor; `3` frames the city centre |

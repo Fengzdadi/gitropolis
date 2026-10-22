@@ -1006,6 +1006,74 @@ function buildCooling(M, S) {
   return null;
 }
 
+// ------------------------------------------------------------ the science park
+// a lab: glass floors behind white fins on the two faces the camera sees, plant on the roof
+function buildLab(M, S) {
+  const { w, d, h, u, rng } = S;
+  const glass = rgb(S.P.glass[rng() < 0.5 ? 0 : 1]), white = S.white, e = u * 0.035;
+  const floors = clamp(Math.round(h / (u * 0.36)), 1, 4), fh = h / floors, slab = fh * 0.14;
+  M.box(-w / 2, w / 2, 0, slab, -d / 2, d / 2, [POD, S.base], [POD, S.base]);
+  for (let k = 0; k < floors; k++) {
+    const y0 = k * fh + (k ? 0 : slab), y1 = (k + 1) * fh - slab;
+    M.box(-w / 2 + e, w / 2 - e, y0, y1, -d / 2 + e, d / 2 - e, [GLASS, glass], null, ['top']);
+    M.box(-w / 2, w / 2, y1, y1 + slab, -d / 2, d / 2, [TRIM, white], [ROOF, white]);
+  }
+  const nx = clamp(Math.round(w / (u * 0.2)), 3, 16), nz = clamp(Math.round(d / (u * 0.2)), 3, 16);
+  for (let i = 1; i < nx; i++) { const x = -w / 2 + i * w / nx; M.box(x - e * 0.35, x + e * 0.35, slab, h, d / 2 - e, d / 2 + e * 0.5, [TRIM, white], [TRIM, white]); }
+  for (let i = 1; i < nz; i++) { const z = -d / 2 + i * d / nz; M.box(w / 2 - e, w / 2 + e * 0.5, slab, h, z - e * 0.35, z + e * 0.35, [TRIM, white], [TRIM, white]); }
+  M.box(-w * 0.28, w * 0.12, h, h + u * 0.13, -d * 0.22, d * 0.14, [TRIM, S.alu], [ROOF, rgb(S.P.metal[0])]);
+  if (rng() < 0.3) M.loft(w * 0.28, -d * 0.24, [[h, u * 0.07, u * 0.07], [h + u * 0.16, u * 0.07, u * 0.07]], 8, [TRIM, S.alu], { cap: [ROOF, S.white] });
+  return { cx: -w * 0.08, cz: -d * 0.04, w: w * 0.4, d: d * 0.36, y: h + u * 0.13, flat: true };
+}
+
+// a data centre, where the training runs: a long blind hall in a coloured band, fans along the roof
+function buildDatacenter(M, S) {
+  const { w, d, h, u } = S;
+  const wallC = rgb(S.P.concrete[3]), band = S.accent, dark = S.dark, e = u * 0.03;
+  M.box(-w / 2, w / 2, 0, h, -d / 2, d / 2, [WALL, wallC], [ROOF, rgb(S.P.metal[0])]);
+  M.box(-w / 2 - e, w / 2 + e, h * 0.62, h * 0.74, -d / 2 - e, d / 2 + e, [ACC, band], [ACC, band]);
+  M.box(-w * 0.12, w * 0.12, 0, h * 0.42, d / 2, d / 2 + e, [TRIM, dark], [TRIM, dark]); // loading door
+  const alongX = w >= d, L = alongX ? w : d, n = clamp(Math.round(L / (u * 0.28)), 2, 12), r = Math.min(u * 0.1, L / n * 0.36);
+  for (let i = 0; i < n; i++) {
+    const t = -L / 2 + (i + 0.5) * L / n, x = alongX ? t : 0, z = alongX ? 0 : t;
+    M.loft(x, z, [[h, r, r], [h + r * 0.6, r, r]], 8, [TRIM, S.alu], { cap: [TRIM, dark] });
+  }
+  return null;
+}
+
+// a greenhouse, where the experiments (tests) grow: glass walls and a glass ridge roof on a white frame
+function buildGreenhouse(M, S) {
+  const { w, d, h, u } = S;
+  const glass = rgb(S.P.glass[0]), white = S.white, e = u * 0.025;
+  const alongX = w >= d, L = alongX ? w : d, W = alongX ? d : w, wallH = h * 0.6, rise = Math.min(W * 0.4, h * 0.4);
+  M.swap = !alongX;
+  M.box(-L / 2, L / 2, 0, e * 2, -W / 2, W / 2, [POD, S.base], [POD, S.base]);
+  M.box(-L / 2, L / 2, e * 2, wallH, -W / 2, W / 2, [GLASS, glass], null, ['top']);
+  gable(M, 0, 0, L, W, wallH, rise, e, 'x', glass, GLASS, glass);
+  const n = clamp(Math.round(L / (u * 0.25)), 2, 12);
+  for (let i = 0; i <= n; i++) { const x = -L / 2 + i * L / n; M.box(x - e, x + e, 0, wallH, W / 2 - e, W / 2 + e, [TRIM, white], [TRIM, white]); }
+  M.box(-L / 2, L / 2, wallH + rise - e, wallH + rise + e, -e, e, [TRIM, white], [TRIM, white]); // ridge
+  M.swap = false;
+  return null;
+}
+
+// the science park's landmark: a ring of glass round a green courtyard
+function buildRing(M, S) {
+  const { w, d, h, u } = S;
+  const glass = rgb(S.P.glass[1]), white = S.white, alu = S.alu;
+  const R = Math.min(w, d) * 0.47, t = R * 0.26, r = R - t, n = 28, H = Math.min(h, R * 0.6);
+  const at = (rad, k, y) => { const a = (k % n) / n * Math.PI * 2; return [rad * Math.cos(a), y, rad * Math.sin(a)]; };
+  for (let k = 0; k < n; k++) {
+    const mid = [(R + r) / 2 * Math.cos((k + 0.5) / n * Math.PI * 2), H / 2, (R + r) / 2 * Math.sin((k + 0.5) / n * Math.PI * 2)];
+    M.quad(at(R, k, 0), at(R, k + 1, 0), at(R, k + 1, H), at(R, k, H), GLASS, glass, mid); // outside
+    M.quad(at(r, k, 0), at(r, k + 1, 0), at(r, k + 1, H), at(r, k, H), GLASS, glass, mid); // courtyard side
+    M.quad(at(R, k, H), at(R, k + 1, H), at(r, k + 1, H), at(r, k, H), ROOF, white, mid); // roof
+    M.quad(at(R * 1.012, k, H * 0.48), at(R * 1.012, k + 1, H * 0.48), at(R * 1.012, k + 1, H * 0.54), at(R * 1.012, k, H * 0.54), TRIM, alu, [0, H * 0.5, 0]); // floor line
+  }
+  M.loft(0, 0, [[0, r * 0.98, r * 0.98], [u * 0.02, r * 0.98, r * 0.98]], n, [POD, rgb(S.P.ground[2])], { cap: [POD, rgb(S.P.ground[2])] }); // the courtyard's lawn
+  return null;
+}
+
 function buildPlant(M, S) {
   const { w, d, h, u } = S, rt = S.roof;
   const cooling = S.rng() < 0.42, towers = d > w * 0.9 && S.rng() < 0.5 ? 2 : 1;
@@ -1927,7 +1995,8 @@ const BUILDERS = { slab: buildSlab, tower: buildTower, setback: buildSetback, po
   pilotis: buildPilotis, congress: buildCongress, cathedral: buildCathedral,
   supertall: buildSupertall, needle: buildNeedle,
   barn: buildBarn, silo: buildSilo, windmill: buildWindmill, bales: buildBales,
-  factory: buildFactory, cooling: buildCooling };
+  factory: buildFactory, cooling: buildCooling,
+  lab: buildLab, datacenter: buildDatacenter, greenhouse: buildGreenhouse, ring: buildRing };
 
 const FLAT = { old: 'flat', mid: 'flat', new: 'flat' };
 const DEFAULT_ROOF = {
@@ -1947,6 +2016,7 @@ const DEFAULT_ROOF = {
   supertall: FLAT, needle: FLAT,
   barn: FLAT, silo: FLAT, windmill: FLAT, bales: FLAT,
   factory: FLAT, cooling: FLAT,
+  lab: FLAT, datacenter: FLAT, greenhouse: FLAT, ring: FLAT,
 };
 // landmarks that ignore the era: a ruin is always weathered, a building site is always raw
 const FORCE_ERA = { ruin: 'old', site: 'mid' };

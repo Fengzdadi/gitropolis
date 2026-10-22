@@ -10,7 +10,7 @@
     "score": 0.59,
     "reasons": ["avenues radiating from one centre","buildings of a fairly even height"],
     "runnerUp": "manhattan",
-    "ranking": [["paris",0.59],["manhattan",0.53],["barcelona",0.51],["tokyo",0.44],["venice",0.28],["industrial",0.19],["hongkong",0.11],["la",0.05],["farm",0],["desert",0],["capital",0],["mountain",0],["university",0],["port",0],["smalltown",0]],
+    "ranking": [["paris",0.59],["manhattan",0.53],["barcelona",0.51],["tokyo",0.44],["venice",0.28],["industrial",0.19],["hongkong",0.11],["la",0.05],["farm",0],["desert",0],["capital",0],["mountain",0],["university",0],["port",0],["science",0],["smalltown",0]],
     "states": [],
     "chip": false,
     "metrics": {
@@ -61,7 +61,10 @@
       "infraKinds": [],
       "usedCore": true,
       "cShare": 0,
-      "headers": 0
+      "headers": 0,
+      "mlShare": 0,
+      "mlFiles": 0,
+      "trainFiles": 0
     }
   },
   "commits": {"count":1506,"digest":"4d35fdca709c3f76"},

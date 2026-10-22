@@ -6,5 +6,6 @@
   { "repo": "google/gson", "ref": "gson-parent-2.14.0", "sha": "3ff35d6269894901ab8006258395aafc4b9765cd" },
   { "repo": "getify/You-Dont-Know-JS", "ref": "2nd-ed", "sha": "044120ef55564939cd35f5ddaf3f6c0a45d7b02c" },
   { "repo": "terraform-aws-modules/terraform-aws-eks", "ref": "v21.29.0", "sha": "91f11ea01656c26b8e6b8eb1b74f19863f60056c" },
-  { "repo": "jqlang/jq", "ref": "jq-1.8.2", "sha": "34f7186b86743a083a589741b6cea95293524108" }
+  { "repo": "jqlang/jq", "ref": "jq-1.8.2", "sha": "34f7186b86743a083a589741b6cea95293524108" },
+  { "repo": "karpathy/nanoGPT", "ref": "master", "sha": "3adf61e154c3fe3fca428ad6bc3818b27a3b8291" }
 ]
