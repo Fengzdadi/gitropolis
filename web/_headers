@@ -1,0 +1,5 @@
+# The hosted site (Cloudflare static assets). The vendored libraries change only when one is upgraded,
+# so browsers keep them a day rather than check each of their ~45 modules on every visit, and use a
+# kept copy while checking for up to a week after that.
+/vendor/*
+  Cache-Control: public, max-age=86400, stale-while-revalidate=604800

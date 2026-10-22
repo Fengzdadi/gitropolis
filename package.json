@@ -10,6 +10,6 @@
   "bugs": { "url": "https://github.com/Fengzdadi/gitropolis/issues" },
   "type": "module",
   "bin": { "gitropolis": "bin/cli.mjs" },
-  "files": ["bin", "src", "web", "!web/og.png"],
+  "files": ["bin", "src", "web", "!web/og.png", "!web/_headers"],
   "engines": { "node": ">=18" }
 }
