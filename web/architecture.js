@@ -1,7 +1,6 @@
 // Every building gets a shape that comes from its file: role and structure pick the form,
 // age picks the era, the busiest files get spires and the most-edited ones keep a crane on site.
 import * as THREE from 'three';
-import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { addFacadeDetail } from './surfaces.js';
 
 const PERIPHERY = /(^|\/)(tests?|__tests__|specs?|e2e|fixtures?|samples?|examples?|docs?|playgrounds?|templates?|benchmarks?)(\/|$)/;
@@ -170,37 +169,51 @@ function paint(g, t) {
 // one merged mesh for the whole city; per-vertex building id, base height and birth time
 // let a shader grow every building from the ground when the timeline reaches it
 export function buildCityMesh({ buildingGeometry, specs, B, files, t01, shared, unit, heat, focus, glow = null, castShadow = true }) {
-  const geos = [];
+  // a big repo is ~1M triangles, so the float geometry is never gathered in one place: each building
+  // is packed as soon as it's built (colour and normals as bytes: palette art doesn't need floats) and
+  // its float copy dropped, then the pieces are joined one attribute at a time, letting go of each
+  // piece as it's copied, so the peak is about the size of the finished mesh rather than three times it
+  const toBytes = (a, Type, scale) => { const out = new Type(a.length); for (let k = 0; k < a.length; k++) out[k] = Math.round(a[k] * scale); return out; };
+  const pieces = [];
+  let count = 0;
   specs.forEach((spec, i) => {
     if (B[i].w < 0.01) return;
     let g = buildingGeometry(spec);
     if (g.index) g = g.toNonIndexed();
     if (spec.tint) paint(g, spec.tint);
     g.rotateY(B[i].rot || 0).translate(B[i].x, B[i].y, B[i].z);
-    const n = g.attributes.position.count;
-    const meta = new Float32Array(n * 3);
-    for (let k = 0; k < n; k++) meta.set([i, B[i].y, t01(files[i].born)], k * 3);
-    g.setAttribute('aMeta', new THREE.BufferAttribute(meta, 3));
-    for (const name of Object.keys(g.attributes)) if (!['position', 'normal', 'color', 'part', 'aMeta'].includes(name)) g.deleteAttribute(name);
-    if (!g.attributes.part) g.setAttribute('part', new THREE.BufferAttribute(new Float32Array(n), 1));
-    geos.push(g);
+    const a = g.attributes, n = a.position.count;
+    pieces.push({
+      i, n, position: a.position.array,
+      normal: toBytes(a.normal.array, Int8Array, 127),
+      color: toBytes(a.color.array, Uint8Array, 255),
+      part: a.part ? Uint8Array.from(a.part.array) : new Uint8Array(n),
+    });
+    count += n;
   });
   // a city with nothing to build (no recognised files) still gets a valid, empty mesh
-  const empty = () => { const g = new THREE.BufferGeometry(); for (const [k, n] of [['position', 3], ['normal', 3], ['color', 3], ['part', 1], ['aMeta', 3]]) g.setAttribute(k, new THREE.Float32BufferAttribute([], n)); return g; };
-  const geo = geos.length ? mergeGeometries(geos) : empty();
-  // the per-building pieces would otherwise live as long as any closure from this scope (syncState below)
-  for (const g of geos) g.dispose();
-  geos.length = 0;
-  // a big repo is ~1M triangles: store colour and normals as bytes (palette art doesn't need floats),
-  // and let the GPU keep the only copy once uploaded (picking uses the proxy boxes, not this mesh)
-  const pack = (name, Type, scale) => {
-    const a = geo.attributes[name], out = new Type(a.array.length);
-    for (let k = 0; k < out.length; k++) out[k] = Math.round(a.array[k] * scale);
-    geo.setAttribute(name, new THREE.BufferAttribute(out, a.itemSize, true));
+  const geo = new THREE.BufferGeometry();
+  const join = (name, Type, size, normalized) => {
+    const out = new Type(count * size);
+    let o = 0;
+    for (const p of pieces) { out.set(p[name], o); o += p[name].length; p[name] = null; }
+    geo.setAttribute(name, new THREE.BufferAttribute(out, size, normalized));
   };
-  pack('color', Uint8Array, 255);
-  pack('normal', Int8Array, 127);
-  geo.setAttribute('part', new THREE.BufferAttribute(Uint8Array.from(geo.attributes.part.array), 1, false));
+  join('position', Float32Array, 3, false);
+  join('normal', Int8Array, 3, true);
+  join('color', Uint8Array, 3, true);
+  join('part', Uint8Array, 1, false);
+  // per-vertex building id, base height and birth time, the same for every vertex of a building
+  const meta = new Float32Array(count * 3);
+  let o = 0;
+  for (const { i, n } of pieces) {
+    const y = B[i].y, born = t01(files[i].born);
+    for (let k = 0; k < n; k++, o += 3) { meta[o] = i; meta[o + 1] = y; meta[o + 2] = born; }
+  }
+  geo.setAttribute('aMeta', new THREE.BufferAttribute(meta, 3));
+  // the pieces would otherwise live as long as any closure from this scope (syncState below)
+  pieces.length = 0;
+  // let the GPU keep the only copy once uploaded (picking uses the proxy boxes, not this mesh)
   const bytes = Object.values(geo.attributes).reduce((n, a) => n + a.array.byteLength, 0);
   // three.js still needs the bounds (for sorting) after the arrays are gone, so compute them first
   geo.computeBoundingBox();
