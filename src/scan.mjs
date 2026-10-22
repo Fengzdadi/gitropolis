@@ -12,6 +12,7 @@ const LANGS = {
   vue: 'js', svelte: 'js', py: 'py', go: 'go', rs: 'rs', java: 'java', kt: 'kt',
   c: 'c', h: 'c', cc: 'cpp', cpp: 'cpp', hpp: 'cpp', cs: 'cs', rb: 'rb', php: 'php',
   swift: 'swift', scala: 'scala', lua: 'lua', zig: 'zig', ex: 'ex', exs: 'ex',
+  dart: 'dart', gd: 'gd', cu: 'cpp', cuh: 'cpp', // Flutter, Godot's GDScript, CUDA kernels
   css: 'css', scss: 'css', less: 'css', html: 'html', sh: 'sh',
   // infrastructure as code: only kept when it's a real part of the repo (see INFRA_MIN)
   tf: 'hcl', tfvars: 'hcl', hcl: 'hcl', bicep: 'hcl', yaml: 'yaml', yml: 'yaml',
@@ -47,7 +48,7 @@ const MAX_BYTES = 1_000_000;
 const NONCODE = new Set(['cfg', 'doc', 'lock']);
 const DAY = 86400, YEAR = 365.25 * DAY;
 // only these languages get import edges, so only they can honestly be called "unimported"
-const LINKED = new Set(['js', 'ts', 'py', 'go', 'rs', 'c', 'cpp', 'java', 'kt']);
+const LINKED = new Set(['js', 'ts', 'py', 'go', 'rs', 'c', 'cpp', 'java', 'kt', 'dart']);
 const ENTRY = /(^|\/)((main|index|cli|app|server)\.[^/]+|__main__\.py|mod\.rs|lib\.rs)$|(^|\/)(bin|cmd)\//;
 // not reached by imports on purpose: samples / fixtures / generated apps, framework file conventions, test setup
 const LOOSE = /(^|\/)(__\w*fixtures?__|fixtures?|examples?|templates?|integrations?|playgrounds?|e2e)\/|(^|\/)(layout|page|route|loading|error|middleware|test-setup|setup|conftest)\.[^/]+$/;
@@ -56,14 +57,70 @@ const SRC_REF = /[\w@.\/-]+\.(?:[cm]?[jt]sx?|py|rs|go|c|h|cc|cpp|hpp|vue|svelte)
 
 const stemOf = p => p.slice(p.lastIndexOf('/') + 1).replace(/\.[^.]*$/, '');
 
+// What a file says about the kind of project it belongs to: model code (a tech campus), or a game made
+// with an engine (a theme park). Only the project's own files count, not the examples, tests or docs
+// beside it: a physics library with a pygame demo isn't a game, nor a web framework with a torch example
+// a campus. An engine's own repository (bevy, pygame) is the engine, not a game made with it.
+// (also as part of a folder's name: android-test-app/, sample_app/, demo-web/)
+const SAMPLE_DIR = /(^|\/)(\w+[-_])?(examples?|samples?|demos?|tests?|fixtures?|playgrounds?|benchmarks?|docs?)([-_]\w+)?\//;
+const ML_IMPORT = /^\s*(?:import|from)\s+(torch|tensorflow|jax|flax|keras|transformers|diffusers|lightning|pytorch_lightning|sklearn|triton|accelerate|peft|vllm|timm|xformers|mlx)\b/m;
+const ENGINES = [
+  ['Godot', (p, lang) => lang === 'gd'],
+  ['Unity', (p, lang) => lang === 'cs' && /(^|\/)Assets\//.test(p)],
+  ['Unreal', (p, lang) => lang === 'cpp' && /(^|\/)Source\//.test(p)],
+  ['Bevy', (p, lang, t) => lang === 'rs' && /\buse\s+bevy::/.test(t)],
+  ['pygame', (p, lang, t) => lang === 'py' && /^\s*(?:import|from)\s+(?:pygame|arcade|pyglet|ursina|panda3d)\b/m.test(t)],
+  ['LÖVE', (p, lang, t) => lang === 'lua' && /\bfunction\s+love\.(?:load|update|draw|run|conf)\b/.test(t)],
+  ['Phaser', (p, lang, t) => (lang === 'js' || lang === 'ts') && /\bnew\s+Phaser\.Game\b/.test(t)],
+];
+const ENGINE_REPO = /^(bevy|pygame|pygame-ce|arcade|pyglet|ursina|panda3d|godot|love|phaser|UnrealEngine)$/i;
+function signalOf(p, ext, lang, text) {
+  if (SAMPLE_DIR.test(p)) return undefined;
+  if (ext === 'cu' || ext === 'cuh' || (lang === 'py' && ML_IMPORT.test(text))) return 'ml';
+  for (const [name, test] of ENGINES) if (test(p, lang, text)) return name;
+  return undefined;
+}
+// The engine the game is made with. A project file settles it for Godot, Unity and Unreal, and LÖVE's
+// callbacks for LÖVE; an engine that's only a library (Bevy, pygame, Phaser) has to be used throughout,
+// not by one visualiser script in a bigger project. files: the project's own files in the engine's language.
+const ENGINE_LANG = { Godot: ['gd'], Unity: ['cs'], Unreal: ['cpp', 'c'], Bevy: ['rs'], pygame: ['py'], 'LÖVE': ['lua'], Phaser: ['js', 'ts'] };
+function gameEngine(files, listed, name) {
+  if (ENGINE_REPO.test(name)) return null;
+  const marked = {};
+  for (const f of files) if (f.g && f.g !== 'ml') marked[f.g] = (marked[f.g] || 0) + 1;
+  const own = name => files.filter(f => ENGINE_LANG[name].includes(f.lang) && !SAMPLE_DIR.test(f.p)).length;
+  const project = { Godot: listed.some(p => /(^|\/)project\.godot$/.test(p)), Unity: listed.some(p => /(^|\/)ProjectSettings\/ProjectVersion\.txt$/.test(p)), Unreal: listed.some(p => p.endsWith('.uproject')), 'LÖVE': !!marked['LÖVE'] };
+  const found = Object.keys(marked).filter(e => e in project ? project[e] : marked[e] >= 10 || marked[e] >= own(e) * 0.25);
+  const best = found.map(e => ({ name: e, files: own(e) })).sort((a, b) => b.files - a.files)[0];
+  return best?.files ? best : null;
+}
+// A mobile app (not a library, and not the sample app beside one): the platforms it ships to. An Android
+// app declares an activity, an iOS app has an application target, a Flutter app a lib/main.dart, and a
+// React Native app its own ios/ or android/ folder.
+function appPlatforms(root, listed) {
+  const read = p => { try { return readFileSync(path.join(root, p), 'utf8'); } catch { return ''; } };
+  const own = listed.filter(p => !SAMPLE_DIR.test(p) && !SKIP_DIR.test(p)), ownSet = new Set(own);
+  const out = new Set();
+  for (const p of own) {
+    const dir = p.slice(0, p.lastIndexOf('/') + 1);
+    if (/(^|\/)pubspec\.yaml$/.test(p)) { if (ownSet.has(dir + 'lib/main.dart') && /^\s+flutter:/m.test(read(p))) out.add('Flutter'); }
+    else if (/(^|\/)package\.json$/.test(p)) { if (/"react-native"\s*:/.test(read(p)) && own.some(q => q.startsWith(dir + 'ios/') || q.startsWith(dir + 'android/'))) out.add('React Native'); }
+    else if (/(^|\/)AndroidManifest\.xml$/.test(p)) { if (/<activity\b/.test(read(p))) out.add('Android'); }
+    else if (/\.xcodeproj\/project\.pbxproj$/.test(p)) { const t = read(p); if (t.includes('com.apple.product-type.application') && /SDKROOT = iphoneos|TARGETED_DEVICE_FAMILY/.test(t)) out.add('iOS'); }
+  }
+  return ['Flutter', 'React Native', 'Android', 'iOS'].filter(x => out.has(x));
+}
+
 function git(repo, args) {
   return execFileSync('git', ['-C', repo, ...args], { encoding: 'utf8', maxBuffer: 1 << 30 });
 }
 
-export async function scanRepo(repo, { maxCommits = 20000 } = {}) {
+// name: the repository's name, when the folder it's cloned into has another (the hosted scanner's)
+export async function scanRepo(repo, { maxCommits = 20000, name } = {}) {
   repo = path.resolve(repo);
   const t0 = Date.now();
   const root = git(repo, ['rev-parse', '--show-toplevel']).trim();
+  name ||= path.basename(root);
   const listed = git(root, ['ls-files', '-z']).split('\0').filter(Boolean);
 
   const files = [];
@@ -116,7 +173,7 @@ export async function scanRepo(repo, { maxCommits = 20000 } = {}) {
       : INFRA.has(lang) ? { c: 0, f: 0, lf: 0, x: 0, r: 'infra', k: infraKind(p, text, lang) }
       : PROSE.has(lang) ? { c: (text.match(/^#{1,3} /gm) || []).length, f: 0, lf: 0, x: 0, r: 'page', k: pageKind(p) }
       : fileAnatomy(p, text, lang);
-    files.push({ p, lang, loc, a, text, imp: new Set(), churn: 0, born: 0, last: 0 });
+    files.push({ p, lang, loc, a, text, g: signalOf(p, ext, lang, text), imp: new Set(), churn: 0, born: 0, last: 0 });
   }
   {
     // What share of the repo's lines is infrastructure, prose, notebooks and data? Each is measured
@@ -193,15 +250,15 @@ export async function scanRepo(repo, { maxCommits = 20000 } = {}) {
   const status = fileStatus(files, start, end, tails, refs, jvmUsed);
   const edges = files.reduce((n, f) => n + f.imp.size, 0);
   const city = {
-    name: path.basename(root),
+    name,
     scannedAt: Math.floor(Date.now() / 1000),
     scanMs: Date.now() - t0,
     start, end, ...(truncated && { truncated, firstCommit }),
     stats: { files: files.length, loc: files.reduce((n, f) => n + f.loc, 0), edges, commits: touched.length },
-    files: files.map(f => ({ p: f.p, lang: f.lang, loc: f.loc, imp: [...f.imp], a: f.a, churn: f.churn, born: f.born, last: f.last, ...(status.get(f) && { s: status.get(f) }) })),
+    files: files.map(f => ({ p: f.p, lang: f.lang, loc: f.loc, imp: [...f.imp], a: f.a, churn: f.churn, born: f.born, last: f.last, ...(status.get(f) && { s: status.get(f) }), ...(f.g && { g: f.g }) })),
     // compact: [time, fileIdx, fileIdx, ...]; skip giant sweeping commits (formatting, renames)
     commits: touched.filter(c => c.f.length < 200).map(c => [c.t, ...c.f]),
-    extras: { hardwareFiles },
+    extras: { hardwareFiles, engine: gameEngine(files, listed, name), app: appPlatforms(root, listed) },
   };
   city.identity = classify(city);
   return city;
@@ -270,28 +327,36 @@ const RS_RE = /^\s*(?:pub(?:\([^)]*\))?\s+)?mod\s+(\w+)\s*;|use\s+(crate|super|s
 const C_RE = /#include\s*"([^"]+)"/g;
 const JVM_PKG = /^\s*package\s+([\w.]+)/m;
 const JVM_IMPORT = /^\s*import\s+(?:static\s+)?([\w.]+?)(\.\*)?\s*;?\s*$/gm;
+const DART_RE = /^\s*(?:import|export|part)\s+['"]([^'"]+\.dart)['"]/gm;
+// GDScript: scripts load each other by path (preload("res://player.gd"), extends "res://enemy.gd"),
+// and use each other by the global name one declares (class_name Player … extends Player, Player.new())
+const GD_PATH = /\b(?:preload|load|extends)\s*\(?\s*["']((?:res:\/\/)?[^"']+\.gd)["']/g;
+const GD_CLASS = /^class_name\s+(\w+)/m;
 
 const JS_EXT = ['', '.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs', '.vue', '.svelte',
   '/index.ts', '/index.tsx', '/index.js', '/index.jsx', '/index.mjs'];
 
 // workspace packages, so `import '@scope/pkg'` and `use my_crate::x` link across a monorepo
 function workspacePackages(root, listed) {
-  const js = new Map(), rust = new Map();
+  const js = new Map(), rust = new Map(), dart = new Map();
   for (const p of listed) {
     if (SKIP_DIR.test(p)) continue;
     const base = path.posix.basename(p);
-    if (base !== 'package.json' && base !== 'Cargo.toml') continue;
+    if (base !== 'package.json' && base !== 'Cargo.toml' && base !== 'pubspec.yaml') continue;
     let text;
     try { text = readFileSync(path.join(root, p), 'utf8'); } catch { continue; }
     const dir = path.posix.dirname(p) === '.' ? '' : path.posix.dirname(p) + '/';
     if (base === 'package.json') {
       try { const name = JSON.parse(text).name; if (name) js.set(name, dir); } catch { }
+    } else if (base === 'pubspec.yaml') {
+      const m = /^name:\s*(\w+)/m.exec(text);
+      if (m) dart.set(m[1], dir);
     } else {
       const m = /\[package\][^[]*?\bname\s*=\s*"([^"]+)"/.exec(text);
       if (m) rust.set(m[1].replace(/-/g, '_'), dir);
     }
   }
-  return { js, rust };
+  return { js, rust, dart };
 }
 
 function resolveImports(root, files, index, listed) {
@@ -357,6 +422,10 @@ function resolveImports(root, files, index, listed) {
     for (const ws of words) for (const w of ws) seen.set(w, (seen.get(w) || 0) + 1);
     ids.forEach((i, k) => { const name = stemOf(files[i].p); if ((seen.get(name) || 0) > (words[k].has(name) ? 1 : 0)) jvmUsed.add(i); });
   }
+  // godot: res:// is the folder holding project.godot; class_name → the file that declares it
+  const godotRoots = listed.filter(p => /(^|\/)project\.godot$/.test(p)).map(p => p.slice(0, p.lastIndexOf('/') + 1)).sort((a, b) => b.length - a.length);
+  const gdClass = new Map();
+  for (const [i, f] of files.entries()) if (f.lang === 'gd' && f.text) { const m = GD_CLASS.exec(f.text); if (m && !gdClass.has(m[1])) gdClass.set(m[1], i); }
   // prose: "guide/intro.md" → path, for site-absolute links like (/guide/intro)
   const proseSuffix = new Map();
   for (const f of files) if (PROSE.has(f.lang) || f.lang === 'doc') {
@@ -489,6 +558,17 @@ function resolveImports(root, files, index, listed) {
         }
         if (j !== undefined && files[j] !== f) f.imp.add(j);
       }
+    } else if (f.lang === 'dart') {
+      // relative, or package:<a package in this repo>/x.dart → that package's lib/x.dart
+      for (const m of text.matchAll(DART_RE)) {
+        const spec = m[1], pkg = /^package:(\w+)\/(.+)$/.exec(spec);
+        if (pkg) { const d = ws.dart.get(pkg[1]); if (d !== undefined) addEdge(f, d + 'lib/' + pkg[2]); }
+        else if (!spec.includes(':')) addEdge(f, path.posix.normalize(path.posix.join(dir, spec)));
+      }
+    } else if (f.lang === 'gd') {
+      const res = godotRoots.find(r => f.p.startsWith(r)) ?? '';
+      for (const m of text.matchAll(GD_PATH)) addEdge(f, m[1].startsWith('res://') ? res + m[1].slice(6) : path.posix.normalize(path.posix.join(dir, m[1])));
+      for (const w of new Set(text.match(/\b[A-Z]\w*/g) || [])) { const j = gdClass.get(w); if (j !== undefined && files[j] !== f) f.imp.add(j); }
     } else if (INFRA.has(f.lang)) {
       linkInfra(f, dir, text, index, infraByDir, addEdge);
     } else if (PROSE.has(f.lang) || (f.lang === 'doc' && proseSuffix.size)) {

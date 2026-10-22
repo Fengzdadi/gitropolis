@@ -3,7 +3,7 @@
   "start": 1312829110,
   "end": 1706036044,
   "stats": {"files":27,"loc":2562,"edges":0,"commits":114},
-  "extras": {"hardwareFiles":0},
+  "extras": {"hardwareFiles":0,"engine":null,"app":[]},
   "identity": {
     "city": "smalltown",
     "name": "Small Town",

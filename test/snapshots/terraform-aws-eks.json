@@ -3,7 +3,7 @@
   "start": 1528343723,
   "end": 1791415603,
   "stats": {"files":124,"loc":18628,"edges":35,"commits":1020},
-  "extras": {"hardwareFiles":0},
+  "extras": {"hardwareFiles":0,"engine":null,"app":[]},
   "identity": {
     "city": "port",
     "name": "Port City",

@@ -3,7 +3,7 @@
   "start": 1384569612,
   "end": 1768750571,
   "stats": {"files":56,"loc":12388,"edges":52,"commits":1065},
-  "extras": {"hardwareFiles":0},
+  "extras": {"hardwareFiles":0,"engine":null,"app":[]},
   "identity": {
     "city": "university",
     "name": "University Town",

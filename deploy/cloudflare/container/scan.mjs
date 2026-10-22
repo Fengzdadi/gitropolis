@@ -3,6 +3,5 @@
 import { scanRepo } from '../src/scan.mjs';
 
 const [dir, name] = process.argv.slice(2);
-const city = await scanRepo(dir);
-city.name = name;
+const city = await scanRepo(dir, { name });
 process.stdout.write(JSON.stringify(city));

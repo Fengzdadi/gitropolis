@@ -94,6 +94,16 @@ const LANG = {
     fn: /^\s*defp?\s/,
     exp: /^\s*def\s/,
   },
+  dart: {
+    brace: true,
+    cls: /^\s*(?:(?:abstract|sealed|base|final|interface)\s+)*(?:class|mixin|enum|extension)\s+\w/,
+    fn: /^\s*(?:(?:static|external|factory)\s+)*(?:[\w<>?,\[\] ]+\s+)?(?!(?:if|for|while|switch|catch|return|else)\b)\w+\s*(?:<[^>]*>)?\s*\([^;]*$/,
+    exp: /^(?:(?:abstract|sealed|base|final|interface)\s+)*(?:class|mixin|enum|extension|typedef)\s+[A-Z]/,
+  },
+  gd: {
+    cls: /^\s*(?:class_name|class)\s+\w/,
+    fn: /^\s*(?:static\s+)?func\s+\w/,
+  },
   lua: { fn: /^\s*(?:local\s+)?function\s/ },
   sh: { fn: /^\s*(?:function\s+\w+|\w+\s*\(\s*\))\s*\{?\s*$/ },
 };

@@ -3,7 +3,7 @@
   "start": 1536079093,
   "end": 1791527362,
   "stats": {"files":105,"loc":32342,"edges":183,"commits":547},
-  "extras": {"hardwareFiles":0},
+  "extras": {"hardwareFiles":0,"engine":null,"app":[]},
   "identity": {
     "city": "manhattan",
     "name": "Manhattan",

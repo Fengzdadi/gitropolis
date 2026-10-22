@@ -3,7 +3,7 @@
   "start": 1270562534,
   "end": 1771472515,
   "stats": {"files":125,"loc":18654,"edges":192,"commits":1935},
-  "extras": {"hardwareFiles":0},
+  "extras": {"hardwareFiles":0,"engine":null,"app":[]},
   "identity": {
     "city": "paris",
     "name": "Paris",

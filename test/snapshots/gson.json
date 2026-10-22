@@ -3,7 +3,7 @@
   "start": 1220238812,
   "end": 1776970831,
   "stats": {"files":287,"loc":52218,"edges":1009,"commits":1728},
-  "extras": {"hardwareFiles":0},
+  "extras": {"hardwareFiles":0,"engine":null,"app":[]},
   "identity": {
     "city": "mountain",
     "name": "Mountain City",
