@@ -110,7 +110,7 @@ export function buildingSpecs({ files, B, inDeg, hub: hubIdx, unit, kind, t01 })
     const hub = i === hubIdx;
     const status = new Set(f.s || []);
     if (status.has('giant') && role === 'source') form = 'mega';
-    else if (hub) form = town ? 'clocktower' : kind === 'port' ? 'lighthouse' : kind === 'university' ? 'library' : kind === 'capital' ? 'congress' : kind === 'desert' ? 'needle' : kind === 'farm' ? 'windmill' : (a.c || 0) >= 2 ? 'setback' : 'tower';
+    else if (hub) form = town ? 'clocktower' : kind === 'port' ? 'lighthouse' : kind === 'university' ? 'library' : kind === 'capital' ? 'congress' : kind === 'desert' ? 'needle' : kind === 'farm' ? 'windmill' : kind === 'industrial' ? 'cooling' : (a.c || 0) >= 2 ? 'setback' : 'tower';
     else if (kind === 'capital' && i === entry) form = 'cathedral'; // the file that imports the most: where the plan is read from
     else if (status.has('dead')) form = 'ruin';
     else if (sites.has(i)) form = 'site';
@@ -119,6 +119,14 @@ export function buildingSpecs({ files, B, inDeg, hub: hubIdx, unit, kind, t01 })
     // the boomtown's strip: anything that tall is a supertall
     if (kind === 'desert' && !hub && b.h > unit * 2.8 && ['slab', 'tower', 'setback', 'podium', 'hall', 'frame', 'mega', 'house', 'shed'].includes(form)) form = 'supertall';
     if (kind === 'capital' && ['slab', 'tower', 'setback', 'podium', 'house', 'hall', 'frame', 'mega'].includes(form)) form = 'pilotis';
+    // the industrial town: code is made in saw-tooth works (small files in workshops, giants in power
+    // plants), and headers are the warehouses its parts are kept in; tests and docs are the terraces
+    if (kind === 'industrial' && !hub && role !== 'test' && role !== 'docs') {
+      if (/\.(h|hh|hpp|hxx|cuh)$/.test(f.p) && ['slab', 'tower', 'setback', 'podium', 'hall', 'frame', 'house'].includes(form)) form = 'warehouse';
+      else if (['slab', 'tower', 'setback', 'podium', 'hall', 'frame'].includes(form)) form = 'factory';
+      else if (form === 'house') form = 'shed';
+      else if (form === 'mega') form = 'plant';
+    }
     const era = town && hub ? 'old' : bornRank[i] < 0.34 ? 'old' : bornRank[i] < 0.67 ? 'mid' : 'new';
     const LOW = { house: 1.1, shed: 1.4, hall: 1.4, plant: 1.4, cityhall: 1.8, courthouse: 1.4, port: 0.6, airport: 0.9, containers: 0.5, tanks: 0.7, warehouse: 0.8 };
     let h = LOW[form] ? Math.min(b.h, unit * LOW[form]) : b.h;
@@ -128,6 +136,7 @@ export function buildingSpecs({ files, B, inDeg, hub: hubIdx, unit, kind, t01 })
     if (form === 'library') h = Math.max(b.h, unit * 2.4);
     if (form === 'needle') h = Math.max(b.h, unit * 8);
     if (form === 'windmill') h = Math.max(b.h, unit * 2.2);
+    if (form === 'cooling') h = Math.max(b.h, unit * 3.5);
     if (form === 'cathedral') h = Math.max(b.h * 0.8, unit * 1.3);
     if (form === 'ruin') h *= 0.6;
     if (form === 'site') h *= 0.35;
@@ -145,7 +154,7 @@ export function buildingSpecs({ files, B, inDeg, hub: hubIdx, unit, kind, t01 })
           ? { roof: ROOF_PAINT[slot % 8], roofMix: 0.85, wall: WALL_PAINT[(slot + (i % 3 === 0 ? 3 : 0)) % 8], wallMix: 0.7 }
           : { roof: ROOF_PAINT[slot % 8], roofMix: 0.3 };
       })(),
-      props: { spire: spires.has(i) || hub, antenna: antennas.has(i) && !spires.has(i), crane: cranes.has(i), tank: kind === 'manhattan' && era !== 'new' && i % 5 === 0, ac: era === 'mid' && i % 3 === 0 },
+      props: { spire: spires.has(i) || hub, antenna: antennas.has(i) && !spires.has(i), crane: cranes.has(i) && kind !== 'industrial', smoke: cranes.has(i) && kind === 'industrial', tank: kind === 'manhattan' && era !== 'new' && i % 5 === 0, ac: era === 'mid' && i % 3 === 0 },
     };
   });
 }

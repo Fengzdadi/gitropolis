@@ -34,6 +34,8 @@ export function cityMetrics(city, now = Date.now() / 1000) {
   const proseLoc = sum(proseIdx.map(i => all[i].loc)), farmLoc = sum(farmIdx.map(i => all[i].loc));
   const workLoc = Math.max(1, infraLoc + codeLoc + proseLoc + farmLoc);
   const farmCount = l => farmIdx.filter(i => all[i].lang === l).length;
+  // the factory town: how much of the code is C, C++ or Zig (CUDA kernels are model code: they make a campus)
+  const cIdx = plainIdx.filter(i => ['c', 'cpp', 'zig'].includes(all[i].lang) && all[i].g !== 'ml');
   // in a port the infrastructure *is* the codebase, in a university the pages are; anywhere else they don't shape the city
   const isPort = infraLoc / workLoc >= 0.5 && infraIdx.length >= 8;
   const isCampus = !isPort && proseLoc / workLoc >= 0.5 && proseIdx.length >= 10;
@@ -236,6 +238,8 @@ export function cityMetrics(city, now = Date.now() / 1000) {
     locales: locales.size,
     infraKinds,
     usedCore: useCore,
+    cShare: sum(cIdx.map(i => all[i].loc)) / Math.max(1, codeLoc),
+    headers: cIdx.filter(i => /\.(h|hh|hpp|hxx)$/.test(all[i].p)).length,
   };
 }
 
@@ -270,6 +274,11 @@ const ARCHETYPES = {
   port: m => [
     [ramp(m.infraShare, 0.3, 0.6), `${pct(m.infraShare)} of it is infrastructure: ${m.infraKinds.join(', ')}`],
     [ramp(m.infraFiles, 8, 50), `${m.infraFiles} cargo manifests on the quays`],
+  ],
+  industrial: m => [
+    [ramp(m.cShare, 0.4, 0.7), `${pct(m.cShare)} of it is C and C++: works, not storefronts`],
+    [ramp(m.headers, 5, 60), `${m.headers} headers stacked in the warehouses`],
+    [ramp(m.medianLoc, 80, 250), `heavy machinery: the median file is ${m.medianLoc} lines`],
   ],
   smalltown: m => [
     [1 - ramp(m.files, 15, 40), `only ${m.files} file${m.files === 1 ? "" : "s"} — one main street`],
@@ -323,7 +332,7 @@ const STATES = {
 };
 
 export const CITY_NAMES = {
-  farm: 'Farm Village', desert: 'Desert Boomtown', capital: 'Planned Capital', mountain: 'Mountain City', university: 'University Town', port: 'Port City', smalltown: 'Small Town', manhattan: 'Manhattan', hongkong: 'Hong Kong', tokyo: 'Tokyo',
+  farm: 'Farm Village', desert: 'Desert Boomtown', industrial: 'Factory Town', capital: 'Planned Capital', mountain: 'Mountain City', university: 'University Town', port: 'Port City', smalltown: 'Small Town', manhattan: 'Manhattan', hongkong: 'Hong Kong', tokyo: 'Tokyo',
   la: 'Los Angeles', paris: 'Paris', venice: 'Venice', barcelona: 'Barcelona',
 };
 
@@ -338,6 +347,8 @@ export function classify(city) {
   const best = m.infraShare >= 0.5 && m.infraFiles >= 8 ? port
     : m.proseShare >= 0.5 && m.proseFiles >= 10 ? scored.find(s => s.id === 'university')
     : m.farmShare >= 0.4 && m.farmFiles >= 10 ? scored.find(s => s.id === 'farm')
+    // what the code is made of decides before how old it is: a young C project is a factory town
+    : m.cShare >= 0.6 && m.files >= 20 ? scored.find(s => s.id === 'industrial')
     // a big city out of nothing in under two years is a boomtown, whatever its streets look like
     : m.ageYears < 2 && m.commitsPerWeek >= 15 && m.files >= 150 ? scored.find(s => s.id === 'desert')
     : m.files < 15 ? scored.find(s => s.id === 'smalltown') : scored[0];

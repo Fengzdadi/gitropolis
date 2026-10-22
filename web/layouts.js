@@ -24,7 +24,7 @@ function shortLabel(t) {
   return s.length > 22 ? s.slice(0, 21) + '…' : s;
 }
 
-export const CITY_KINDS = ['farm', 'desert', 'capital', 'mountain', 'university', 'port', 'smalltown', 'manhattan', 'hongkong', 'tokyo', 'la', 'paris', 'venice', 'barcelona'];
+export const CITY_KINDS = ['farm', 'desert', 'capital', 'mountain', 'university', 'port', 'industrial', 'smalltown', 'manhattan', 'hongkong', 'tokyo', 'la', 'paris', 'venice', 'barcelona'];
 
 // ---------------------------------------------------------------- shared helpers
 
@@ -549,6 +549,46 @@ const PLANNERS = {
         const l = files[i].lang;
         return l === 'data' ? 0.2 : l === 'model' ? 1.8 : l === 'nb' ? Math.min(0.7 + 0.35 * Math.pow(rel, 0.4), 1.4) : Math.min(0.5 + 0.25 * Math.pow(rel, 0.4), 1);
       },
+    };
+  },
+
+  // an industrial town (C and C++): works compounds on both banks of a canal, each district one paved
+  // yard of saw-tooth factories, its tests and docs the workers' terraces on the green beside them, and
+  // the most-included file the cooling tower at the head of the canal
+  industrial(ds, ctx) {
+    const items = ds.map(d => ({ d, items: d.items.filter(it => it.i !== ctx.hub) })).filter(x => x.items.length)
+      .map(x => ({ ...x, v: sum(x.items.map(it => it.a)) * 1.12 + 1 })); // a little room to load; packRect's padding does the rest
+    const total = sum(items.map(x => x.v)), W = Math.sqrt(total * 2.4), C = 2.4; // C: the canal and its two quays
+    // biggest compounds first, each to the lighter bank, so the two banks come out even
+    const banks = [[], []], load = [0, 0];
+    for (const x of [...items].sort((a, b) => b.v - a.v)) { const k = load[0] <= load[1] ? 0 : 1; banks[k].push(x); load[k] += x.v; }
+    const lots = [], blocks = [], labels = [];
+    banks.forEach((bank, k) => {
+      if (!bank.length) return;
+      const D = load[k] / W, z0 = k ? C / 2 : -C / 2 - D;
+      const root = hierarchy({ children: bank }).sum(x => x.v || 0).sort((a, b) => b.value - a.value);
+      treemap().tile(treemapSquarify.ratio(1.4)).size([W, D]).paddingInner(0.5).paddingOuter(0.2)(root);
+      for (const l of root.leaves()) {
+        const { d, items } = l.data, za = z0 + l.y0, zb = z0 + l.y1;
+        blocks.push({ poly: rectPoly(l.x0, za, l.x1, zb), type: d.periphery ? 'lawn' : 'yard' });
+        lots.push(...packRect(items, l.x0, za, l.x1, zb, 0.18));
+        if (d.name !== '·') labels.push({ text: d.name, x: (l.x0 + l.x1) / 2, z: k ? zb + 0.4 : za - 0.4 });
+      }
+    });
+    const D0 = load[0] / W, D1 = load[1] / W, Q = 0.45; // Q: quay width
+    const water = [rectPoly(-0.4, -C / 2 + Q, W + 3.2, C / 2 - Q)];
+    const n = Math.max(1, Math.round(W / 7));
+    const bridges = Array.from({ length: n }, (_, k) => { const x = (k + 0.5) * W / n; return { a: [x, -C / 2], b: [x, C / 2], w: 0.38 }; });
+    // the cooling towers stand on their own pad where the canal ends
+    const pad = clamp(Math.sqrt(total) * 0.2, 3.4, 9), px = W + 3.6; // a bigger town has bigger towers
+    blocks.push({ poly: rectPoly(px, -pad / 2, px + pad, pad / 2), type: 'yard' });
+    lots.push({ i: ctx.hub, x: px + pad / 2, z: 0, w: pad * 0.86, d: pad * 0.86, rot: 0 });
+    return {
+      lots, blocks, labels, water, bridges,
+      land: [rectPoly(-0.6, -C / 2 - D0 - 0.6, px + pad + 0.6, C / 2 + D1 + 0.6)],
+      camera: { az: 125, el: 26, dist: 0.9 },
+      // works are low and wide; their chimneys and the cooling tower give the skyline
+      height: (i, rel) => i === ctx.hub ? pad * 0.9 : Math.min(0.55 + 0.75 * Math.sqrt(rel), 2.6),
     };
   },
 

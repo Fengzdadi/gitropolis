@@ -10,7 +10,7 @@
     "score": 0.76,
     "reasons": ["only 21 files — one main street"],
     "runnerUp": "la",
-    "ranking": [["smalltown",0.76],["la",0.65],["manhattan",0.59],["venice",0.43],["paris",0.43],["hongkong",0.33],["barcelona",0.33],["tokyo",0.25],["farm",0],["desert",0],["capital",0],["mountain",0],["university",0],["port",0]],
+    "ranking": [["smalltown",0.76],["la",0.65],["manhattan",0.59],["venice",0.43],["paris",0.43],["hongkong",0.33],["barcelona",0.33],["tokyo",0.25],["farm",0],["desert",0],["capital",0],["mountain",0],["university",0],["port",0],["industrial",0]],
     "states": [{"id":"ruins","reason":"ancient ruins: 62% of files untouched for 2+ years"},{"id":"ghost","reason":"ghost town: no commits for 3.0 years"}],
     "chip": false,
     "metrics": {
@@ -59,7 +59,9 @@
       "proseLongest": 0,
       "locales": 0,
       "infraKinds": [],
-      "usedCore": false
+      "usedCore": false,
+      "cShare": 0,
+      "headers": 0
     }
   },
   "commits": {"count":114,"digest":"ccafa4a18021dae2"},

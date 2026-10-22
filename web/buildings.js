@@ -961,6 +961,51 @@ function buildShed(M, S) {
   return T;
 }
 
+// the industrial town's works: a saw-tooth shed with a tall brick chimney, a white band near its top;
+// a works running hot (edited a lot lately) has smoke coming off it
+function buildFactory(M, S) {
+  const T = buildShed(M, S);
+  const { w, d, h, u, rng } = S;
+  if (!S.props.smoke && rng() < 0.6) return T; // not every works has a tall stack: a forest of them reads as noise
+  const r = u * 0.07, x = w * 0.32 * (rng() < 0.5 ? -1 : 1), z = d * 0.3, H = h * (1.35 + rng() * 0.4);
+  const brick = rgb(S.P.brick[rng() < 0.5 ? 0 : 1]), white = S.white;
+  M.loft(x, z, [[0, r * 1.5, r * 1.5], [h * 0.3, r * 1.25, r * 1.25], [H * 0.86, r * 0.95, r * 0.95]], 8, [TRIM, brick]);
+  M.loft(x, z, [[H * 0.86, r * 0.95, r * 0.95], [H * 0.9, r * 0.94, r * 0.94]], 8, [ACC, white]);
+  M.loft(x, z, [[H * 0.9, r * 0.94, r * 0.94], [H * 0.96, r * 0.92, r * 0.92]], 8, [TRIM, brick]);
+  M.loft(x, z, [[H * 0.96, r * 1.05, r * 1.05], [H, r * 1.05, r * 1.05]], 8, [TRIM, S.dark], { cap: [TRIM, S.dark] });
+  if (S.props.smoke) {
+    let py = H + r * 0.6;
+    for (const [k, dx] of [[2.2, 0], [2.6, 0.9], [2, 1.9]]) {
+      const pr = r * k;
+      M.loft(x + dx * r, z - dx * r * 0.5, [[py, pr * 0.8, pr * 0.8], [py + pr * 0.55, pr, pr], [py + pr * 1.1, pr * 0.6, pr * 0.6]], 6, [ACC, rgb(S.P.concrete[0])], { cap: [ACC, rgb(S.P.concrete[0])] });
+      py += pr * 0.8;
+    }
+  }
+  return T;
+}
+
+// the industrial town's landmark: two hyperbolic cooling towers on a concrete apron, steam rising
+function buildCooling(M, S) {
+  const { w, d, h, u } = S;
+  const conc = rgb(S.P.concrete[S.era === 'new' ? 3 : 0]), white = S.white;
+  const prof = [[0, 1], [0.22, 0.9], [0.45, 0.78], [0.68, 0.7], [0.85, 0.73], [1, 0.8]];
+  M.box(-w / 2, w / 2, 0, u * 0.03, -d / 2, d / 2, [POD, S.base], [POD, rgb(S.P.concrete[2])]);
+  // a real cooling tower is about as tall as 1.3 times its base is wide
+  const R = u * 0.3;
+  for (const [cx, cz, r, Ht] of [[-w * 0.17, -d * 0.12, R, Math.min(h, R * 2.7)], [w * 0.27, d * 0.25, R * 0.72, Math.min(h, R * 2.7) * 0.78]]) {
+    const R = r;
+    M.loft(cx, cz, prof.map(([f, k]) => [Ht * f, R * k, R * k]), 12, [TRIM, conc], { cap: [TRIM, S.dark] });
+    M.loft(cx, cz, [[Ht, R * 0.8, R * 0.8], [Ht + R * 0.06, R * 0.84, R * 0.84]], 12, [TRIM, S.steel]);
+    let py = Ht + R * 0.1;
+    for (const [k, dx] of [[0.62, 0], [0.54, 0.2], [0.4, 0.34]]) {
+      const pr = R * k;
+      M.loft(cx + dx * R, cz - dx * R * 0.4, [[py, pr * 0.8, pr * 0.8], [py + pr * 0.55, pr, pr], [py + pr * 1.1, pr * 0.6, pr * 0.6]], 8, [ACC, white], { cap: [ACC, white] });
+      py += pr * 0.85;
+    }
+  }
+  return null;
+}
+
 function buildPlant(M, S) {
   const { w, d, h, u } = S, rt = S.roof;
   const cooling = S.rng() < 0.42, towers = d > w * 0.9 && S.rng() < 0.5 ? 2 : 1;
@@ -1881,7 +1926,8 @@ const BUILDERS = { slab: buildSlab, tower: buildTower, setback: buildSetback, po
   college: buildCollege, chapel: buildChapel, library: buildLibrary,
   pilotis: buildPilotis, congress: buildCongress, cathedral: buildCathedral,
   supertall: buildSupertall, needle: buildNeedle,
-  barn: buildBarn, silo: buildSilo, windmill: buildWindmill, bales: buildBales };
+  barn: buildBarn, silo: buildSilo, windmill: buildWindmill, bales: buildBales,
+  factory: buildFactory, cooling: buildCooling };
 
 const FLAT = { old: 'flat', mid: 'flat', new: 'flat' };
 const DEFAULT_ROOF = {
@@ -1900,6 +1946,7 @@ const DEFAULT_ROOF = {
   pilotis: FLAT, congress: FLAT, cathedral: FLAT,
   supertall: FLAT, needle: FLAT,
   barn: FLAT, silo: FLAT, windmill: FLAT, bales: FLAT,
+  factory: FLAT, cooling: FLAT,
 };
 // landmarks that ignore the era: a ruin is always weathered, a building site is always raw
 const FORCE_ERA = { ruin: 'old', site: 'mid' };

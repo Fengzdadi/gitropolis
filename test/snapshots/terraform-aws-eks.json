@@ -10,7 +10,7 @@
     "score": 1,
     "reasons": ["100% of it is infrastructure: Terraform","88 cargo manifests on the quays"],
     "runnerUp": "manhattan",
-    "ranking": [["port",1],["manhattan",0.78],["venice",0.73],["paris",0.57],["la",0.44],["barcelona",0.35],["tokyo",0.26],["farm",0],["desert",0],["capital",0],["mountain",0],["university",0],["smalltown",0],["hongkong",0]],
+    "ranking": [["port",1],["manhattan",0.78],["venice",0.73],["paris",0.57],["la",0.44],["barcelona",0.35],["tokyo",0.26],["farm",0],["desert",0],["capital",0],["mountain",0],["university",0],["industrial",0],["smalltown",0],["hongkong",0]],
     "states": [],
     "chip": false,
     "metrics": {
@@ -59,7 +59,9 @@
       "proseLongest": 0,
       "locales": 0,
       "infraKinds": ["Terraform"],
-      "usedCore": true
+      "usedCore": true,
+      "cShare": 0,
+      "headers": 0
     }
   },
   "commits": {"count":1020,"digest":"a117fea6fe6e3806"},

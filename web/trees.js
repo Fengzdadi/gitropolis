@@ -56,6 +56,7 @@ const MIX = {
   capital: { round: 3, palm: 1 },
   desert: { palm: 1 },
   farm: { round: 2, autumn: 2, conifer: 1 },
+  industrial: { round: 1, conifer: 1 },
 };
 
 function pickSpecies(kind, seed) {
