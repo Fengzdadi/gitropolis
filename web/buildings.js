@@ -1074,6 +1074,115 @@ function buildRing(M, S) {
   return null;
 }
 
+// ------------------------------------------------------------ the theme park
+const FUN = ['#d94a4a', '#3f74b5', '#e8c14a', '#d97aa6', '#3aa3a0', '#8a5bb5'];
+const fun = rng => { const a = Math.floor(rng() * FUN.length); return [rgb(FUN[a]), rgb(FUN[(a + 1 + Math.floor(rng() * (FUN.length - 1))) % FUN.length])]; };
+// a cone of n panels in two alternating colours: big tops, carousel roofs, castle turrets
+function stripedCone(M, cx, cz, y0, r, y1, n, c1, c2) {
+  for (let k = 0; k < n; k++) {
+    const a0 = k / n * TAU, a1 = (k + 1) / n * TAU;
+    M.tri([cx + Math.cos(a0) * r, y0, cz + Math.sin(a0) * r], [cx + Math.cos(a1) * r, y0, cz + Math.sin(a1) * r], [cx, y1, cz], ROOF, k % 2 ? c2 : c1, [cx, y0 + (y1 - y0) * 0.2, cz]);
+  }
+}
+const pennant = (M, x, y, z, u, col) => {
+  M.strut([x, y, z], [x, y + u * 0.35, z], u * 0.02, TRIM, rgb('#4a4458'));
+  M.tri([x, y + u * 0.35, z], [x, y + u * 0.23, z], [x + u * 0.16, y + u * 0.29, z], ACC, col, [x, y + u * 0.29, z - 1]);
+};
+
+// the castle at the hub of the park: a white keep, round towers at its corners, a tall spire in the middle
+function buildCastle(M, S) {
+  const { w, d, h, u, rng } = S;
+  const stone = rgb('#efe8dc'), shade = rgb('#d6cdbf'), [r1, r2] = fun(rng), blue = rgb('#3f74b5');
+  const kw = w * 0.56, kd = d * 0.56, kh = h * 0.42;
+  M.box(-kw / 2, kw / 2, 0, kh, -kd / 2, kd / 2, [WALL, stone], [ROOF, shade]);
+  for (let i = 0; i < 6; i++) { // battlements along the two faces the camera sees
+    const x = -kw / 2 + (i + 0.25) * kw / 6, z = -kd / 2 + (i + 0.25) * kd / 6, b = kw / 12;
+    M.box(x, x + b, kh, kh + b, kd / 2 - b, kd / 2, [WALL, stone], [ROOF, shade]);
+    M.box(kw / 2 - b, kw / 2, kh, kh + b, z, z + b, [WALL, stone], [ROOF, shade]);
+  }
+  M.box(-kw * 0.12, kw * 0.12, 0, kh * 0.45, kd / 2, kd / 2 + u * 0.02, [TRIM, rgb('#4a4458')], [TRIM, rgb('#4a4458')]); // the gate
+  const tr = Math.min(w, d) * 0.1;
+  for (const [x, z] of [[-kw / 2, -kd / 2], [kw / 2, -kd / 2], [-kw / 2, kd / 2], [kw / 2, kd / 2]]) {
+    M.loft(x, z, [[0, tr, tr], [kh * 1.35, tr, tr]], 10, [WALL, stone]);
+    stripedCone(M, x, z, kh * 1.35, tr * 1.25, kh * 1.35 + tr * 3, 10, blue, blue);
+  }
+  const sr = Math.min(w, d) * 0.13;
+  M.loft(0, 0, [[kh, sr, sr], [h * 0.72, sr, sr]], 12, [WALL, stone]);
+  stripedCone(M, 0, 0, h * 0.72, sr * 1.3, h, 12, r1, r2);
+  pennant(M, 0, h, 0, u, r1);
+  return null;
+}
+
+// the Ferris wheel: a rim of struts on an A-frame, spokes to the hub, a gondola at every other spoke
+function buildFerris(M, S) {
+  const { w, d, h, u, rng } = S;
+  const R = Math.min(h * 0.46, Math.max(w, d) * 0.48), cy = h - R, n = 16, t = Math.max(u * 0.05, R * 0.06);
+  const dark = rgb('#4a4458'), [c1, c2] = fun(rng);
+  const rim = k => [Math.cos(k / n * TAU) * R, cy + Math.sin(k / n * TAU) * R, 0];
+  for (let k = 0; k < n; k++) {
+    M.strut(rim(k), rim(k + 1), t, TRIM, c2); // a painted rim, so the wheel reads against the lawn
+    M.strut([0, cy, 0], rim(k), t * 0.45, TRIM, rgb('#f4efe6'));
+    if (k % 2 === 0) { const [x, y] = rim(k), g = R * 0.11; M.box(x - g, x + g, y - g * 2.2, y - g * 0.4, -g, g, [ACC, k % 4 ? c1 : c2], [ROOF, k % 4 ? c1 : c2]); }
+  }
+  for (const z of [-d * 0.3, d * 0.3]) for (const x of [-R * 0.45, R * 0.45]) M.strut([x, 0, z], [0, cy, 0], t * 1.4, TRIM, dark);
+  M.box(-w * 0.3, w * 0.3, 0, u * 0.08, -d * 0.35, d * 0.35, [POD, rgb(S.P.concrete[1])], [POD, rgb(S.P.concrete[1])]);
+  return null;
+}
+
+// a carousel: a round deck, a ring of brass poles, a striped roof and a pennant
+function buildCarousel(M, S) {
+  const { w, d, h, u, rng } = S;
+  const R = Math.min(w, d) * 0.46, [c1, c2] = fun(rng), deck = Math.min(h * 0.12, u * 0.08), eave = h * 0.55;
+  M.loft(0, 0, [[0, R, R], [deck, R, R]], 14, [POD, c2], { cap: [POD, rgb('#efe8dc')] });
+  for (let k = 0; k < 10; k++) { const a = k / 10 * TAU; M.strut([Math.cos(a) * R * 0.85, deck, Math.sin(a) * R * 0.85], [Math.cos(a) * R * 0.85, eave, Math.sin(a) * R * 0.85], Math.max(u * 0.02, R * 0.04), TRIM, rgb('#e8c14a')); }
+  M.loft(0, 0, [[deck, R * 0.25, R * 0.25], [eave, R * 0.25, R * 0.25]], 8, [WALL, c1]);
+  M.loft(0, 0, [[eave, R * 1.02, R * 1.02], [eave + h * 0.06, R * 1.02, R * 1.02]], 14, [ACC, c2]);
+  stripedCone(M, 0, 0, eave + h * 0.06, R * 1.04, h * 0.92, 14, c1, rgb('#f4efe6'));
+  pennant(M, 0, h * 0.92, 0, u, c2);
+  return null;
+}
+
+// a big top: a striped circus tent, two slopes from a low wall to its king pole
+function buildBigtop(M, S) {
+  const { w, d, h, u, rng } = S;
+  const R = Math.min(w, d) * 0.48, [c1, c2] = fun(rng), white = rgb('#f4efe6'), wall = h * 0.28;
+  M.loft(0, 0, [[0, R, R], [wall, R, R]], 16, [WALL, white]);
+  M.box(-R * 0.18, R * 0.18, 0, wall * 0.85, R * 0.9, R * 1.02, [TRIM, rgb('#4a4458')], [TRIM, rgb('#4a4458')]); // the way in
+  const mid = wall + (h - wall) * 0.38;
+  for (let k = 0; k < 16; k++) { // lower slope: a frustum of panels
+    const a0 = k / 16 * TAU, a1 = (k + 1) / 16 * TAU, rr = R * 0.45;
+    M.quad([Math.cos(a0) * R, wall, Math.sin(a0) * R], [Math.cos(a1) * R, wall, Math.sin(a1) * R], [Math.cos(a1) * rr, mid, Math.sin(a1) * rr], [Math.cos(a0) * rr, mid, Math.sin(a0) * rr], ROOF, k % 2 ? c1 : white, [0, wall, 0]);
+  }
+  stripedCone(M, 0, 0, mid, R * 0.45, h * 0.94, 16, c1, white);
+  pennant(M, 0, h * 0.94, 0, u, c2);
+  return null;
+}
+
+// a drop tower: a tall white mast, a ring of seats part way up it, a lamp on top
+function buildDroptower(M, S) {
+  const { w, d, h, u, rng } = S;
+  const r = Math.min(w, d) * 0.12, [c1, c2] = fun(rng), white = rgb('#f4efe6');
+  M.box(-w * 0.3, w * 0.3, 0, u * 0.06, -d * 0.3, d * 0.3, [POD, rgb(S.P.concrete[1])], [POD, rgb(S.P.concrete[1])]);
+  M.loft(0, 0, [[0, r, r], [h * 0.95, r * 0.8, r * 0.8]], 8, [WALL, white]);
+  const y = h * (0.35 + rng() * 0.4);
+  M.loft(0, 0, [[y, r * 2.6, r * 2.6], [y + h * 0.05, r * 2.6, r * 2.6]], 12, [ACC, c1], { cap: [ROOF, c2] });
+  M.loft(0, 0, [[h * 0.95, r * 1.4, r * 1.4], [h, r * 1.4, r * 1.4]], 8, [ACC, c2], { cap: [ROOF, c2] });
+  return null;
+}
+
+// a stall: a little booth under a striped awning
+function buildStall(M, S) {
+  const { w, d, h, u, rng } = S;
+  const [c1] = fun(rng), white = rgb('#f4efe6'), bw = w * 0.8, bd = d * 0.7, bh = Math.min(h, u * 0.7) * 0.7;
+  M.box(-bw / 2, bw / 2, 0, bh, -bd / 2, bd / 2, [WALL, rgb('#efe8dc')], [ROOF, white]);
+  const n = 6, y0 = bh * 0.95, y1 = bh * 1.25;
+  for (let k = 0; k < n; k++) {
+    const x0 = -bw / 2 + k * bw / n, x1 = x0 + bw / n;
+    M.quad([x0, y1, bd / 2 - bd * 0.1], [x0, y0, bd / 2 + bd * 0.25], [x1, y0, bd / 2 + bd * 0.25], [x1, y1, bd / 2 - bd * 0.1], ROOF, k % 2 ? white : c1, [0, 0, 0]);
+  }
+  return null;
+}
+
 function buildPlant(M, S) {
   const { w, d, h, u } = S, rt = S.roof;
   const cooling = S.rng() < 0.42, towers = d > w * 0.9 && S.rng() < 0.5 ? 2 : 1;
@@ -1996,7 +2105,8 @@ const BUILDERS = { slab: buildSlab, tower: buildTower, setback: buildSetback, po
   supertall: buildSupertall, needle: buildNeedle,
   barn: buildBarn, silo: buildSilo, windmill: buildWindmill, bales: buildBales,
   factory: buildFactory, cooling: buildCooling,
-  lab: buildLab, datacenter: buildDatacenter, greenhouse: buildGreenhouse, ring: buildRing };
+  lab: buildLab, datacenter: buildDatacenter, greenhouse: buildGreenhouse, ring: buildRing,
+  castle: buildCastle, ferris: buildFerris, carousel: buildCarousel, bigtop: buildBigtop, droptower: buildDroptower, stall: buildStall };
 
 const FLAT = { old: 'flat', mid: 'flat', new: 'flat' };
 const DEFAULT_ROOF = {
@@ -2017,6 +2127,7 @@ const DEFAULT_ROOF = {
   barn: FLAT, silo: FLAT, windmill: FLAT, bales: FLAT,
   factory: FLAT, cooling: FLAT,
   lab: FLAT, datacenter: FLAT, greenhouse: FLAT, ring: FLAT,
+  castle: FLAT, ferris: FLAT, carousel: FLAT, bigtop: FLAT, droptower: FLAT, stall: FLAT,
 };
 // landmarks that ignore the era: a ruin is always weathered, a building site is always raw
 const FORCE_ERA = { ruin: 'old', site: 'mid' };

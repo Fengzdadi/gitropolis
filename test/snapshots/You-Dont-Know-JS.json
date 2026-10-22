@@ -10,7 +10,7 @@
     "score": 0.88,
     "reasons": ["100% of it is prose: about 107,667 words over 48 pages","the longest page runs to about 11,000 words"],
     "runnerUp": "venice",
-    "ranking": [["university",0.88],["venice",0.7],["paris",0.56],["la",0.36],["manhattan",0.34],["barcelona",0.29],["industrial",0.21],["tokyo",0.16],["hongkong",0.12],["farm",0],["desert",0],["capital",0],["mountain",0],["port",0],["science",0],["smalltown",0]],
+    "ranking": [["university",0.88],["venice",0.7],["paris",0.56],["la",0.36],["manhattan",0.34],["barcelona",0.29],["industrial",0.21],["tokyo",0.16],["hongkong",0.12],["farm",0],["desert",0],["capital",0],["mountain",0],["port",0],["themepark",0],["science",0],["smalltown",0]],
     "states": [{"id":"ruins","reason":"ancient ruins: 84% of files untouched for 2+ years"}],
     "chip": false,
     "metrics": {
@@ -62,6 +62,8 @@
       "usedCore": true,
       "cShare": 0,
       "headers": 0,
+      "engine": null,
+      "engineFiles": 0,
       "mlShare": 0,
       "mlFiles": 0,
       "trainFiles": 0

@@ -244,6 +244,9 @@ export function cityMetrics(city, now = Date.now() / 1000) {
     usedCore: useCore,
     cShare: sum(cIdx.map(i => all[i].loc)) / Math.max(1, codeLoc),
     headers: cIdx.filter(i => /\.(h|hh|hpp|hxx)$/.test(all[i].p)).length,
+    // the theme park: the game engine the scanner found, and how many of the project's files are written for it
+    engine: city.extras?.engine?.name || null,
+    engineFiles: city.extras?.engine?.files || 0,
     mlShare: sum(mlIdx.map(i => all[i].loc)) / Math.max(1, codeLoc),
     mlFiles: mlIdx.length,
     trainFiles: mlIdx.filter(i => TRAIN_RE.test(all[i].p)).length,
@@ -286,6 +289,9 @@ const ARCHETYPES = {
     [ramp(m.cShare, 0.4, 0.7), `${pct(m.cShare)} of it is C and C++: works, not storefronts`],
     [ramp(m.headers, 5, 60), `${m.headers} headers stacked in the warehouses`],
     [ramp(m.medianLoc, 80, 250), `heavy machinery: the median file is ${m.medianLoc} lines`],
+  ],
+  themepark: m => [
+    [m.engine ? ramp(m.engineFiles, 3, 40) : 0, `made with ${m.engine}: ${m.engineFiles} rides, stalls and shows`],
   ],
   science: m => [
     [ramp(m.mlShare, 0.2, 0.5), `${pct(m.mlShare)} of the code trains or runs models`],
@@ -343,7 +349,7 @@ const STATES = {
 };
 
 export const CITY_NAMES = {
-  farm: 'Farm Village', desert: 'Desert Boomtown', industrial: 'Factory Town', science: 'Science Park', capital: 'Planned Capital', mountain: 'Mountain City', university: 'University Town', port: 'Port City', smalltown: 'Small Town', manhattan: 'Manhattan', hongkong: 'Hong Kong', tokyo: 'Tokyo',
+  farm: 'Farm Village', desert: 'Desert Boomtown', industrial: 'Factory Town', science: 'Science Park', themepark: 'Theme Park', capital: 'Planned Capital', mountain: 'Mountain City', university: 'University Town', port: 'Port City', smalltown: 'Small Town', manhattan: 'Manhattan', hongkong: 'Hong Kong', tokyo: 'Tokyo',
   la: 'Los Angeles', paris: 'Paris', venice: 'Venice', barcelona: 'Barcelona',
 };
 
@@ -358,7 +364,8 @@ export function classify(city) {
   const best = m.infraShare >= 0.5 && m.infraFiles >= 8 ? port
     : m.proseShare >= 0.5 && m.proseFiles >= 10 ? scored.find(s => s.id === 'university')
     : m.farmShare >= 0.4 && m.farmFiles >= 10 ? scored.find(s => s.id === 'farm')
-    // what the code is made of decides before how old it is: a young C project is a factory town
+    // what the code is made of decides before how old it is: a game, an app, model code, C
+    : m.engine && m.engineFiles >= 5 ? scored.find(s => s.id === 'themepark')
     : m.mlShare >= 0.35 && m.mlFiles >= 3 ? scored.find(s => s.id === 'science')
     : m.cShare >= 0.6 && m.files >= 20 ? scored.find(s => s.id === 'industrial')
     // a big city out of nothing in under two years is a boomtown, whatever its streets look like

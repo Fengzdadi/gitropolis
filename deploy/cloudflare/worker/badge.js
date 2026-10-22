@@ -8,10 +8,10 @@ import { ICON } from './icon.js';
 const KIND_COLOR = {
   tokyo: '#c0413b', hongkong: '#7a2a35', manhattan: '#2f6188', la: '#c8682a', paris: '#8c4a3c', venice: '#2f7aa8',
   barcelona: '#b0603f', port: '#1f3d5a', university: '#5a4e8c', mountain: '#3d6b36', capital: '#4a4458',
-  desert: '#8a7a4e', farm: '#4f7f3a', smalltown: '#6b6250', industrial: '#8a4a2f', science: '#2f7a72',
+  desert: '#8a7a4e', farm: '#4f7f3a', smalltown: '#6b6250', industrial: '#8a4a2f', science: '#2f7a72', themepark: '#b5476e',
 };
 const PHRASE = {
-  farm: 'a farm village', desert: 'a desert boomtown', industrial: 'a factory town', science: 'a science park', capital: 'a planned capital', mountain: 'a mountain city',
+  farm: 'a farm village', desert: 'a desert boomtown', industrial: 'a factory town', science: 'a science park', themepark: 'a theme park', capital: 'a planned capital', mountain: 'a mountain city',
   university: 'a university town', port: 'a port city', smalltown: 'a small town', manhattan: 'Manhattan', hongkong: 'Hong Kong',
   tokyo: 'Tokyo', la: 'Los Angeles', paris: 'Paris', venice: 'Venice', barcelona: 'Barcelona',
 };

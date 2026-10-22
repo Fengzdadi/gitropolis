@@ -34,7 +34,8 @@ export function buildingSpecs({ files, B, inDeg, hub: hubIdx, unit, kind, t01 })
   const cranes = top(recentChurn, 0.015, 5);
   const locs = files.map(f => f.loc).sort((a, b) => a - b), medLoc = locs[N >> 1] || 1;
   const crowdLoc = N > 6000 ? locs[Math.floor(N * 0.8)] : 0;
-  let entry = 0;
+  let entry = 0, biggest = -1;
+  for (let i = 0; i < N; i++) if (i !== hubIdx && files[i].g && (biggest < 0 || files[i].loc > files[biggest].loc)) biggest = i;
   for (let i = 1; i < N; i++) if (outDeg[i] > outDeg[entry]) entry = i;
   const nbLocs = files.filter(f => f.a?.r === 'notebook').map(f => f.loc).sort((a, b) => a - b);
   const barnLoc = nbLocs.length ? nbLocs[Math.floor(nbLocs.length * 0.85)] : Infinity; // only the biggest notebooks are barns
@@ -112,7 +113,7 @@ export function buildingSpecs({ files, B, inDeg, hub: hubIdx, unit, kind, t01 })
     const hub = i === hubIdx;
     const status = new Set(f.s || []);
     if (status.has('giant') && role === 'source') form = 'mega';
-    else if (hub) form = town ? 'clocktower' : kind === 'port' ? 'lighthouse' : kind === 'university' ? 'library' : kind === 'capital' ? 'congress' : kind === 'desert' ? 'needle' : kind === 'farm' ? 'windmill' : kind === 'industrial' ? 'cooling' : kind === 'science' ? 'ring' : (a.c || 0) >= 2 ? 'setback' : 'tower';
+    else if (hub) form = town ? 'clocktower' : kind === 'port' ? 'lighthouse' : kind === 'university' ? 'library' : kind === 'capital' ? 'congress' : kind === 'desert' ? 'needle' : kind === 'farm' ? 'windmill' : kind === 'industrial' ? 'cooling' : kind === 'science' ? 'ring' : kind === 'themepark' ? 'castle' : (a.c || 0) >= 2 ? 'setback' : 'tower';
     else if (kind === 'capital' && i === entry) form = 'cathedral'; // the file that imports the most: where the plan is read from
     else if (status.has('dead')) form = 'ruin';
     else if (sites.has(i)) form = 'site';
@@ -128,6 +129,14 @@ export function buildingSpecs({ files, B, inDeg, hub: hubIdx, unit, kind, t01 })
       else if (['slab', 'tower', 'setback', 'podium', 'hall', 'frame'].includes(form)) form = 'factory';
       else if (form === 'house') form = 'shed';
       else if (form === 'mega') form = 'plant';
+    }
+    // the theme park: the biggest script is the Ferris wheel, big ones are big tops, slender ones drop
+    // towers, the rest carousels; everything that isn't a script for the engine (tests, docs, the
+    // project's other code) is a stall along the paths
+    if (kind === 'themepark' && !hub && ['slab', 'tower', 'setback', 'podium', 'hall', 'frame', 'mega', 'house', 'shed'].includes(form)) {
+      if (i === biggest) form = 'ferris';
+      else if (!f.g || role === 'test' || role === 'docs') form = 'stall';
+      else form = f.loc > medLoc * 2.2 ? 'bigtop' : slender && i % 4 === 0 ? 'droptower' : 'carousel';
     }
     // the science park: code works in glass labs, training runs (and giants) in data centres, and the
     // tests are the greenhouses the experiments grow in
@@ -146,6 +155,9 @@ export function buildingSpecs({ files, B, inDeg, hub: hubIdx, unit, kind, t01 })
     if (form === 'needle') h = Math.max(b.h, unit * 8);
     if (form === 'windmill') h = Math.max(b.h, unit * 2.2);
     if (form === 'cooling') h = Math.max(b.h, unit * 3.5);
+    if (form === 'ferris') h = Math.max(b.h, unit * 3.2);
+    if (form === 'stall') h = Math.min(b.h, unit * 0.8);
+    if (form === 'bigtop' || form === 'carousel') h = Math.min(b.h, Math.min(b.w, b.d) * (form === 'bigtop' ? 0.85 : 0.75)); // tents are squat
     if (form === 'datacenter' || form === 'greenhouse') h = Math.min(b.h, unit * 1.1);
     if (form === 'cathedral') h = Math.max(b.h * 0.8, unit * 1.3);
     if (form === 'ruin') h *= 0.6;

@@ -248,6 +248,10 @@ export async function scanRepo(repo, { maxCommits = 20000, name } = {}) {
   } catch { }
 
   const status = fileStatus(files, start, end, tails, refs, jvmUsed);
+  // a game: once its engine is settled, every one of the project's own files in the engine's language
+  // is written for it (LÖVE's callbacks are in main.lua, but the other scripts are the game too)
+  const engine = gameEngine(files, listed, name);
+  if (engine) for (const f of files) if (ENGINE_LANG[engine.name].includes(f.lang) && !SAMPLE_DIR.test(f.p)) f.g = engine.name;
   const edges = files.reduce((n, f) => n + f.imp.size, 0);
   const city = {
     name,
@@ -258,7 +262,7 @@ export async function scanRepo(repo, { maxCommits = 20000, name } = {}) {
     files: files.map(f => ({ p: f.p, lang: f.lang, loc: f.loc, imp: [...f.imp], a: f.a, churn: f.churn, born: f.born, last: f.last, ...(status.get(f) && { s: status.get(f) }), ...(f.g && { g: f.g }) })),
     // compact: [time, fileIdx, fileIdx, ...]; skip giant sweeping commits (formatting, renames)
     commits: touched.filter(c => c.f.length < 200).map(c => [c.t, ...c.f]),
-    extras: { hardwareFiles, engine: gameEngine(files, listed, name), app: appPlatforms(root, listed) },
+    extras: { hardwareFiles, engine, app: appPlatforms(root, listed) },
   };
   city.identity = classify(city);
   return city;

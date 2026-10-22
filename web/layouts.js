@@ -24,7 +24,7 @@ function shortLabel(t) {
   return s.length > 22 ? s.slice(0, 21) + '…' : s;
 }
 
-export const CITY_KINDS = ['farm', 'desert', 'capital', 'mountain', 'university', 'port', 'industrial', 'science', 'smalltown', 'manhattan', 'hongkong', 'tokyo', 'la', 'paris', 'venice', 'barcelona'];
+export const CITY_KINDS = ['farm', 'desert', 'capital', 'mountain', 'university', 'port', 'industrial', 'science', 'themepark', 'smalltown', 'manhattan', 'hongkong', 'tokyo', 'la', 'paris', 'venice', 'barcelona'];
 
 // ---------------------------------------------------------------- shared helpers
 
@@ -624,6 +624,50 @@ const PLANNERS = {
       land: [rectPoly(x0 - 1, z0 - 1, x1 + 1, z1 + 1)],
       camera: { az: 45, el: 30, dist: 0.95 },
       height: (i, rel) => i === ctx.hub ? 1.1 : Math.min(0.5 + 0.55 * Math.sqrt(rel), 2),
+    };
+  },
+
+  // a theme park (a game): the most-imported file is the castle on an island in the middle, and each
+  // district is a land, a wedge of the ring around it, its rides scattered on the lawn between paths
+  themepark(ds, ctx) {
+    const FILL = 0.45;
+    const lands = ds.map(d => ({ d, items: d.items.filter(it => it.i !== ctx.hub) })).filter(x => x.items.length);
+    for (const l of lands) l.area = sum(l.items.map(it => it.a));
+    const total = sum(lands.map(l => l.area)) || 1;
+    const r0 = Math.max(2.8, Math.sqrt(ctx.area[ctx.hub] || 1) * 2.2); // the castle's island and its moat
+    const R = Math.sqrt(total / (Math.PI * FILL) + (r0 + 0.8) ** 2);
+    const MIN = Math.min(0.45, (Math.PI * 2) / Math.max(1, lands.length) * 0.5); // a small land still gets a slice to build on
+    const raw = lands.map(l => l.area / total * Math.PI * 2);
+    const short = sum(raw.map(x => Math.max(0, MIN - x))), big = sum(raw.filter(x => x > MIN)) || 1;
+    const spans = raw.map(x => x <= MIN ? MIN : x - short * (x / big));
+    const lots = [{ i: ctx.hub, x: 0, z: 0, w: r0 * 0.95, d: r0 * 0.95, rot: 0 }];
+    const blocks = [{ poly: circlePoly(0, 0, r0 - 0.9, 48), type: 'plaza' }], labels = [];
+    let t = -Math.PI / 2;
+    lands.forEach((l, k) => {
+      const t0 = t, t1 = t + spans[k];
+      t = t1;
+      const rin = r0 + 0.8, rout = R, rm = (rin + rout) / 2, ga = 0.3 / rm, a0 = t0 + ga, a1 = t1 - ga;
+      blocks.push({ poly: annularSector(rin, rout, a0, a1), type: l.d.periphery ? 'park' : 'lawn' });
+      // rides spread over the whole land on a loose grid (along the arc, out from the middle), then
+      // bent into the wedge; each a little off its grid point so the land doesn't look planted in rows
+      const W = (a1 - a0) * rm, D = rout - rin, n = l.items.length;
+      const cols = Math.max(1, Math.round(Math.sqrt(n * W / D))), rows = Math.ceil(n / cols), cw = W / cols, cd = D / rows;
+      [...l.items].sort((a, b) => b.a - a.a).forEach((it, m) => {
+        const row = Math.floor(m / cols), col = row % 2 ? cols - 1 - m % cols : m % cols;
+        const r = rin + (row + 0.5) * cd, sq = Math.min(Math.sqrt(it.a), Math.min(cw * r / rm, cd) * 0.8);
+        const th = a0 + ((col + 0.5) * cw + (hash(it.i) - 0.5) * (cw - sq) * 0.8) / rm, rr = r + (hash(it.i + 7) - 0.5) * (cd - sq) * 0.8;
+        lots.push({ i: it.i, x: Math.cos(th) * rr, z: Math.sin(th) * rr, w: sq, d: sq, rot: -(th + Math.PI / 2) });
+      });
+      const tm = (t0 + t1) / 2, rl = R + 0.7;
+      if (l.d.name !== '·') labels.push({ text: l.d.name, x: Math.cos(tm) * rl, z: Math.sin(tm) * rl });
+    });
+    const water = [circlePoly(0, 0, r0 + 0.25, 48)];
+    const bridges = [0, 1, 2, 3].map(q => { const a = q * Math.PI / 2 + Math.PI / 4; return { a: [Math.cos(a) * (r0 - 1.1), Math.sin(a) * (r0 - 1.1)], b: [Math.cos(a) * (r0 + 0.9), Math.sin(a) * (r0 + 0.9)], w: 0.5 }; });
+    return {
+      lots, blocks, labels, water, bridges, ground: 'land', paths: 'paved',
+      land: [rectPoly(-R - 1.2, -R - 1.2, R + 1.2, R + 1.2)],
+      camera: { az: 45, el: 32, dist: 0.9 },
+      height: (i, rel) => i === ctx.hub ? r0 * 1.15 : Math.min(0.6 + 0.85 * Math.sqrt(rel), 3.2),
     };
   },
 
