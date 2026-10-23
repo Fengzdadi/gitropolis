@@ -54,11 +54,13 @@ export function createPixelPipeline(renderer, scene, camera, { pixel = 3, outlin
         vec2 px = floor(vUv * uRes);
         vec3 c = toSRGB(clamp(texture2D(tColor, (px + 0.5) / uRes).rgb, 0.0, 1.0));
         c += bayer4(px) * 0.022; // just enough to break up banding; more reads as noise (and muddies the overview)
-        // nearest palette entry, weighted towards how the eye judges brightness
+        // nearest palette entry, weighted towards how the eye judges brightness: per channel, 9·w² for
+        // the luma weights w = (0.30, 0.59, 0.11) plus 0.35 overall, folded into one dot product (this
+        // loop runs for every pixel against every palette colour)
         vec3 best = uPalette[0]; float bd = 1e9;
         for (int k = 0; k < ${palette.length}; k++) {
-          vec3 d = (c - uPalette[k]) * vec3(0.30, 0.59, 0.11) * 3.0;
-          float e = dot(d, d) + 0.35 * dot(c - uPalette[k], c - uPalette[k]);
+          vec3 d = c - uPalette[k];
+          float e = dot(d * d, vec3(0.30 * 0.30 * 9.0 + 0.35, 0.59 * 0.59 * 9.0 + 0.35, 0.11 * 0.11 * 9.0 + 0.35));
           if (e < bd) { bd = e; best = uPalette[k]; }
         }
         // ink a pixel when a neighbour is much farther away: the silhouette of whatever is in front
