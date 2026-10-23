@@ -1128,6 +1128,8 @@ async function record() {
   if (PIXEL) await report('/meta', JSON.stringify({ px: ART_PX }));
   document.body.classList.add('recording');
   controls.enabled = false;
+  // the benchmark draws no text: it starts now, so its setup time isn't spent waiting for web fonts
+  if (REC.bench) return bench();
   // the web fonts are optional: offline their stylesheet may never arrive, and while it's pending
   // document.fonts.ready doesn't resolve either. Give them a few seconds, then draw with what there is.
   const sheet = document.getElementById('webfonts');
@@ -1318,7 +1320,6 @@ async function record() {
   }
 
   if (studio) await Promise.all([document.fonts.load(`400 64px ${studio.style.font}`), document.fonts.load(`400 16px ${studio.style.uiFont || 'Inter'}`)]);
-  if (REC.bench) return bench();
   if (REC.still) {
     setTimeline(1);
     heat.fill(0);

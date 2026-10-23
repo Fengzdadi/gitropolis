@@ -261,7 +261,7 @@ server.on('listening', () => {
   const chrome = findChrome();
   if (chrome && !headed) {
     rec.browser = spawn(chrome, ['--headless=new', `--window-size=${w},${h}`, '--hide-scrollbars', '--mute-audio',
-      '--enable-gpu', '--use-angle=default', '--enable-unsafe-swiftshader', '--no-first-run', '--no-default-browser-check', ...(benchMode ? ['--js-flags=--expose-gc'] : []),
+      '--enable-gpu', '--use-angle=default', '--enable-unsafe-swiftshader', '--no-first-run', '--no-default-browser-check', ...(benchMode ? ['--js-flags=--expose-gc --no-concurrent-array-buffer-sweeping', '--enable-precise-memory-info'] : []),
       `--user-data-dir=${path.join(rec.tmp, 'chrome')}`, recUrl], { stdio: 'ignore' });
   } else {
     console.log(`  open ${cyan(recUrl)} and keep the tab in front until it finishes`);
