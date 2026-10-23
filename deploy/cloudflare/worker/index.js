@@ -28,16 +28,18 @@ async function lookup(owner, repo, env, ctx) {
   const key = new Request(`https://gh.cache/${owner}/${repo}`);
   const cached = await caches.default.match(key);
   if (cached) return cached.json();
-  const gh = path => fetch(`https://api.github.com/repos/${owner}/${repo}${path}`, {
-    headers: { 'user-agent': 'gitropolis', accept: 'application/vnd.github+json', ...(env.GITHUB_TOKEN && { authorization: `Bearer ${env.GITHUB_TOKEN}` }) },
+  const gh = (path, accept = 'application/vnd.github+json') => fetch(`https://api.github.com/repos/${owner}/${repo}${path}`, {
+    headers: { 'user-agent': 'gitropolis', accept, ...(env.GITHUB_TOKEN && { authorization: `Bearer ${env.GITHUB_TOKEN}` }) },
   });
-  const r = await gh('');
+  // both at once: GitHub resolves HEAD to the default branch, and the .sha media type answers with
+  // just the commit's sha instead of the whole commit and its diff
+  const [r, c] = await Promise.all([gh(''), gh('/commits/HEAD', 'application/vnd.github.sha')]);
+  if (!r.ok) await c.body?.cancel(); // the commit isn't wanted then
   if (r.status === 404) return { missing: true };
   if (!r.ok) throw new Error(`GitHub said ${r.status}`);
   const meta = await r.json();
-  const c = await gh(`/commits/${encodeURIComponent(meta.default_branch)}`);
   if (!c.ok) throw new Error(`GitHub said ${c.status}`);
-  const info = { full: meta.full_name, private: meta.private, size: meta.size, sha: (await c.json()).sha, stars: meta.stargazers_count };
+  const info = { full: meta.full_name, private: meta.private, size: meta.size, sha: (await c.text()).trim(), stars: meta.stargazers_count };
   ctx.waitUntil(caches.default.put(key, new Response(JSON.stringify(info), { headers: { 'cache-control': 'max-age=600' } })));
   return info;
 }
