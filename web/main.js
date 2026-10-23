@@ -168,7 +168,9 @@ const REC = params.get('record') ? {
 const viewW = () => REC ? REC.w : innerWidth;
 const viewH = () => REC ? REC.h : innerHeight;
 
-const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance', preserveDrawingBuffer: !!REC });
+// pixel art draws the city off screen and puts only a full-screen quad on the canvas: multisampling it
+// would cost a screen-sized buffer per sample and change no pixel
+const renderer = new THREE.WebGLRenderer({ antialias: !PIXEL, powerPreference: 'high-performance', preserveDrawingBuffer: !!REC });
 renderer.setPixelRatio(REC ? (PIXEL ? 1 : 1.5) : Math.min(devicePixelRatio, 2)); // 1.5x supersampling when filming (pixel art does its own)
 renderer.setSize(viewW(), viewH(), !REC);
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
