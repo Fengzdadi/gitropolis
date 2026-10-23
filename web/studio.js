@@ -284,7 +284,7 @@ export function buildStudio(ctx) {
   // the field's lookup tables were only needed to plan routes; the GPU keeps its own copy of the texture
   const trees = S.pixel && layout ? timed('trees', () => buildTrees({ layout, B, streets, unit: layout.unit, plateStep, shared })) : null;
   if (trees) scene.add(trees);
-  if (streets) { streets.drivable = streets.navigable = null; streets.curbs = null; streets.lanes = streets.boats = null; streets.texture.onUpdate = () => { streets.texture.image.data = null; }; }
+  if (streets) { streets.drivable = streets.navigable = streets.bornAt = null; streets.curbs = null; streets.lanes = streets.boats = null; streets.texture.onUpdate = t => { t.image.data = null; }; }
   const roadY = layout?.groundIsWater ? plateStep * 0.8 + 0.05 : 0.05;
 
   // ---- district plinths (classic treemap only)
