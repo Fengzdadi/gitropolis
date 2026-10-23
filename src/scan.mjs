@@ -295,6 +295,10 @@ function fileStatus(files, start, end, tails, refs, jvmUsed) {
   const locs = code.map(f => f.loc).sort((a, b) => a - b);
   const giantMin = Math.max(2000, 8 * (locs[locs.length >> 1] || 0));
   const giants = code.filter(f => f.loc >= giantMin).sort((a, b) => b.loc - a.loc).slice(0, Math.max(1, Math.floor(code.length * 0.01)));
+  // new means newer than the city around it, so there must be a city already: most of the code older
+  // than the window. A young repo, or one that was a README for months before its code came, has none
+  const oldLoc = code.reduce((s, f) => s + (end - f.born > win ? f.loc : 0), 0);
+  const settled = oldLoc * 2 > code.reduce((s, f) => s + f.loc, 0);
 
   files.forEach((f, i) => {
     const base = f.p.slice(f.p.lastIndexOf('/') + 1);
@@ -305,7 +309,7 @@ function fileStatus(files, start, end, tails, refs, jvmUsed) {
         && !jvmUsed.has(i) && !(f.lang === 'kt' && ktUsed.has(path.posix.dirname(f.p)))
         && !(tails.has(stem) || tails.has(path.posix.basename(path.posix.dirname(f.p)) + '/' + stem)) // aliased imports (`@/x/foo`) we could not resolve
         && (f.imp.size || f.loc >= 30) && end - f.last > 2 * YEAR) add(f, 'dead');
-    if (end - f.born <= win) add(f, 'new');
+    if (settled && end - f.born <= win) add(f, 'new');
     if (giants.includes(f)) add(f, 'giant');
   });
   return out;
