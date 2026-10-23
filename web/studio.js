@@ -225,6 +225,15 @@ export function buildStudio(ctx) {
   if (!S.flat) {
     renderer.shadowMap.enabled = true;
     renderer.shadowMap.type = S.pixel ? THREE.BasicShadowMap : THREE.PCFSoftShadowMap; // pixel art wants hard shadows
+    // the sun stands still, and whatever casts a shadow (buildings, trees, land) moves only as the timeline
+    // grows it in (vehicles cast none): redraw the shadow map when the timeline moves, not every frame
+    renderer.shadowMap.autoUpdate = false;
+    let shadowsAt = NaN;
+    scene.onBeforeRender = () => {
+      if (shared.uTimeline.value === shadowsAt) return;
+      shadowsAt = shared.uTimeline.value;
+      renderer.shadowMap.needsUpdate = true;
+    };
     const sun = new THREE.DirectionalLight(S.sun.color, S.sun.intensity);
     const el = THREE.MathUtils.degToRad(S.sun.elevation), az = THREE.MathUtils.degToRad(S.sun.azimuth);
     sun.position.set(Math.cos(el) * Math.cos(az), Math.sin(el), Math.cos(el) * Math.sin(az)).multiplyScalar(SIZE * 1.6);
