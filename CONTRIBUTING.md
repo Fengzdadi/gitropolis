@@ -57,6 +57,8 @@ gitropolis is checked against real repos. `npm test` scans seven public repos, e
 
 If your change is meant to move a repo, run `npm test -- --update`, read the snapshot diff, and commit it with your change. Say in the pull request why each repo moved. CI runs the same test on Node 18 and 22.
 
+`npm test` first checks that `web/index.html` preloads every module the page imports. If you add or remove an import, `node test/preload.mjs --print` gives the list to paste in.
+
 Before opening a pull request:
 
 1. **Run `npm test`.** Most changes shouldn't move any of the pinned repos, and none should change city type unless that's the point of the change.

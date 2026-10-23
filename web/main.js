@@ -31,17 +31,14 @@ const PIXEL = STYLE === 'pixel';
 // art-pixel size in screen pixels, and how far to zoom in (close-ups frame the city's landmark)
 const PIXEL_SIZE = Math.max(1, Math.round((+params.get('px') || 1) * 4) / 4); // one art pixel per screen pixel unless ?px= asks for chunkier (quarter steps)
 const ZOOM = +params.get('zoom') || 1;
-// Where the city comes from: the CLI serves city.json; the hosted site (gitropolis.dev/owner/repo)
-// asks its API; ?data= may point at another city file, but only on this server, never another site.
-const dataSrc = params.get('data');
 const route = /^\/([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+?)(?:\.git)?\/?$/.exec(location.pathname);
 const loadingEl = document.getElementById('loading');
 if (STYLE === 'pixel') document.body.classList.add('waiting');
 // a little building site to watch while the city is surveyed (a first visit can take a minute)
 let stopWaiting = () => {};
 if (route) stopWaiting = startWaiting(loadingEl, `surveying ${route[1]}/${route[2]}`);
-const resp = await fetch(dataSrc && !/^([a-z][\w+.-]*:|\/\/|\\)/i.test(dataSrc) ? dataSrc
-  : route ? `/api/city/${encodeURIComponent(route[1])}/${encodeURIComponent(route[2])}${params.get('card') ? '?for=card' : ''}` : 'city.json');
+// the city was asked for by index.html, while this code was still loading
+const resp = await window.__city;
 const isJSON = (resp.headers.get('content-type') || '').includes('json');
 if (!route && !(resp.ok && isJSON)) {
   // no city here: the hosted site's front door

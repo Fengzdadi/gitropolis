@@ -172,6 +172,79 @@
   "mp4-muxer": "./vendor/mp4-muxer/mp4-muxer.js"
 } }
 </script>
+<script>
+  // Ask for the city now, alongside the code, rather than once every module has arrived (main.js
+  // awaits it). The CLI serves city.json; the hosted site (gitropolis.dev/owner/repo) asks its API;
+  // ?data= may point at another city file, but only on this server, never another site.
+  window.__city = (() => {
+    const params = new URLSearchParams(location.search), data = params.get('data');
+    const route = /^\/([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+?)(?:\.git)?\/?$/.exec(location.pathname);
+    return fetch(data && !/^([a-z][\w+.-]*:|\/\/|\\)/i.test(data) ? data
+      : route ? `/api/city/${encodeURIComponent(route[1])}/${encodeURIComponent(route[2])}${params.get('card') ? '?for=card' : ''}` : 'city.json');
+  })();
+</script>
+<!-- every module the page imports, so they're all requested at once instead of one import level at a
+     time (test/preload.mjs keeps this list in step with the code: node test/preload.mjs --print) -->
+<link rel="modulepreload" href="main.js">
+<link rel="modulepreload" href="vendor/three/three.module.min.js">
+<link rel="modulepreload" href="vendor/three/addons/controls/OrbitControls.js">
+<link rel="modulepreload" href="vendor/three/addons/postprocessing/EffectComposer.js">
+<link rel="modulepreload" href="vendor/three/addons/shaders/CopyShader.js">
+<link rel="modulepreload" href="vendor/three/addons/postprocessing/ShaderPass.js">
+<link rel="modulepreload" href="vendor/three/addons/postprocessing/Pass.js">
+<link rel="modulepreload" href="vendor/three/addons/postprocessing/MaskPass.js">
+<link rel="modulepreload" href="vendor/three/addons/postprocessing/RenderPass.js">
+<link rel="modulepreload" href="vendor/three/addons/postprocessing/UnrealBloomPass.js">
+<link rel="modulepreload" href="vendor/three/addons/shaders/LuminosityHighPassShader.js">
+<link rel="modulepreload" href="vendor/three/addons/postprocessing/OutputPass.js">
+<link rel="modulepreload" href="vendor/three/addons/shaders/OutputShader.js">
+<link rel="modulepreload" href="vendor/d3-hierarchy/index.js">
+<link rel="modulepreload" href="vendor/d3-hierarchy/cluster.js">
+<link rel="modulepreload" href="vendor/d3-hierarchy/hierarchy/index.js">
+<link rel="modulepreload" href="vendor/d3-hierarchy/hierarchy/count.js">
+<link rel="modulepreload" href="vendor/d3-hierarchy/hierarchy/each.js">
+<link rel="modulepreload" href="vendor/d3-hierarchy/hierarchy/eachBefore.js">
+<link rel="modulepreload" href="vendor/d3-hierarchy/hierarchy/eachAfter.js">
+<link rel="modulepreload" href="vendor/d3-hierarchy/hierarchy/find.js">
+<link rel="modulepreload" href="vendor/d3-hierarchy/hierarchy/sum.js">
+<link rel="modulepreload" href="vendor/d3-hierarchy/hierarchy/sort.js">
+<link rel="modulepreload" href="vendor/d3-hierarchy/hierarchy/path.js">
+<link rel="modulepreload" href="vendor/d3-hierarchy/hierarchy/ancestors.js">
+<link rel="modulepreload" href="vendor/d3-hierarchy/hierarchy/descendants.js">
+<link rel="modulepreload" href="vendor/d3-hierarchy/hierarchy/leaves.js">
+<link rel="modulepreload" href="vendor/d3-hierarchy/hierarchy/links.js">
+<link rel="modulepreload" href="vendor/d3-hierarchy/hierarchy/iterator.js">
+<link rel="modulepreload" href="vendor/d3-hierarchy/pack/index.js">
+<link rel="modulepreload" href="vendor/d3-hierarchy/accessors.js">
+<link rel="modulepreload" href="vendor/d3-hierarchy/constant.js">
+<link rel="modulepreload" href="vendor/d3-hierarchy/lcg.js">
+<link rel="modulepreload" href="vendor/d3-hierarchy/pack/siblings.js">
+<link rel="modulepreload" href="vendor/d3-hierarchy/array.js">
+<link rel="modulepreload" href="vendor/d3-hierarchy/pack/enclose.js">
+<link rel="modulepreload" href="vendor/d3-hierarchy/partition.js">
+<link rel="modulepreload" href="vendor/d3-hierarchy/treemap/round.js">
+<link rel="modulepreload" href="vendor/d3-hierarchy/treemap/dice.js">
+<link rel="modulepreload" href="vendor/d3-hierarchy/stratify.js">
+<link rel="modulepreload" href="vendor/d3-hierarchy/tree.js">
+<link rel="modulepreload" href="vendor/d3-hierarchy/treemap/index.js">
+<link rel="modulepreload" href="vendor/d3-hierarchy/treemap/squarify.js">
+<link rel="modulepreload" href="vendor/d3-hierarchy/treemap/slice.js">
+<link rel="modulepreload" href="vendor/d3-hierarchy/treemap/binary.js">
+<link rel="modulepreload" href="vendor/d3-hierarchy/treemap/sliceDice.js">
+<link rel="modulepreload" href="vendor/d3-hierarchy/treemap/resquarify.js">
+<link rel="modulepreload" href="studio.js">
+<link rel="modulepreload" href="vendor/three/addons/utils/BufferGeometryUtils.js">
+<link rel="modulepreload" href="buildings.js">
+<link rel="modulepreload" href="architecture.js">
+<link rel="modulepreload" href="surfaces.js">
+<link rel="modulepreload" href="streets.js">
+<link rel="modulepreload" href="perf.js">
+<link rel="modulepreload" href="trees.js">
+<link rel="modulepreload" href="layouts.js">
+<link rel="modulepreload" href="pixel.js">
+<link rel="modulepreload" href="waiting.js">
+<link rel="modulepreload" href="card.js">
+<link rel="modulepreload" href="png.js">
 </head>
 <body>
 <div id="loading">BUILDING CITY…</div>

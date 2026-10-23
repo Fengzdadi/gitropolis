@@ -2,8 +2,6 @@
 // post, a story), with the repo's name, what kind of city it is, its history and where to see it.
 // The city is rendered off screen at art resolution and every art pixel becomes a 2×2 block, so the
 // pixels survive a social network's JPEG recompression and stay crisp on phone screens.
-import { GIFEncoder, quantize, applyPalette } from 'gifenc';
-import { Muxer, ArrayBufferTarget } from 'mp4-muxer';
 import { canvasPNG } from './png.js';
 
 const INK = '#14121c', SOFT = '#4a4458', PAPER = '#f2efe9', ACCENT = '#c0413b', BAR_OFF = '#cdc8d2';
@@ -208,6 +206,8 @@ export async function filmCity(kind, format, info, stage, { progress = () => {},
     if (gif) {
       // one palette for the whole film, taken from the finished city (plus a slot for "unchanged")
       draw(st.frame(1, 0));
+      // the encoders are only fetched for a film, not with every page
+      const { GIFEncoder, quantize, applyPalette } = await import('gifenc');
       const palette = quantize(g.getImageData(0, 0, OW, OH).data, 255);
       while (palette.length < 255) palette.push([0, 0, 0]);
       palette.push([0, 0, 0]);
@@ -236,6 +236,7 @@ export async function filmCity(kind, format, info, stage, { progress = () => {},
       if ((await VideoEncoder.isConfigSupported({ ...base, codec }).catch(() => ({})))?.supported) { config = { ...base, codec }; muxCodec = mc; break; }
     }
     if (!config) throw new Error("this browser can't encode video");
+    const { Muxer, ArrayBufferTarget } = await import('mp4-muxer');
     const muxer = new Muxer({ target: new ArrayBufferTarget(), video: { codec: muxCodec, width: OW, height: OH }, fastStart: 'in-memory' });
     let failed = null;
     const encoder = new VideoEncoder({ output: (chunk, meta) => muxer.addVideoChunk(chunk, meta), error: e => { failed = e; } });

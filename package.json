@@ -10,7 +10,7 @@
   "bugs": { "url": "https://github.com/Fengzdadi/gitropolis/issues" },
   "type": "module",
   "bin": { "gitropolis": "bin/cli.mjs" },
-  "scripts": { "test": "node test/snapshot.mjs" },
+  "scripts": { "test": "node test/preload.mjs && node test/snapshot.mjs" },
   "files": ["bin", "src", "web", "!web/og.png", "!web/_headers"],
   "engines": { "node": ">=18" }
 }
