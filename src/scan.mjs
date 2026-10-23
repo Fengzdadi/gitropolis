@@ -123,11 +123,49 @@ export async function scanRepo(repo, { maxCommits = 20000, name } = {}) {
   name ||= path.basename(root);
   const listed = git(root, ['ls-files', '-z']).split('\0').filter(Boolean);
 
+  // ---- git history: one pass over `git log --name-status`, oldest first, following renames
+  // so a file moved into src/ keeps the birthday of its original path. (Only which files each commit
+  // touched matters, not how many lines: --numstat would diff every changed file, often 10x slower.)
+  // git runs alongside the reading of the files below, in its own process; the two only meet at the end.
+  const commits = [];
+  const alias = new Map(); // path at this point in history -> history record
+  const history = new Promise((resolve, reject) => {
+    // quotePath=false: non-ASCII names (中文.md, café.js) come back as raw UTF-8, matching ls-files
+    const proc = spawn('git', ['-C', root, '-c', 'core.quotePath=false', 'log', `--max-count=${maxCommits}`, '--name-status',
+      '--format=@@%ct', '-M', '--reverse'], { stdio: ['ignore', 'pipe', 'ignore'] });
+    const rl = readline.createInterface({ input: proc.stdout });
+    let cur = null;
+    rl.on('line', line => {
+      if (line.startsWith('@@')) {
+        cur = { t: +line.slice(2), f: [] };
+        commits.push(cur);
+        return;
+      }
+      // "M\tpath", or "R097\told\tnew" for a rename (a path with a tab in it comes quoted)
+      const parts = line.split('\t');
+      if (!cur || parts.length < 2) return;
+      const from = unquote(parts[1]), to = parts[0][0] === 'R' ? unquote(parts[2]) : from;
+      let h = alias.get(from);
+      if (from !== to) { alias.delete(from); }
+      if (!h) h = { born: cur.t, last: 0, churn: 0 };
+      alias.set(to, h);
+      h.last = cur.t;
+      h.churn++;
+      cur.f.push(h);
+    });
+    proc.on('error', reject);
+    proc.on('close', resolve);
+  });
+  history.catch(() => {}); // (a failure surfaces where it's awaited)
+
   const files = [];
   const refs = new Set();
   const index = new Map(); // path -> idx
   const hardwareFiles = listed.filter(p => /\.(v|sv|svh|vhd|vhdl)$/i.test(p)).length;
+  let read = 0;
   for (const p of listed) {
+    // now and then let git's output drain (a full pipe would stop git until the files are read)
+    if (++read % 256 === 0) await new Promise(setImmediate);
     const ext = p.slice(p.lastIndexOf('.') + 1).toLowerCase();
     const base = p.slice(p.lastIndexOf('/') + 1);
     const lang = LOCKFILE.test(p) ? 'lock' : CFG_FILE.test(p) ? 'cfg' : docRole(base) ? 'doc'
@@ -196,38 +234,7 @@ export async function scanRepo(repo, { maxCommits = 20000, name } = {}) {
 
   const { tails, jvmUsed } = resolveImports(root, files, index, listed);
 
-  // ---- git history: one pass over `git log --name-status`, oldest first, following renames
-  // so a file moved into src/ keeps the birthday of its original path. (Only which files each commit
-  // touched matters, not how many lines: --numstat would diff every changed file, often 10x slower.)
-  const commits = [];
-  const alias = new Map(); // path at this point in history -> history record
-  await new Promise((resolve, reject) => {
-    // quotePath=false: non-ASCII names (中文.md, café.js) come back as raw UTF-8, matching ls-files
-    const proc = spawn('git', ['-C', root, '-c', 'core.quotePath=false', 'log', `--max-count=${maxCommits}`, '--name-status',
-      '--format=@@%ct', '-M', '--reverse'], { stdio: ['ignore', 'pipe', 'ignore'] });
-    const rl = readline.createInterface({ input: proc.stdout });
-    let cur = null;
-    rl.on('line', line => {
-      if (line.startsWith('@@')) {
-        cur = { t: +line.slice(2), f: [] };
-        commits.push(cur);
-        return;
-      }
-      // "M\tpath", or "R097\told\tnew" for a rename (a path with a tab in it comes quoted)
-      const parts = line.split('\t');
-      if (!cur || parts.length < 2) return;
-      const from = unquote(parts[1]), to = parts[0][0] === 'R' ? unquote(parts[2]) : from;
-      let h = alias.get(from);
-      if (from !== to) { alias.delete(from); }
-      if (!h) h = { born: cur.t, last: 0, churn: 0 };
-      alias.set(to, h);
-      h.last = cur.t;
-      h.churn++;
-      cur.f.push(h);
-    });
-    proc.on('error', reject);
-    proc.on('close', resolve);
-  });
+  await history;
   const recIdx = new Map();
   for (const [p, h] of alias) {
     const idx = index.get(p);
