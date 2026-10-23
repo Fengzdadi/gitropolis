@@ -159,6 +159,7 @@ rows.forEach((row, r) => row.items.forEach((it, c) => {
   holder.add(m);
   ground.scale.set(it.spec.w * 1.35, it.spec.d * 1.35, 1);
   // fit this building (plus a ground margin) to its cell in view space
+  g.computeBoundingBox();
   const bb = g.boundingBox, f = Math.max(it.spec.w, it.spec.d) * 0.7;
   let x0 = 1e9, x1 = -1e9, y0 = 1e9, y1 = -1e9;
   for (const x of [bb.min.x - f * 0.2, bb.max.x + f * 0.2]) for (const y of [0, bb.max.y]) for (const z of [bb.min.z - f * 0.2, bb.max.z + f * 0.2]) {

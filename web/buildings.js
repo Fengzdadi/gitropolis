@@ -148,7 +148,8 @@ class Builder {
     g.setAttribute('normal', new THREE.Float32BufferAttribute(this.n, 3));
     g.setAttribute('color', new THREE.Float32BufferAttribute(this.c, 3));
     g.setAttribute('part', new THREE.Float32BufferAttribute(this.k, 1));
-    g.computeBoundingBox(); g.computeBoundingSphere();
+    // no bounds: the city moves every building into place (each move would compute them again) and merges
+    // it, three.js computes them when it needs them, and the gallery asks for the box it frames with
     return g;
   }
 }
