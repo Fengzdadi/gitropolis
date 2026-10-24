@@ -14,7 +14,9 @@ import { fileURLToPath } from 'node:url';
 import { scanRepo } from '../src/scan.mjs';
 
 const args = process.argv.slice(2);
-const PKG = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'));
+// anything after a lone -- is the repo, never an option (a folder's name can start with a dash)
+const afterDashes = args.includes('--') ? args.splice(args.indexOf('--')).slice(1) : [];
+const PKG =JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'));
 if (args.includes('--version') || args.includes('-v')) { console.log(PKG.version); process.exit(0); }
 if (args.includes('--help') || args.includes('-h')) {
   console.log(`gitropolis ${PKG.version} — your git repo as a pixel-art city
@@ -72,8 +74,10 @@ const noHud = bool('--no-hud');
 const fixedCam = bool('--static'); // films: hold the establishing shot instead of pushing in
 const benchMode = bool('--bench'); // measure setup and frame cost in headless Chrome
 const noOpen = bool('--no-open');
-const unknown = args.find(a => a.startsWith('-'));
+// what's left is the repo: a word starting with a dash is a mistyped option, unless it's a folder that's there
+const unknown = args.find(a => a.startsWith('-') && !existsSync(a));
 if (unknown) fail(`unknown option ${unknown} (see --help)`);
+args.push(...afterDashes);
 if (args.length > 1) fail(`one repo at a time (got ${args.join(', ')})`);
 const repo = args[0] || process.cwd();
 if (!existsSync(repo)) { console.error(`gitropolis: no such folder ${repo}`); process.exit(1); }
