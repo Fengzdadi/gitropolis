@@ -27,6 +27,9 @@ const mono = (t, px) => Math.ceil(t.length * px * 0.6);
 const icon = (x, y, s) => `<g transform="translate(${x} ${y}) scale(${s / 32})" shape-rendering="crispEdges">${ICON}</g>`;
 
 // city: { kind, buildings } or null when the repo hasn't been built yet
+// pixel and card sit in a 1px white rim, in 1px of clear space: unseen on a white page, it keeps their ink edge from
+// sinking into a dark one (GitHub's dark theme). That puts the art 2px in (the viewBox starts at -2), an even number,
+// so at 150% or 250% zoom it still falls on whole device pixels, as it did before
 export function badgeSVG(style, city) {
   const right = city ? `built like ${PHRASE[city.kind] || city.kind}` : 'see the city';
   const color = (city && KIND_COLOR[city.kind]) || '#4a4458';
@@ -34,16 +37,16 @@ export function badgeSVG(style, city) {
   if (style === 'pixel') {
     const label = city ? PHRASE[city.kind] || city.kind : 'see the city', lead = city ? 'built like ' : '';
     const tw = mono(lead + label, 12), W = 4 + 18 + 6 + tw + 10 + 2, H = 24;
-    return `<svg xmlns="http://www.w3.org/2000/svg" width="${W + 2}" height="${H + 2}" viewBox="0 0 ${W + 2} ${H + 2}" role="img" aria-label="${title}"><title>${title}</title>
-<rect x="2" y="2" width="${W}" height="${H}" fill="#14121c"/><rect width="${W}" height="${H}" fill="#14121c"/><rect x="2" y="2" width="${W - 4}" height="${H - 4}" fill="#f2efe9"/>
+    return `<svg xmlns="http://www.w3.org/2000/svg" width="${W + 6}" height="${H + 6}" viewBox="-2 -2 ${W + 6} ${H + 6}" role="img" aria-label="${title}"><title>${title}</title>
+<g fill="#fff" shape-rendering="crispEdges"><rect x="1" y="1" width="${W + 2}" height="${H + 2}"/><rect x="-1" y="-1" width="${W + 2}" height="${H + 2}"/></g><rect x="2" y="2" width="${W}" height="${H}" fill="#14121c"/><rect width="${W}" height="${H}" fill="#14121c"/><rect x="2" y="2" width="${W - 4}" height="${H - 4}" fill="#f2efe9"/>
 ${icon(5, 3, 18)}
 <text x="28" y="16.5" font-family="'Courier New',Courier,monospace" font-size="12" fill="#14121c" textLength="${tw}">${esc(lead)}<tspan fill="${color}" font-weight="bold">${esc(label)}</tspan></text></svg>`;
   }
   if (style === 'card') {
     const line1 = 'gitropolis', line2 = city ? `${right} · ${city.buildings.toLocaleString('en')} buildings` : 'see this repo as a city';
     const tw = Math.max(mono(line1, 12), mono(line2, 11)), W = 4 + 28 + 8 + tw + 10, H = 34;
-    return `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" role="img" aria-label="${title}"><title>${title}</title>
-<rect width="${W}" height="${H}" rx="2" fill="#14121c"/><rect x="2" y="2" width="${W - 4}" height="${H - 4}" rx="1" fill="#86bfd9"/>
+    return `<svg xmlns="http://www.w3.org/2000/svg" width="${W + 4}" height="${H + 4}" viewBox="-2 -2 ${W + 4} ${H + 4}" role="img" aria-label="${title}"><title>${title}</title>
+<rect x="-1" y="-1" width="${W + 2}" height="${H + 2}" rx="3" fill="#fff"/><rect width="${W}" height="${H}" rx="2" fill="#14121c"/><rect x="2" y="2" width="${W - 4}" height="${H - 4}" rx="1" fill="#86bfd9"/>
 ${icon(4, 3, 28)}
 <text font-family="'Courier New',Courier,monospace" fill="#14121c"><tspan x="40" y="15" font-size="12" font-weight="bold" textLength="${mono(line1, 12)}">${line1}</tspan><tspan x="40" y="27" font-size="11" textLength="${mono(line2, 11)}">${esc(line2)}</tspan></text></svg>`;
   }
