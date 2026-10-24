@@ -646,7 +646,9 @@ const PLANNERS = {
     lands.forEach((l, k) => {
       const t0 = t, t1 = t + spans[k];
       t = t1;
-      const rin = r0 + 0.8, rout = R, rm = (rin + rout) / 2, ga = 0.3 / rm, a0 = t0 + ga, a1 = t1 - ga;
+      // a path between lands is 0.6 wide but never more than 30% of a land: with dozens of lands the
+      // wedges are thin, and a full-width path would leave too little room for its rides, or less than none
+      const rin = r0 + 0.8, rout = R, rm = (rin + rout) / 2, ga = Math.min(0.3 / rm, (t1 - t0) * 0.15), a0 = t0 + ga, a1 = t1 - ga;
       blocks.push({ poly: annularSector(rin, rout, a0, a1), type: l.d.periphery ? 'park' : 'lawn' });
       // rides spread over the whole land on a loose grid (along the arc, out from the middle), then
       // bent into the wedge; each a little off its grid point so the land doesn't look planted in rows
