@@ -178,12 +178,14 @@ renderer.toneMappingExposure = 1.0;
 document.body.prepend(renderer.domElement);
 // A phone that sends the tab to the background (or a GPU reset) can take the WebGL context away. The
 // city's geometry lives only on the GPU once uploaded (see buildCityMesh), so it can't be put back as
-// it was: reload the page instead, once it's in view again (but not round and round).
+// it was: reload the page instead, once it's in view again. Only once until a city has stayed on screen
+// for 15 s (the loop clears the mark): a city too big for the GPU loses it again while uploading, however
+// long that takes, and would otherwise reload round and round.
 renderer.domElement.addEventListener('webglcontextlost', () => {
   if (REC) return fail('the browser lost the WebGL context');
-  let last = 0;
-  try { last = +sessionStorage.getItem('gitropolis.lost') || 0; } catch { /* no storage: reload anyway */ }
-  if (Date.now() - last < 15_000) {
+  let again = false;
+  try { again = !!sessionStorage.getItem('gitropolis.lost'); } catch { /* no storage: reload anyway */ }
+  if (again) {
     const n = document.getElementById('note');
     n.textContent = 'the graphics card keeps resetting — reload the page to see the city again';
     n.classList.add('show');
@@ -191,7 +193,7 @@ renderer.domElement.addEventListener('webglcontextlost', () => {
   }
   const reload = () => {
     if (document.hidden) return;
-    try { sessionStorage.setItem('gitropolis.lost', String(Date.now())); } catch { /* as above */ }
+    try { sessionStorage.setItem('gitropolis.lost', '1'); } catch { /* as above */ }
     location.reload();
   };
   renderer.domElement.addEventListener('webglcontextrestored', reload);
@@ -1072,6 +1074,7 @@ function tick(dt) {
 
 if (!REC) {
   const clock = new THREE.Clock();
+  let shown = false;
   renderer.setAnimationLoop(() => {
     const dt = Math.min(clock.getDelta(), 0.1);
     if (staged) return; // a share film is being shot: hold the live view
@@ -1083,6 +1086,8 @@ if (!REC) {
     controls.update();
     updateLabels();
     renderFrame();
+    // the city is on screen: once it has stayed 15 s, a lost context may reload the page again
+    if (!shown) { shown = true; setTimeout(() => { try { sessionStorage.removeItem('gitropolis.lost'); } catch { /* no storage */ } }, 15_000); }
   });
 } else {
   record().catch(err => report('/fail', String(err?.stack || err)));
