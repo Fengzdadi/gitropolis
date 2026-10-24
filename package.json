@@ -1,6 +1,6 @@
 {
   "name": "gitropolis",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Your git repo as a pixel-art city that grows along its history.",
   "keywords": ["git", "visualization", "code-city", "pixel-art", "isometric", "threejs", "cli"],
   "author": "Fengzdadi",
