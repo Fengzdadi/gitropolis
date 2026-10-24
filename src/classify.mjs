@@ -11,10 +11,10 @@ const FARM = new Set(['nb', 'data', 'model']);
 const PROSE = new Set(['md']);
 const INFRA_NAMES = { tf: 'Terraform', k8s: 'Kubernetes manifests', chart: 'Helm charts', values: 'Helm charts', kustomize: 'Kustomize', jsonnet: 'jsonnet', ansible: 'Ansible', nix: 'Nix', tmpl: 'templates', yaml: 'YAML' };
 const YEAR = 365.25 * 86400;
-const TEST_RE = /(^|\/)(tests?|__tests__|specs?|e2e|testing)(\/|$)|(^|\/)src\/\w*Test\w*\/|\.(test|spec)\.[a-z]+$|_test\.(go|py|rs)$|(^|\/)test_[^/]+\.py$/;
+const TEST_RE = /(^|\/)(tests?|test_\w+|integration_test|__tests__|specs?|e2e|testing)(\/|$)|(^|\/)src\/\w*Test\w*\/|\.(test|spec)\.[a-z]+$|_test\.(go|py|rs|dart)$|(^|\/)test_[^/]+\.py$/;
 const GROUP_RE = /^(packages|apps|libs|crates|modules|plugins|services|projects)\/[^/]+/;
 // tests, docs, examples, fixtures… are part of the city, but they don't decide which city it is
-const NONCORE_RE = /(^|\/)(tests?|__tests__|specs?|e2e|testing|fixtures?|__fixtures__|samples?|examples?|docs?|playground|benchmarks?|bench|scripts|website|site|\.github)(\/|$)|(^|\/)src\/\w*Test\w*\/|\.(test|spec|stories)\.[a-z]+$|_test\.(go|py|rs)$|(^|\/)test_[^/]+\.py$/;
+const NONCORE_RE = /(^|\/)(tests?|test_\w+|integration_test|__tests__|specs?|e2e|testing|fixtures?|__fixtures__|samples?|examples?|docs?|playground|benchmarks?|bench|scripts|website|site|\.github)(\/|$)|(^|\/)src\/\w*Test\w*\/|\.(test|spec|stories)\.[a-z]+$|_test\.(go|py|rs|dart)$|(^|\/)test_[^/]+\.py$/;
 
 // a training run, a fine-tune: the science park's data centres
 export const TRAIN_RE = /(^|\/)(train|finetune|fine_tune|pretrain)[^/]*\.(py|c|cu)$/i;

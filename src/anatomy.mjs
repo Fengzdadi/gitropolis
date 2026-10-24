@@ -116,8 +116,8 @@ const C = {
 };
 LANG.c = LANG.cpp = C;
 
-const TEST_PATH = /(^|\/)(tests?|__tests\w*__|specs?|__mocks__|__fixtures__|fixtures?|e2e|cypress|testdata|playgrounds?)\/|\.(test|spec)\.\w+$|_test\.(go|py|rs|c|cc|cpp|exs?)$|(^|\/)test_[^/]*\.py$|(^|\/)conftest\.py$|[a-z0-9](Test|Tests|Spec)\.(java|kt|cs|swift|scala|php)$|(^|\/)tests?\.(rs|py|[cm]?[jt]s)$|(^|\/)src\/\w*Test\w*\//;
-const BUILD_PATH = /(^|\/)(scripts?|\.github|\.circleci|\.gitlab|ci)\/|(^|\/)(build\.rs|setup\.py|noxfile\.py|tasks\.py|fabfile\.py|Rakefile|gulpfile\.\w+|Gruntfile\.\w+|Makefile|Dockerfile[\w.-]*)$/;
+const TEST_PATH = /(^|\/)(tests?|test_\w+|integration_test|__tests\w*__|specs?|__mocks__|__fixtures__|fixtures?|e2e|cypress|testdata|playgrounds?)\/|\.(test|spec)\.\w+$|_test\.(go|py|rs|c|cc|cpp|exs?|dart)$|(^|\/)test_[^/]*\.py$|(^|\/)conftest\.py$|[a-z0-9](Test|Tests|Spec)\.(java|kt|cs|swift|scala|php)$|(^|\/)tests?\.(rs|py|[cm]?[jt]s)$|(^|\/)src\/\w*Test\w*\//;
+const BUILD_PATH = /(^|\/)(scripts?|\.github|\.circleci|\.gitlab|ci)\/|(^|\/)(build\.rs|setup\.py|noxfile\.py|tasks\.py|fabfile\.py|Rakefile|gulpfile\.\w+|Gruntfile\.\w+|Makefile|Dockerfile[\w.-]*)$|(^|\/)tool\/[^/]+\.dart$/;
 const DOCS_PATH = /(^|\/)(docs?|documentation|examples?|samples?|demos?)\//i;
 // a JVM package (src/main/java/com/example/demo/…) is a namespace, not folders: its segments
 // (samples, example, demo, docs) say nothing about whether the file is an example or a doc
