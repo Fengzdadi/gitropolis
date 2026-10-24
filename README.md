@@ -2,6 +2,8 @@
 
 # gitropolis
 
+[![gitropolis](https://gitropolis.dev/Fengzdadi/gitropolis/badge.svg)](https://gitropolis.dev/Fengzdadi/gitropolis) &nbsp; [![gitropolis](https://gitropolis.dev/Fengzdadi/gitropolis/badge.svg?style=pixel)](https://gitropolis.dev/Fengzdadi/gitropolis) &nbsp; [![gitropolis](https://gitropolis.dev/Fengzdadi/gitropolis/badge.svg?style=card)](https://gitropolis.dev/Fengzdadi/gitropolis)
+
 **Your git repo as a pixel-art city.**
 
 Every file is a building. Every directory is a neighbourhood.<br>
