@@ -208,6 +208,9 @@ export async function scanRepo(repo, { maxCommits = 20000, name } = {}) {
       } else if (base === 'bun.lockb') { loc = Math.round(size / 40); text = ''; } // binary
       else text = readFileSync(full, 'utf8');
     } catch { continue; }
+    // binary under a code file's name (a video segment saved as .ts, an installer with its archive
+    // appended): a NUL byte is git's own test
+    if (text.includes('\0')) continue;
     // a .tpl is infrastructure when it's a Helm / Go ({{ .Values.x }}) or Terraform (${x}, %{ if }) template,
     // not when it's a PHP Smarty page ({$title}, {if $x}…{/if}, {include file=…})
     if (ext === 'tpl' && !text.includes('{{') && SMARTY.test(text)) continue;
