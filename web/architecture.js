@@ -175,7 +175,7 @@ export function buildingSpecs({ files, B, inDeg, hub: hubIdx, unit, kind, t01 })
       // prose has no vernacular: the campus is built in plain collegiate stone and brick
       style: (town && hub) || role === 'page' || form === 'library' ? 'default' : STYLE_BY_LANG[f.lang] || cityStyle,
       tiers: Math.min(4, Math.max(2, a.c || 3)),
-      roof: form === 'house' ? (ROOF_BY_CITY[kind] === 'mansard' ? 'mansard' : town && (i * 2654435761 >>> 0) % 3 === 0 ? 'hip' : 'gable') : form === 'shed' && kind === 'port' ? 'hip' : ROOF_BY_CITY[kind], // port sheds are saw-tooth factories
+      roof: form === 'house' ? (ROOF_BY_CITY[kind] === 'mansard' ? 'mansard' : kind === 'resort' || town && (i * 2654435761 >>> 0) % 3 === 0 ? 'hip' : 'gable') : form === 'shed' && kind === 'port' ? 'hip' : ROOF_BY_CITY[kind], // a resort's villas are hipped; port sheds are saw-tooth factories
       tint: (() => {
         const slot = dSlot.get(paintKey(f.p)) || 0;
         // in a small town, alternate between two wall colours within a district so a street isn't uniform
