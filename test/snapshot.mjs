@@ -55,7 +55,7 @@ function checkout({ repo, sha }) {
 // What's compared: everything the scanner hands the city, minus timings. File and import references
 // are by path, not by index, so one added file shows as one added file and not as every file shifting.
 function normalize(city) {
-  const { scannedAt, scanMs, files, commits, identity, ...rest } = city;
+  const { scannedAt, scanMs, files, gone, commits, identity, ...rest } = city;
   const { idleYears, ...metrics } = identity.metrics; // the frozen clock talking, not the scanner
   const paths = files.map(f => f.p);
   const commitList = commits.map(([t, ...idx]) => [t, ...idx.map(i => paths[i])]);
@@ -65,6 +65,7 @@ function normalize(city) {
     // the timeline is long and every file's born / last / churn already tells its story: keep a fingerprint
     commits: { count: commitList.length, digest: createHash('sha256').update(JSON.stringify(commitList)).digest('hex').slice(0, 16) },
     files: Object.fromEntries(files.map(({ p, imp, ...f }) => [p, { ...f, imp: imp.map(i => paths[i]) }])),
+    gone: Object.fromEntries(gone.map(({ p, ...f }) => [p, f])),
   };
 }
 
@@ -74,7 +75,7 @@ function pretty(v, pad = '', rowsFlat = false) {
   const flat = JSON.stringify(v);
   if (!v || typeof v !== 'object' || Array.isArray(v) || flat.length <= 60) return flat;
   const inner = pad + '  ';
-  const rows = Object.entries(v).map(([k, x]) => `${inner}${JSON.stringify(k)}: ${rowsFlat ? JSON.stringify(x) : pretty(x, inner, !pad && k === 'files')}`);
+  const rows = Object.entries(v).map(([k, x]) => `${inner}${JSON.stringify(k)}: ${rowsFlat ? JSON.stringify(x) : pretty(x, inner, !pad && (k === 'files' || k === 'gone'))}`);
   return `{\n${rows.join(',\n')}\n${pad}}`;
 }
 const stringify = snap => pretty(snap) + '\n';
@@ -128,15 +129,21 @@ function summarize(want, got) {
   if (statesMoved) lines.push(`    states: ${states(wi.states)} → ${states(gi.states)}`);
   for (const k of ['files', 'loc', 'edges', 'commits']) if (want.stats[k] !== got.stats[k]) lines.push(`    ${k}: ${want.stats[k]} → ${got.stats[k]}`);
 
-  const { files: wf, ...wrest } = want, { files: gf, ...grest } = got;
-  const added = Object.keys(gf).filter(p => !(p in wf)), removed = Object.keys(wf).filter(p => !(p in gf));
-  list(`    ${added.length} file${added.length === 1 ? '' : 's'} added:`, added);
-  list(`    ${removed.length} file${removed.length === 1 ? '' : 's'} removed:`, removed);
-  const changed = Object.keys(gf).filter(p => p in wf && !same(wf[p], gf[p]));
-  const fields = {};
-  for (const p of changed) for (const [k] of leaves(wf[p], gf[p], '', [])) fields[k] = (fields[k] || 0) + 1;
-  if (changed.length) lines.push(`    ${changed.length} file${changed.length === 1 ? '' : 's'} changed (${Object.entries(fields).sort((a, b) => b[1] - a[1]).map(([k, n]) => `${k} ×${n}`).join(', ')}):`);
-  list('', changed.map(p => `${p}  ${leaves(wf[p], gf[p], '', []).map(([k, c]) => `${k} ${c}`).join('; ')}`));
+  const { files: wf, gone: wg = {}, ...wrest } = want, { files: gf, gone: gg = {}, ...grest } = got;
+  // which files came and went from a list of them, and what changed in the ones on both sides
+  const fileList = (wf, gf, what) => {
+    const s = n => n === 1 ? '' : 's';
+    const added = Object.keys(gf).filter(p => !(p in wf)), removed = Object.keys(wf).filter(p => !(p in gf));
+    list(`    ${added.length} ${what}file${s(added.length)} added:`, added);
+    list(`    ${removed.length} ${what}file${s(removed.length)} removed:`, removed);
+    const changed = Object.keys(gf).filter(p => p in wf && !same(wf[p], gf[p]));
+    const fields = {};
+    for (const p of changed) for (const [k] of leaves(wf[p], gf[p], '', [])) fields[k] = (fields[k] || 0) + 1;
+    if (changed.length) lines.push(`    ${changed.length} ${what}file${s(changed.length)} changed (${Object.entries(fields).sort((a, b) => b[1] - a[1]).map(([k, n]) => `${k} ×${n}`).join(', ')}):`);
+    list('', changed.map(p => `${p}  ${leaves(wf[p], gf[p], '', []).map(([k, c]) => `${k} ${c}`).join('; ')}`));
+  };
+  fileList(wf, gf, '');
+  fileList(wg, gg, 'deleted ');
 
   const skip = new Set(['identity.city', 'identity.name', 'identity.score', 'identity.runnerUp', statesMoved && 'identity.states']);
   list('    identity:', leaves(wrest.identity, grest.identity, 'identity', []).filter(([p]) => !skip.has(p)).map(([p, c]) => `${p.slice(9)}: ${c}`), 20);
