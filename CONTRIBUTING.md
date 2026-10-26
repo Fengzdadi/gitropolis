@@ -59,6 +59,8 @@ If your change is meant to move a repo, run `npm test -- --update`, read the sna
 
 `npm test` first checks that `web/index.html` preloads every module the page imports. If you add or remove an import, `node test/preload.mjs --print` gives the list to paste in.
 
+`test/layout.mjs` plans every snapshot city as each kind of city, with the deleted files the page would add, and checks that they get lots of their own and take nothing from the files that are there: no deleted README becomes the city hall, no landmark moves, no district named only for deleted files. A planner change that fails it is handing a deleted file something only a living one should have.
+
 Then `test/history.mjs` builds a few small repos on the spot (merges, moves git doesn't pair, deleted files, a history read only in part) and checks what the scanner makes of each file's birth and of the files deleted along the way. A change to how the scanner reads history should add a case there.
 
 Before opening a pull request:

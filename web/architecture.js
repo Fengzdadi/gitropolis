@@ -23,39 +23,48 @@ const DISTRICT_RE = /^(packages|apps|libs|crates|modules|plugins|services|projec
 const districtKey = p => (DISTRICT_RE.exec(p) || [p.includes('/') ? p.split('/')[0] : '·'])[0];
 
 export function buildingSpecs({ files, B, inDeg, hub: hubIdx, unit, kind, t01 }) {
-  const N = files.length;
-  const rank = (vals) => { const order = [...vals.keys()].sort((a, b) => vals[a] - vals[b]); const r = new Array(N); order.forEach((i, k) => { r[i] = k / Math.max(1, N - 1); }); return r; };
+  // the city's own measures (its eras, its tallest, its biggest) are taken over the files here: a
+  // deleted file still standing is drawn by them, but never picked out by them
+  const live = [...files.keys()].filter(i => !files[i].gone), N = live.length;
+  const rank = (vals) => {
+    const order = [...live].sort((a, b) => vals[a] - vals[b]), r = new Array(files.length);
+    order.forEach((i, k) => { r[i] = k / Math.max(1, N - 1); });
+    // a deleted file ranks where it would have among them
+    for (let i = 0; i < files.length; i++) if (files[i].gone) { let lo = 0, hi = N; while (lo < hi) { const m = (lo + hi) >> 1; if (vals[order[m]] < vals[i]) lo = m + 1; else hi = m; } r[i] = lo / Math.max(1, N - 1); }
+    return r;
+  };
   const bornRank = rank(files.map(f => f.born));
   const outDeg = files.map(f => f.imp.length);
-  const top = (vals, share, min = 1) => new Set([...vals.keys()].filter(i => vals[i] >= min).sort((a, b) => vals[b] - vals[a]).slice(0, Math.max(1, Math.round(N * share))));
+  const top = (vals, share, min = 1) => new Set(live.filter(i => vals[i] >= min).sort((a, b) => vals[b] - vals[a]).slice(0, Math.max(1, Math.round(N * share))));
   const spires = top(inDeg, 0.004, 3);
   const antennas = top(outDeg, 0.03, 6);
   const recentChurn = files.map(f => t01(f.last) > 0.95 ? f.churn : 0);
   const cranes = top(recentChurn, 0.015, 5);
-  const locs = files.map(f => f.loc).sort((a, b) => a - b), medLoc = locs[N >> 1] || 1;
+  const locs = live.map(i => files[i].loc).sort((a, b) => a - b), medLoc = locs[N >> 1] || 1;
   const crowdLoc = N > 6000 ? locs[Math.floor(N * 0.8)] : 0;
   let entry = 0, biggest = -1;
-  for (let i = 0; i < N; i++) if (i !== hubIdx && files[i].g && (biggest < 0 || files[i].loc > files[biggest].loc)) biggest = i;
-  for (let i = 1; i < N; i++) if (outDeg[i] > outDeg[entry]) entry = i;
-  const nbLocs = files.filter(f => f.a?.r === 'notebook').map(f => f.loc).sort((a, b) => a - b);
+  for (const i of live) if (i !== hubIdx && files[i].g && (biggest < 0 || files[i].loc > files[biggest].loc)) biggest = i;
+  for (const i of live) if (outDeg[i] > outDeg[entry]) entry = i;
+  const here = files.filter(f => !f.gone);
+  const nbLocs = here.filter(f => f.a?.r === 'notebook').map(f => f.loc).sort((a, b) => a - b);
   const barnLoc = nbLocs.length ? nbLocs[Math.floor(nbLocs.length * 0.85)] : Infinity; // only the biggest notebooks are barns
   // the city's own vernacular (for manifests, docs and other non-code buildings): its biggest language
   const byLang = {};
-  for (const f of files) if (CODE.has(f.lang)) byLang[f.lang] = (byLang[f.lang] || 0) + f.loc;
+  for (const f of here) if (CODE.has(f.lang)) byLang[f.lang] = (byLang[f.lang] || 0) + f.loc;
   const mainLang = Object.keys(byLang).sort((a, b) => byLang[b] - byLang[a])[0];
   const cityStyle = STYLE_BY_LANG[mainLang] || 'default';
   // one airport per city: the biggest deploy file
   // only a handful of the very newest source files are building sites, or the whole city is scaffolding
   // (a boomtown is different: there the newest 12% of its source files are cranes and scaffolding)
-  const sites = new Set([...files.keys()].filter(i => (kind === 'desert' || (files[i].s || []).includes('new')) && (files[i].a?.r || 'source') === 'source')
+  const sites = new Set(live.filter(i => (kind === 'desert' || (files[i].s || []).includes('new')) && (files[i].a?.r || 'source') === 'source')
     .sort((a, b) => files[b].born - files[a].born).slice(0, Math.max(2, Math.round(N * (kind === 'desert' ? 0.12 : 0.01)))));
   // districts ranked by size get palette slots in order, so the biggest ones get the most distinct colours
   // when one top-level directory holds most of the code (a lone src/ or source/), its subdirectories
   // are the real neighbourhoods: paint by those instead, so single-directory repos aren't one colour
   const topCount = new Map();
-  for (const f of files) topCount.set(districtKey(f.p), (topCount.get(districtKey(f.p)) || 0) + 1);
+  for (const f of here) topCount.set(districtKey(f.p), (topCount.get(districtKey(f.p)) || 0) + 1);
   const [domKey, domN] = [...topCount].sort((a, b) => b[1] - a[1])[0] || ['', 0];
-  const refine = domN / Math.max(1, files.length) > 0.7;
+  const refine = domN / Math.max(1, N) > 0.7;
   const paintKey = p => {
     const k = districtKey(p);
     if (!refine || k !== domKey) return k;
@@ -63,10 +72,10 @@ export function buildingSpecs({ files, B, inDeg, hub: hubIdx, unit, kind, t01 })
     return rest.includes('/') ? `${k}/${rest.split('/')[0]}` : k;
   };
   const dSize = new Map();
-  for (const f of files) dSize.set(paintKey(f.p), (dSize.get(paintKey(f.p)) || 0) + f.loc);
+  for (const f of here) dSize.set(paintKey(f.p), (dSize.get(paintKey(f.p)) || 0) + f.loc);
   const dSlot = new Map([...dSize].sort((a, b) => b[1] - a[1]).map(([k], n) => [k, n]));
   const town = kind === 'smalltown';
-  const deploys = [...files.keys()].filter(i => files[i].a?.r === 'deploy').sort((a, b) => files[b].loc - files[a].loc);
+  const deploys = live.filter(i => files[i].a?.r === 'deploy').sort((a, b) => files[b].loc - files[a].loc);
 
   return files.map((f, i) => {
     const b = B[i], a = f.a || {};
@@ -75,6 +84,9 @@ export function buildingSpecs({ files, B, inDeg, hub: hubIdx, unit, kind, t01 })
     // only a project's (or a package's) own manifests and lockfiles are infrastructure; the hundreds inside fixtures are sheds
     if ((role === 'manifest' || role === 'lock') && nested) role = 'config';
     if ((role === 'readme' || role === 'license' || role === 'changelog') && nested) role = 'docs';
+    // a deleted file is never one of the city's landmarks: its README was a house, its lockfile a shed
+    if (f.gone && (role === 'readme' || role === 'license' || role === 'changelog')) role = 'docs';
+    if (f.gone && (role === 'manifest' || role === 'lock' || role === 'deploy')) role = 'config';
     if (kind === 'university' && f.lang === 'doc' && f.p.includes('/')) role = 'page', pageKind = 'index'; // a chapter's README is its contents page
     if (role === 'deploy' && i !== deploys[0]) role = 'build';
     const slender = b.h > 2.4 * Math.min(b.w, b.d);
@@ -204,8 +216,9 @@ function paint(g, t) {
   }
 }
 
-// one merged mesh for the whole city; per-vertex building id, base height and birth time
-// let a shader grow every building from the ground when the timeline reaches it
+// one merged mesh for the whole city; per-vertex building id, base height, birth and death time
+// let a shader grow every building from the ground when the timeline reaches it (and take a deleted
+// file's back down when it goes)
 export function buildCityMesh({ buildingGeometry, specs, B, files, t01, shared, unit, heat, focus, glow = null, castShadow = true }) {
   // a big repo is ~1M triangles, so the float geometry is never gathered in one place: each building
   // is packed as soon as it's built (colour and normals as bytes: palette art doesn't need floats) and
@@ -241,14 +254,14 @@ export function buildCityMesh({ buildingGeometry, specs, B, files, t01, shared, 
   join('normal', Int8Array, 3, true);
   join('color', Uint8Array, 3, true);
   join('part', Uint8Array, 1, false);
-  // per-vertex building id, base height and birth time, the same for every vertex of a building
-  const meta = new Float32Array(count * 3);
+  // per-vertex building id, base height, birth and death time, the same for every vertex of a building
+  const meta = new Float32Array(count * 4);
   let o = 0;
   for (const { i, n } of pieces) {
-    const y = B[i].y, born = t01(files[i].born);
-    for (let k = 0; k < n; k++, o += 3) { meta[o] = i; meta[o + 1] = y; meta[o + 2] = born; }
+    const y = B[i].y, born = t01(files[i].born), died = B[i].died ?? 2;
+    for (let k = 0; k < n; k++, o += 4) { meta[o] = i; meta[o + 1] = y; meta[o + 2] = born; meta[o + 3] = died; }
   }
-  geo.setAttribute('aMeta', new THREE.BufferAttribute(meta, 3));
+  geo.setAttribute('aMeta', new THREE.BufferAttribute(meta, 4));
   // the pieces would otherwise live as long as any closure from this scope (syncState below)
   pieces.length = 0;
   // let the GPU keep the only copy once uploaded (picking uses the proxy boxes, not this mesh)
@@ -258,7 +271,8 @@ export function buildCityMesh({ buildingGeometry, specs, B, files, t01, shared, 
   geo.computeBoundingSphere();
   for (const a of Object.values(geo.attributes)) a.onUpload(function () { this.array = null; });
   const grow = `
-    float b0 = aMeta.z * 0.97; float grow = smoothstep(b0, b0 + 0.03, uTimeline);
+    float b0 = aMeta.z * 0.97, d0 = aMeta.w * 0.97;
+    float grow = smoothstep(b0, b0 + 0.03, uTimeline) * (1.0 - smoothstep(d0, d0 + 0.02, uTimeline));
     transformed.y = aMeta.y + (transformed.y - aMeta.y) * grow;
     transformed *= step(0.001, grow);`;
   // per-building live state (commit flash, focus) in a small texture the shader looks up by building id
@@ -270,7 +284,7 @@ export function buildCityMesh({ buildingGeometry, specs, B, files, t01, shared, 
   mat.onBeforeCompile = sh => {
     Object.assign(sh.uniforms, { uTimeline: shared.uTimeline, uFocus: shared.uFocus, tState: { value: stateTex } });
     sh.vertexShader = sh.vertexShader
-      .replace('#include <common>', `#include <common>\nattribute vec3 aMeta; uniform float uTimeline; uniform sampler2D tState; varying vec3 vState;`)
+      .replace('#include <common>', `#include <common>\nattribute vec4 aMeta; uniform float uTimeline; uniform sampler2D tState; varying vec3 vState;`)
       .replace('#include <begin_vertex>', `#include <begin_vertex>\n${grow}\nvState = texture2D(tState, vec2((mod(aMeta.x, ${SW}.0) + 0.5) / ${SW}.0, (floor(aMeta.x / ${SW}.0) + 0.5) / ${SH}.0)).rgb;`);
     sh.fragmentShader = sh.fragmentShader
       .replace('#include <common>', '#include <common>\nvarying vec3 vState; uniform float uFocus;')
@@ -286,7 +300,7 @@ export function buildCityMesh({ buildingGeometry, specs, B, files, t01, shared, 
   depth.onBeforeCompile = sh => {
     sh.uniforms.uTimeline = shared.uTimeline;
     sh.vertexShader = sh.vertexShader
-      .replace('#include <common>', '#include <common>\nattribute vec3 aMeta; uniform float uTimeline;')
+      .replace('#include <common>', '#include <common>\nattribute vec4 aMeta; uniform float uTimeline;')
       .replace('#include <begin_vertex>', `#include <begin_vertex>\n${grow}`);
   };
   const mesh = new THREE.Mesh(geo, mat);
