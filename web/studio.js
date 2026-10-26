@@ -10,6 +10,7 @@ import { addGroundDetail, addGrowth, LAND_LEAD } from './surfaces.js';
 import { buildStreets, buildTraffic } from './streets.js';
 import { timed } from './perf.js';
 import { buildTrees } from './trees.js';
+import { rubbleMesh, riseWithTimeline } from './rubble.js';
 
 export const STYLES = {
   maquette: {
@@ -325,7 +326,7 @@ export function buildStudio(ctx) {
   }
 
   // ---- buildings: one instanced mesh, standard material + injected growth, windows, heat and focus
-  const info = new Float32Array(N * 4);
+  const info = new Float32Array(N * 4), died = Float32Array.from(B, b => b.died ?? 2);
   const geo = new THREE.BoxGeometry(1, 1, 1).translate(0, 0.5, 0);
   const base = new THREE.Color(S.building), accent = new THREE.Color(S.accent);
   const mat = S.flat ? new THREE.MeshBasicMaterial({ color: '#ffffff' })
@@ -344,14 +345,16 @@ export function buildStudio(ctx) {
     info.set([Math.random(), b.born, t01(f.last), Math.log1p(f.churn) / Math.log1p(maxChurn)], i * 4);
   });
   geo.setAttribute('aInfo', new THREE.InstancedBufferAttribute(info, 4));
+  geo.setAttribute('aDied', new THREE.InstancedBufferAttribute(died, 1));
   geo.setAttribute('aHeat', new THREE.InstancedBufferAttribute(heat, 1).setUsage(THREE.DynamicDrawUsage));
   geo.setAttribute('aFocus', new THREE.InstancedBufferAttribute(focusAttr, 1).setUsage(THREE.DynamicDrawUsage));
 
   const growVertex = `
-    float b0 = aInfo.y * 0.97; float grow = smoothstep(b0, b0 + 0.03, uTimeline);
+    float b0 = aInfo.y * 0.97, d0 = aDied * 0.97;
+    float grow = smoothstep(b0, b0 + 0.03, uTimeline) * (1.0 - smoothstep(d0, d0 + 0.02, uTimeline)); // a deleted file comes down
     transformed.y *= max(grow, 0.0);
     transformed *= step(0.001, grow);`;
-  const decl = `attribute vec4 aInfo; attribute float aHeat, aFocus; uniform float uTimeline;`;
+  const decl = `attribute vec4 aInfo; attribute float aDied, aHeat, aFocus; uniform float uTimeline;`;
   mat.onBeforeCompile = sh => {
     Object.assign(sh.uniforms, { uTimeline: shared.uTimeline, uTime: shared.uTime, uFocus: shared.uFocus, uHover: shared.uHover,
       uWin: { value: unit / 7 }, uWinColor: { value: new THREE.Color(S.windowColor || '#ffffff') }, uWindows: { value: S.windows },
@@ -413,6 +416,16 @@ export function buildStudio(ctx) {
     mesh.material.visible = false;
     mesh.castShadow = false;
   }
+  // ---- the lots the deleted files leave: bare ground and rubble, once their buildings come down
+  let rubble = null;
+  if (files.some(f => f.gone)) {
+    const material = S.flat ? new THREE.MeshBasicMaterial({ color: '#ffffff' })
+      : cityMesh ? new THREE.MeshLambertMaterial({ color: '#ffffff', flatShading: true })
+      : new THREE.MeshStandardMaterial({ color: '#ffffff', roughness: 1, flatShading: true });
+    rubble = rubbleMesh({ B, files, unit, material: riseWithTimeline(material, shared), colors: { slab: S.dirt, debris: [S.building, S.plate, S.yard] } });
+    rubble.receiveShadow = !S.flat;
+    scene.add(rubble);
+  }
 
   // ---- imports: hairline arcs (flat curves in plan), the hub's own lines in the accent colour
   if (S.edges) {
@@ -472,6 +485,7 @@ export function buildStudio(ctx) {
     heights: H,
     hub,
     buildings: mesh,
+    rubble,
     setupPost(bloom) {
       bloom.enabled = !!S.bloom;
       if (S.bloom) Object.assign(bloom, S.bloom);

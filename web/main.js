@@ -9,6 +9,7 @@ import { hierarchy, treemap, treemapSquarify } from 'd3-hierarchy';
 import { buildStudio } from './studio.js';
 import { buildLayout, CITY_KINDS } from './layouts.js';
 import { createPixelPipeline } from './pixel.js';
+import { rubbleMesh, RUBBLE_VERTEX } from './rubble.js';
 import { PERF, HEAP, timed } from './perf.js';
 import { startWaiting } from './waiting.js';
 import { openShareDialog, drawCard } from './card.js';
@@ -60,10 +61,18 @@ if (!resp.ok) {
 const data = await resp.json();
 globalThis.gc?.();
 const BASE_HEAP = performance.memory ? performance.memory.usedJSHeapSize / 1e6 : 0; // after loading + parsing city.json
-const files = data.files;
-const N = files.length;
 const span = Math.max(1, data.end - data.start);
 const t01 = t => (t - data.start) / span;
+// The files deleted lately stand in the city too, until the day they went: then they come down and
+// leave a cleared lot. Lately is the window the scanner calls a file new in; the most recent go
+// first when there are many (never more lots than a quarter of the city's buildings).
+// They go after the files here, so the indices in commits and imports stay what they were.
+const LIVE = data.files.length;
+const DAY = 86400, recent = Math.max(span * 0.02, 21 * DAY);
+const lately = (data.gone || []).filter(g => data.end - g.died <= recent);
+const gone = lately.slice(Math.max(0, lately.length - Math.ceil(LIVE / 4)));
+const files = data.files.concat(gone.map(g => ({ ...g, imp: [], gone: true })));
+const N = files.length;
 
 // ------------------------------------------------------------ layout
 const SIZE = 1000;
@@ -105,7 +114,7 @@ treemap()
 const leaves = root.leaves().filter(l => l.data.i !== undefined);
 const lotSides = leaves.map(l => Math.min(l.x1 - l.x0, l.y1 - l.y0)).sort((a, b) => a - b);
 let unit = lotSides[Math.floor(lotSides.length / 2)] || est;
-const locs = files.map(f => f.loc).sort((a, b) => a - b);
+const locs = data.files.map(f => f.loc).sort((a, b) => a - b);
 const medianLoc = locs[Math.floor(locs.length / 2)] || 1;
 let plateStep = unit * 0.05;
 const cx = SIZE / 2, cz = SIZE / 2;
@@ -120,9 +129,9 @@ const inDeg = new Array(N).fill(0);
 const PORT = (params.get('city') || 'auto') === 'auto' ? data.identity?.city === 'port' : params.get('city') === 'port';
 files.forEach(f => f.imp.forEach(j => { if (PORT || files[j].a?.r !== 'infra') inDeg[j]++; }));
 // the city's one landmark, for the planner, the architect and the camera alike: the most-imported file
-// (the first of a tie; the first file when nothing imports anything)
+// (the first of a tie; the first file when nothing imports anything; never one that's been deleted)
 let hub = 0;
-for (let i = 1; i < N; i++) if (inDeg[i] > inDeg[hub]) hub = i;
+for (let i = 1; i < LIVE; i++) if (inDeg[i] > inDeg[hub]) hub = i;
 const maxChurn = files.reduce((m, f) => Math.max(m, f.churn), 1);
 
 // per-file render info
@@ -142,6 +151,8 @@ for (const l of leaves) {
   b.hue = l.hue;
   b.born = t01(f.born);
 }
+// when each comes down (2: never), at the end of the timeline at the latest (a deletion can be the last commit)
+B.forEach((b, i) => { b.died = files[i].gone ? Math.min(1, t01(files[i].died)) : 2; });
 
 // city planners (lit styles only): ?city=auto picks the repo's own archetype, ?city=classic keeps the treemap
 const CITY = params.get('city') || 'auto';
@@ -431,10 +442,11 @@ const buildings = studio ? studio.buildings : (() => {
     uniforms: { ...shared, uWin: { value: unit / 7 } },
     vertexShader: GLSL_COMMON + `
       attribute vec4 aInfo; // seed, born, last, churn
-      attribute float aHue, aHeat, aFocus;
+      attribute float aDied, aHue, aHeat, aFocus;
       varying vec3 vW, vL, vN, vSize; varying vec4 vInfo; varying float vHue, vHeat, vFocus, vId;
       void main(){
-        float b0 = aInfo.y * 0.97; float grow = smoothstep(b0, b0 + 0.03, uTimeline); // born at 1.0 is fully grown by 1.0
+        float b0 = aInfo.y * 0.97, d0 = aDied * 0.97; // born at 1.0 is fully grown by 1.0 (and died at 1.0 gone by then)
+        float grow = smoothstep(b0, b0 + 0.03, uTimeline) * (1.0 - smoothstep(d0, d0 + 0.02, uTimeline));
         if (grow < 0.001) { gl_Position = vec4(0., 0., -2., 1.); return; }
         vec3 p = position; p.y *= grow;
         vec4 w = modelMatrix * instanceMatrix * vec4(p, 1.);
@@ -496,6 +508,7 @@ const buildings = studio ? studio.buildings : (() => {
     hue[i] = b.hue;
   });
   geo.setAttribute('aInfo', new THREE.InstancedBufferAttribute(info, 4));
+  geo.setAttribute('aDied', new THREE.InstancedBufferAttribute(Float32Array.from(B, b => b.died), 1));
   geo.setAttribute('aHue', new THREE.InstancedBufferAttribute(hue, 1));
   geo.setAttribute('aHeat', new THREE.InstancedBufferAttribute(heat, 1).setUsage(THREE.DynamicDrawUsage));
   geo.setAttribute('aFocus', new THREE.InstancedBufferAttribute(focusAttr, 1).setUsage(THREE.DynamicDrawUsage));
@@ -504,6 +517,31 @@ const buildings = studio ? studio.buildings : (() => {
   scene.add(mesh);
   return mesh;
 })();
+// ---- the lots the deleted files leave (neon): dark rubble on a slab, its edge faintly lit
+let rubble = studio?.rubble || null;
+if (NEON && gone.length) {
+  const material = new THREE.ShaderMaterial({
+    uniforms: { ...shared, uEdge: { value: unit * 0.05 } },
+    vertexShader: GLSL_COMMON + `attribute float aDied; varying vec3 vW, vL, vN, vC, vSize;
+      void main(){
+        ${RUBBLE_VERTEX}
+        if (up < 0.001) { gl_Position = vec4(0., 0., -2., 1.); return; }
+        vec3 p = position; p.y *= up;
+        vec4 w = modelMatrix * instanceMatrix * vec4(p, 1.);
+        vW = w.xyz; vL = position; vN = normal; vC = instanceColor;
+        vSize = vec3(length(instanceMatrix[0].xyz), length(instanceMatrix[1].xyz), length(instanceMatrix[2].xyz));
+        gl_Position = projectionMatrix * viewMatrix * w;
+      }`,
+    fragmentShader: GLSL_COMMON + `uniform float uEdge; varying vec3 vW, vL, vN, vC, vSize;
+      void main(){
+        vec3 col = vC * (0.55 + 0.45 * max(vN.y, 0.0));
+        if (vN.y > 0.5) col += vec3(0.5, 0.25, 0.8) * 0.4 * (1.0 - smoothstep(0.0, uEdge, min((0.5 - abs(vL.x)) * vSize.x, (0.5 - abs(vL.z)) * vSize.z)));
+        gl_FragColor = vec4(fog(col, vW), 1.);
+      }`,
+  });
+  rubble = rubbleMesh({ B, files, unit, material, colors: { slab: '#120a1e', debris: ['#2c2140', '#231a33', '#3a2c52'] } });
+  scene.add(rubble);
+}
 
 // ---- dependency sky-lanes: faint arcs + flying particles (all animated on the GPU)
 const MAX_EDGES = 3000;
@@ -713,7 +751,8 @@ addEventListener('resize', () => {
 const $ = s => document.querySelector(s);
 $('#hud h1').textContent = data.name;
 $('#hud .stats').textContent =
-  `${N.toLocaleString()} buildings · ${data.stats.loc.toLocaleString()} LOC · ${data.stats.edges.toLocaleString()} imports · ${data.stats.commits.toLocaleString()} commits`;
+  `${LIVE.toLocaleString()} buildings · ${data.stats.loc.toLocaleString()} LOC · ${data.stats.edges.toLocaleString()} imports · ${data.stats.commits.toLocaleString()} commits` +
+  (gone.length ? ` · ${gone.length.toLocaleString()} torn down lately` : '');
 stopWaiting();
 $('#loading').remove();
 document.body.classList.remove('waiting');
@@ -824,7 +863,7 @@ function shareInfo() {
       owner, repo,
       phrase: CITY_PHRASE[layout.kind] || layout.kind,
       reasons: layout.kind === data.identity?.city ? data.identity.reasons : [],
-      stats: [[N, 'buildings'], [data.stats.loc, 'lines'], [data.stats.commits, 'commits']],
+      stats: [[LIVE, 'buildings'], [data.stats.loc, 'lines'], [data.stats.commits, 'commits']],
       years: [year(data.start), year(data.end)],
       activity(n) {
         const bins = new Array(n).fill(0);
@@ -866,6 +905,10 @@ function stageCity(artW, artH, bands) {
 }
 const captureCity = (artW, artH, bands) => { const st = stageCity(artW, artH, bands); try { return st.still(); } finally { st.end(); } };
 
+// the deleted files come down in the order they went (they're last in files, sorted by when): the
+// next to go, as the timeline moves on
+let di = LIVE;
+const comesDown = i => B[i].died * 0.97; // when its building starts to come down
 function setTimeline(v) {
   shared.uTimeline.value = v;
   const now = data.start + v * span;
@@ -873,6 +916,7 @@ function setTimeline(v) {
   let lo = 0, hi = commits.length;
   while (lo < hi) { const mid = (lo + hi) >> 1; if (commits[mid][0] <= now) lo = mid + 1; else hi = mid; }
   ci = lo;
+  for (di = LIVE; di < N && comesDown(di) <= v;) di++;
 }
 
 function advance(dt) {
@@ -893,13 +937,15 @@ function moveTimeline(v) {
     if (flashed < 400) for (let k = 1; k < commits[ci].length; k++) { const j = commits[ci][k]; heat[j] = Math.max(heat[j], flashGain); flashed++; }
     ci++;
   }
+  // a building coming down flashes as it goes
+  for (; di < N && comesDown(di) <= v; di++) heat[di] = 1;
   shared.uTimeline.value = v;
 }
 
 // ------------------------------------------------------------ labels for top-level districts
 const labelSource = layout
   ? layout.labels.slice(0, 24).map(l => ({ data: { name: l.text }, path: l.path, born: l.born || 0, hue: 0, at: [l.x, l.z], y: l.y || 0 }))
-  : (root.children || []).filter(c => c.children).slice(0, 24);
+  : (root.children || []).filter(c => c.children && c.leaves().some(l => l.data.i < LIVE)).slice(0, 24); // (not one only deleted files were in)
 const labelEls = labelSource.map(n => {
   const el = document.createElement('div');
   el.className = 'label';
@@ -923,7 +969,7 @@ if (layout) files.forEach((f, i) => {
 // is out of view once you zoom in): at the district's own building nearest the centre of its buildings
 // (weighted by size), so a district in several pieces still gets its sign on one of them
 if (PIXEL) labelEls.forEach(({ p }, k) => {
-  const m = labelMembers[k];
+  const m = labelMembers[k].filter(i => i < LIVE);
   if (!m.length) return;
   let x = 0, z = 0, w = 0;
   for (const i of m) { const a = B[i].w * B[i].d + 1e-6; x += B[i].x * a; z += B[i].z * a; w += a; }
@@ -1018,8 +1064,12 @@ files.forEach((f, i) => f.imp.forEach(j => importers[j].push(i)));
 function pick(e) {
   mouse.set(e.clientX / innerWidth * 2 - 1, -e.clientY / innerHeight * 2 + 1);
   raycaster.setFromCamera(mouse, camera);
-  const hit = raycaster.intersectObject(buildings)[0];
-  return hit && B[hit.instanceId].born <= shared.uTimeline.value ? hit.instanceId : -1;
+  const t = shared.uTimeline.value;
+  // a building that's up, or the rubble on a lot whose building has come down, whichever is nearer
+  const up = raycaster.intersectObject(buildings).find(h => B[h.instanceId].born <= t && t < B[h.instanceId].died * 0.97 + 0.02);
+  const down = rubble && raycaster.intersectObject(rubble).find(h => t >= B[rubble.userData.lot[h.instanceId]].died * 0.97 + 0.01);
+  if (down && !(up && up.distance < down.distance)) return rubble.userData.lot[down.instanceId];
+  return up ? up.instanceId : -1;
 }
 renderer.domElement.addEventListener('pointermove', e => {
   const t = performance.now();
@@ -1036,9 +1086,10 @@ renderer.domElement.addEventListener('pointermove', e => {
   const name = document.createElement('b'); name.textContent = f.p;
   tip.replaceChildren(name,
     row(['lines', `${f.loc.toLocaleString()} · `], ['commits', String(f.churn)]),
-    row(['imports', `${f.imp.length} · `], ['imported by', String(inDeg[hoverId])]),
+    ...(f.gone ? [] : [row(['imports', `${f.imp.length} · `], ['imported by', String(inDeg[hoverId])])]),
     row(['born', `${fmtDate(f.born)} · `], ['last edit', fmtDate(f.last)]),
-    ...(hoverLabel >= 0 ? [row(['district', `${labelSource[hoverLabel].path} · ${labelMembers[hoverLabel].length.toLocaleString()} files`])] : []));
+    ...(f.gone ? [row(['deleted', fmtDate(f.died)])] : []),
+    ...(hoverLabel >= 0 ? [row(['district', `${labelSource[hoverLabel].path} · ${labelMembers[hoverLabel].filter(i => i < LIVE).length.toLocaleString()} files`])] : []));
   tip.style.display = 'block';
   tip.style.left = `${Math.min(e.clientX + 16, innerWidth - 380)}px`;
   tip.style.top = `${e.clientY + 16}px`;
@@ -1187,7 +1238,7 @@ async function record() {
     g.shadowColor = color; g.shadowBlur = blur * S; g.fillStyle = '#fff'; g.fillText(txt, x, y);
     g.shadowBlur = 0;
   };
-  const stats = `${N.toLocaleString()} buildings · ${data.stats.loc.toLocaleString()} LOC · ${data.stats.commits.toLocaleString()} commits`;
+  const stats = `${LIVE.toLocaleString()} buildings · ${data.stats.loc.toLocaleString()} LOC · ${data.stats.commits.toLocaleString()} commits`;
   const v = new THREE.Vector3();
 
   // pixel art: district names as the live view's signs (paper, ink edge, a post down to the spot),
@@ -1229,7 +1280,7 @@ async function record() {
     g.fillStyle = ST.ink; g.font = `400 ${Math.round(76 * S)}px ${ST.font}`;
     g.fillText(data.name, pad, pad + 60 * S);
     g.fillStyle = ST.inkSoft; g.font = `400 ${Math.round(17 * S)}px ${ST.uiFont || 'Inter, sans-serif'}`;
-    g.fillText(`${year(data.start)}–${year(data.end)}   ·   ${N.toLocaleString()} files   ·   ${data.stats.loc.toLocaleString()} lines`, pad, pad + 98 * S);
+    g.fillText(`${year(data.start)}–${year(data.end)}   ·   ${LIVE.toLocaleString()} files   ·   ${data.stats.loc.toLocaleString()} lines`, pad, pad + 98 * S);
     if (layout && data.identity) {
       const id = data.identity;
       const name = CITY_PHRASE[layout.kind];

@@ -1212,7 +1212,7 @@ const PLANNERS = {
 // clock tower beside it; the port and the airport sit out at the edge. Each swaps lots with an
 // ordinary file of a similar size, so nobody ends up squeezed.
 function placeLandmarks(lots, files, hub, frontAz) {
-  const root = r => files.findIndex(f => f.a?.r === r && !f.p.includes('/'));
+  const root = r => files.findIndex(f => f.a?.r === r && !f.p.includes('/') && !f.gone); // a deleted README is no city hall
   const marks = new Set([hub]);
   const live = [...lots.keys()].filter(i => lots[i] && lots[i].w > 0.01);
   if (live.length < 12) return;
@@ -1258,7 +1258,8 @@ export function buildLayout(kind, { files, inDeg, hub, SIZE, frontAz }) {
   const v = files.map(f => Math.sqrt(f.loc) + 3);
   const vs = [...v].sort((a, b) => a - b), medV = vs[N >> 1] || 1;
   const area = v.map(x => x / medV);
-  const locs = files.map(f => f.loc).sort((a, b) => a - b), medLoc = locs[N >> 1] || 1;
+  // (heights are measured against the files here, not the deleted ones still standing)
+  const locs = files.filter(f => !f.gone).map(f => f.loc).sort((a, b) => a - b), medLoc = locs[locs.length >> 1] || 1;
   const ctx = { files, inDeg, area, hub };
   const ds = districtsOf(files, area);
   const L = PLANNERS[kind](ds, ctx);
@@ -1311,10 +1312,14 @@ export function buildLayout(kind, { files, inDeg, hub, SIZE, frontAz }) {
   }
   // every district gets a name: a planner may leave some out (the desert's palm villas, a small
   // town's single street), so those are named at the middle of their lots
-  const labelled = L.labels.map(l => ({ ...l, path: l.path ?? l.text.replace(/ \(downtown\)$| \+\d+$/, '') }));
+  // (none for a district whose files have all been deleted: its name went with them)
+  const held = new Set();
+  for (const f of files) if (!f.gone) for (let k = f.p.length; k > 0; k = f.p.lastIndexOf('/', k - 1)) held.add(f.p.slice(0, k));
+  const here = path => held.has(path);
+  const labelled = L.labels.map(l => ({ ...l, path: l.path ?? l.text.replace(/ \(downtown\)$| \+\d+$/, '') })).filter(l => here(l.path));
   const lotOf = new Map(L.lots.map(l => [l.i, l]));
   for (const d of ds) {
-    if (d.name === '·' || d.items.length < 2) continue;
+    if (d.name === '·' || d.items.length < 2 || !here(d.name)) continue;
     if (labelled.some(l => l.path === d.name || l.path.startsWith(d.name + '/') || d.name.startsWith(l.path + '/'))) continue;
     const at = d.items.map(it => lotOf.get(it.i)).filter(Boolean);
     if (!at.length) continue;
