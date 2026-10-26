@@ -59,6 +59,8 @@ If your change is meant to move a repo, run `npm test -- --update`, read the sna
 
 `npm test` first checks that `web/index.html` preloads every module the page imports. If you add or remove an import, `node test/preload.mjs --print` gives the list to paste in.
 
+Then `test/history.mjs` builds a few small repos on the spot (merges, moves git doesn't pair, deleted files, a history read only in part) and checks what the scanner makes of each file's birth and of the files deleted along the way. A change to how the scanner reads history should add a case there.
+
 Before opening a pull request:
 
 1. **Run `npm test`.** Most changes shouldn't move any of the pinned repos, and none should change city type unless that's the point of the change.

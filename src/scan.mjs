@@ -1,5 +1,6 @@
 // Scan a git repository into a compact "city blueprint":
-// files (LOC, language), import edges (regex-based), and git history (born / last / churn / commits).
+// files (LOC, language), import edges (regex-based), git history (born / last / churn / commits), and
+// the files deleted along the way.
 import { execFileSync, spawn } from 'node:child_process';
 import { readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
@@ -51,6 +52,8 @@ const GENERATED = /@generated|do not edit|auto-?generated|automatically generate
 // buildings that are landmarks, not code: they never decide the city and never join the import graph
 const NONCODE = new Set(['cfg', 'doc', 'lock']);
 const DAY = 86400, YEAR = 365.25 * DAY;
+const GONE_TEXT = 256_000_000; // at most this much of the deleted files' text is read (all of it at once)
+const RENAME_LIMIT = 1000; // git's default diff.renameLimit: past this many deleted × added files, it doesn't look for renames
 // only these languages get import edges, so only they can honestly be called "unimported"
 const LINKED = new Set(['js', 'ts', 'py', 'go', 'rs', 'c', 'cpp', 'java', 'kt', 'dart']);
 const ENTRY = /(^|\/)((main|index|cli|app|server)\.[^/]+|__main__\.py|mod\.rs|lib\.rs)$|(^|\/)(bin|cmd)\//;
@@ -119,6 +122,113 @@ function git(repo, args) {
   return execFileSync('git', ['-C', repo, ...args], { encoding: 'utf8', maxBuffer: 1 << 30 });
 }
 
+// What a path would be drawn as, from its name alone (null: not a building)
+function langOf(p) {
+  const ext = p.slice(p.lastIndexOf('.') + 1).toLowerCase();
+  const base = p.slice(p.lastIndexOf('/') + 1);
+  const lang = LOCKFILE.test(p) ? 'lock' : CFG_FILE.test(p) ? 'cfg' : docRole(base) ? 'doc'
+    : ext === 'ipynb' ? 'nb' : DATA_EXT.test(p) ? 'data' : MODEL_EXT.test(p) && !/(^|\/)(node_modules|tests?)\//.test(p) ? 'model' : LANGS[ext];
+  if (!lang || SKIP_DIR.test(p) || SKIP_FILE.test(p)) return null;
+  if (lang === 'yaml' && LOCALE_DIR.test(p)) return null;
+  return lang;
+}
+
+// Languages a file can be rewritten in and still be the same file: a foo.js ported to foo.ts
+const FAMILY = { ts: 'js', cpp: 'c' };
+const familyOf = p => { const lang = langOf(p) ?? ''; return FAMILY[lang] ?? lang; };
+
+// A file as a building, or null when it isn't one. size: its bytes; read(): its text, asked for only
+// when it's needed (from disk for a file in the checkout, from git for one deleted along the way)
+function building(p, lang, size, read) {
+  const ext = p.slice(p.lastIndexOf('.') + 1).toLowerCase();
+  const base = p.slice(p.lastIndexOf('/') + 1);
+  let text, loc = 0;
+  if (lang === 'data' || lang === 'model') {
+    // a dataset's or a model's size is what matters, not its text: about a line per 60 bytes of
+    // table, per 2 KB of weights (a field and a silo should be big, not the whole map)
+    if (BINARY_FARM.test(p) || size > MAX_BYTES) { loc = Math.max(10, Math.min(lang === 'model' ? 3000 : 20000, Math.round(size / (lang === 'model' ? 2000 : 60)))); text = ''; }
+    else text = read();
+  } else if (lang === 'nb') {
+    // a notebook's lines are its cells' source; outputs (often megabytes of images) don't count
+    if (size > 30 * MAX_BYTES) return null;
+    try {
+      const nb = JSON.parse(read());
+      const cells = nb.cells || nb.worksheets?.[0]?.cells || [];
+      const src = c => [].concat(c.source ?? c.input ?? []).join('');
+      text = cells.filter(c => c.cell_type === 'code').map(src).join('\n');
+      loc = cells.map(src).join('\n').split('\n').filter(l => l.trim()).length;
+    } catch { return null; }
+  } else if (size > MAX_BYTES && lang === 'lock') {
+    // a huge lockfile is still a landmark: estimate its lines instead of reading it
+    loc = Math.round(size / 40); text = '';
+  } else if (size > MAX_BYTES) {
+    // anything else this big is mostly generated (a parser, an amalgamation, a code dump), but it can
+    // be a whole single-file app with its assets inline: keep it if it reads like one written by hand
+    if (size > BIG_BYTES) return null;
+    text = read();
+    for (const line of text.split('\n')) if (line.trim()) loc++;
+    if (loc > BIG_LOC || GENERATED.test(text.slice(0, 2000))) return null;
+  } else if (base === 'bun.lockb') { loc = Math.round(size / 40); text = ''; } // binary
+  else text = read();
+  // binary under a code file's name (a video segment saved as .ts, an installer with its archive
+  // appended): a NUL byte is git's own test
+  if (text.includes('\0')) return null;
+  // a .tpl is infrastructure when it's a Helm / Go ({{ .Values.x }}) or Terraform (${x}, %{ if }) template,
+  // not when it's a PHP Smarty page ({$title}, {if $x}…{/if}, {include file=…})
+  if (ext === 'tpl' && !text.includes('{{') && SMARTY.test(text)) return null;
+  if (!loc) for (const line of text.split('\n')) if (line.trim()) loc++;
+  if (!loc) return null;
+  const a = FARM.has(lang) ? { c: 0, f: 0, lf: 0, x: 0, r: { nb: 'notebook', data: 'field', model: 'silo' }[lang], k: ext }
+    : INFRA.has(lang) ? { c: 0, f: 0, lf: 0, x: 0, r: 'infra', k: infraKind(p, text, lang) }
+    : PROSE.has(lang) ? { c: (text.match(/^#{1,3} /gm) || []).length, f: 0, lf: 0, x: 0, r: 'page', k: pageKind(p) }
+    : fileAnatomy(p, text, lang);
+  return { p, lang, loc, a, text, g: signalOf(p, ext, lang, text), imp: new Set(), churn: 0, born: 0, last: 0 };
+}
+
+// Whether building() would read a file of this size, or draw it from its size alone (or not at all)
+function reads(p, lang, size) {
+  let asked = false;
+  building(p, lang, size, () => { asked = true; return ''; });
+  return asked;
+}
+
+// cat-file for the blobs of deleted files. A partial clone fetches a blob it doesn't have when it's asked
+// for, one round trip each, unless git is told not to: then a blob that isn't here is just missing.
+// (GIT_NO_LAZY_FETCH is git 2.44's: canReadBlobs keeps an older git away from partial clones.)
+const catFile = (root, format, ids, maxBuffer) => execFileSync('git', ['-C', root, 'cat-file', format],
+  { input: ids.join('\n') + '\n', maxBuffer, env: { ...process.env, GIT_NO_LAZY_FETCH: '1' }, stdio: ['pipe', 'pipe', 'ignore'] });
+function canReadBlobs(root) {
+  // a partial clone has a promisor remote (older gits mark it with extensions.partialClone)
+  try { git(root, ['config', '--get-regexp', '^(remote\\..*\\.promisor|extensions\\.partialclone)$']); } catch { return true; }
+  const [major, minor] = git(root, ['version']).match(/(\d+)\.(\d+)/).slice(1).map(Number);
+  return major > 2 || major === 2 && minor >= 44;
+}
+// Blob sizes by id (a blob that isn't here is left out)
+function blobSizes(root, ids) {
+  const out = new Map();
+  if (!ids.length) return out;
+  for (const line of catFile(root, '--batch-check=%(objectname) %(objecttype) %(objectsize)', ids, 1 << 28).toString('latin1').split('\n')) {
+    const [id, type, size] = line.split(' ');
+    if (type === 'blob') out.set(id, +size);
+  }
+  return out;
+}
+// Blob texts by id, for blobs of `bytes` in all
+function blobTexts(root, ids, bytes) {
+  const out = new Map();
+  if (!ids.length) return out;
+  const buf = catFile(root, '--batch', ids, bytes + ids.length * 100);
+  // each blob comes back as "<id> blob <size>\n<bytes>\n", one that isn't here as "<id> missing\n"
+  for (let o = 0; o < buf.length;) {
+    const nl = buf.indexOf(10, o);
+    const [id, type, size] = buf.toString('latin1', o, nl).split(' ');
+    if (type !== 'blob') { o = nl + 1; continue; }
+    out.set(id, buf.toString('utf8', nl + 1, nl + 1 + +size));
+    o = nl + 2 + +size;
+  }
+  return out;
+}
+
 // name: the repository's name, when the folder it's cloned into has another (the hosted scanner's)
 export async function scanRepo(repo, { maxCommits = 20000, name } = {}) {
   repo = path.resolve(repo);
@@ -127,39 +237,94 @@ export async function scanRepo(repo, { maxCommits = 20000, name } = {}) {
   name ||= path.basename(root);
   const listed = git(root, ['ls-files', '-z']).split('\0').filter(Boolean);
 
-  // ---- git history: one pass over `git log --name-status`, oldest first, following renames
+  // ---- git history: one pass over `git log --raw`, oldest first, following renames
   // so a file moved into src/ keeps the birthday of its original path. (Only which files each commit
-  // touched matters, not how many lines: --numstat would diff every changed file, often 10x slower.)
+  // touched matters, not how many lines: --numstat would diff every changed file, often 10x slower.
+  // --raw costs the same as --name-status, and names the blob a deleted file had.)
   // git runs alongside the reading of the files below, in its own process; the two only meet at the end.
   const commits = [];
   const alias = new Map(); // path at this point in history -> history record
+  const dead = new Map(); // path -> the record of the file deleted there (until a file is added there again)
   const history = new Promise((resolve, reject) => {
     // quotePath=false: non-ASCII names (中文.md, café.js) come back as raw UTF-8, matching ls-files
-    const proc = spawn('git', ['-C', root, '-c', 'core.quotePath=false', 'log', `--max-count=${maxCommits}`, '--name-status',
+    // renameLimit: pinned to git's own default, so pairMoves knows when git gave up (and an older git,
+    // or one configured otherwise, pairs the same files)
+    const proc = spawn('git', ['-C', root, '-c', 'core.quotePath=false', '-c', `diff.renameLimit=${RENAME_LIMIT}`, 'log', `--max-count=${maxCommits}`, '--raw', '--no-abbrev',
       '--format=@@%ct', '-M', '--reverse'], { stdio: ['ignore', 'pipe', 'ignore'] });
     const rl = readline.createInterface({ input: proc.stdout });
-    let cur = null;
+    let cur = null, added = [], deleted = [];
     rl.on('line', line => {
       if (line.startsWith('@@')) {
+        if (cur) pairMoves(added, deleted);
         cur = { t: +line.slice(2), f: [] };
         commits.push(cur);
+        added = []; deleted = [];
         return;
       }
-      // "M\tpath", or "R097\told\tnew" for a rename (a path with a tab in it comes quoted)
-      const parts = line.split('\t');
-      if (!cur || parts.length < 2) return;
-      const from = unquote(parts[1]), to = parts[0][0] === 'R' ? unquote(parts[2]) : from;
+      // ":100644 100644 <old blob> <new blob> M\tpath", or "… R097\told\tnew" for a rename
+      // (a path with a tab in it comes quoted)
+      const tab = line.indexOf('\t');
+      if (!cur || line[0] !== ':' || tab < 0) return;
+      const [mode, , blob, , st] = line.slice(1, tab).split(' ');
+      const parts = line.slice(tab + 1).split('\t');
+      const from = unquote(parts[0]), to = st[0] === 'R' ? unquote(parts[1]) : from;
+      const arrives = st[0] === 'A' || st[0] === 'R';
       let h = alias.get(from);
       if (from !== to) { alias.delete(from); }
-      if (!h) h = { born: cur.t, last: 0, churn: 0 };
-      alias.set(to, h);
+      // a path whose file was deleted: one added there is the same file, back. One edited there was edited
+      // on another branch than the one that deleted it (the walk is one line through a history of
+      // branches), and stays deleted.
+      if (!h && (h = dead.get(to)) && arrives) { dead.delete(to); delete h.died; }
+      // (a file seen for the first time by an edit was there before the commits read: it isn't new)
+      if (!h) { h = { born: cur.t, last: 0, churn: 0 }; if (arrives) added.push(to); }
+      if (st[0] === 'D') {
+        alias.delete(from);
+        dead.set(from, h);
+        Object.assign(h, { died: cur.t, edited: h.last || h.born, blob, mode });
+        deleted.push(from);
+      } else if (h.died === undefined) alias.set(to, h);
       h.last = cur.t;
       h.churn++;
       cur.f.push(h);
     });
     proc.on('error', reject);
-    proc.on('close', resolve);
+    proc.on('close', () => { if (cur) pairMoves(added, deleted); resolve(); });
   });
+  // git pairs a moved file with its old path only when enough of it stayed the same. A file deleted and
+  // one added in the same commit are also the same file when they have the same folder and stem (a
+  // README.rst rewritten as README.md, a foo.js ported to foo.ts), each the only one of its kind. In a
+  // commit that moves thousands of files git doesn't compare them at all: there, files whose paths end
+  // the same are the same file too, matched on the name, then on the name and its folder, and so on up
+  // (test/samples/each/_config.js → tests/samples/each/_config.js). Where git did compare, two files of
+  // the same name in different folders are two files: one example app's register.html going as another's
+  // arrives. Either way they're in the same language (results.py giving way to results.csv is new data).
+  function pairMoves(added, deleted) {
+    const ending = n => p => p.split('/').slice(-n).join('/');
+    const byStem = p => p.replace(/([^/])\.[^./]*$/, '$1'); // (.eslintrc has no stem)
+    if (!added.length || !deleted.length) return;
+    const gaveUp = added.length * deleted.length > RENAME_LIMIT * RENAME_LIMIT;
+    const family = new Map([...added, ...deleted].map(p => [p, familyOf(p)]));
+    for (const key of gaveUp ? [ending(1), ending(2), ending(3), ending(4), byStem] : [byStem]) {
+      if (!added.length || !deleted.length) return;
+      const once = paths => {
+        const n = new Map();
+        for (const p of paths) { const k = `${family.get(p)} ${key(p)}`; n.set(k, n.has(k) ? null : p); }
+        return n;
+      };
+      const gone = once(deleted), took = new Set();
+      for (const [k, to] of once(added)) {
+        const from = gone.get(k);
+        if (!to || !from) continue;
+        // the commit already counts as touching the old file (its deletion); the record made for the
+        // new one is dropped, so its touch isn't counted twice
+        const h = dead.get(from);
+        dead.delete(from); delete h.died;
+        alias.set(to, h);
+        took.add(to).add(from);
+      }
+      added = added.filter(p => !took.has(p)); deleted = deleted.filter(p => !took.has(p));
+    }
+  }
   history.catch(() => {}); // (a failure surfaces where it's awaited)
 
   const files = [];
@@ -170,67 +335,24 @@ export async function scanRepo(repo, { maxCommits = 20000, name } = {}) {
   for (const p of listed) {
     // now and then let git's output drain (a full pipe would stop git until the files are read)
     if (++read % 256 === 0) await new Promise(setImmediate);
-    const ext = p.slice(p.lastIndexOf('.') + 1).toLowerCase();
-    const base = p.slice(p.lastIndexOf('/') + 1);
-    const lang = LOCKFILE.test(p) ? 'lock' : CFG_FILE.test(p) ? 'cfg' : docRole(base) ? 'doc'
-      : ext === 'ipynb' ? 'nb' : DATA_EXT.test(p) ? 'data' : MODEL_EXT.test(p) && !/(^|\/)(node_modules|tests?)\//.test(p) ? 'model' : LANGS[ext];
-    if (!lang || SKIP_DIR.test(p) || SKIP_FILE.test(p)) continue;
-    if (lang === 'yaml' && LOCALE_DIR.test(p)) continue;
-    let text, loc = 0;
-    try {
-      const full = path.join(root, p);
-      const size = statSync(full).size;
-      if (lang === 'data' || lang === 'model') {
-        // a dataset's or a model's size is what matters, not its text: about a line per 60 bytes of
-        // table, per 2 KB of weights (a field and a silo should be big, not the whole map)
-        if (BINARY_FARM.test(p) || size > MAX_BYTES) { loc = Math.max(10, Math.min(lang === 'model' ? 3000 : 20000, Math.round(size / (lang === 'model' ? 2000 : 60)))); text = ''; }
-        else text = readFileSync(full, 'utf8');
-      } else if (lang === 'nb') {
-        // a notebook's lines are its cells' source; outputs (often megabytes of images) don't count
-        if (size > 30 * MAX_BYTES) continue;
-        try {
-          const nb = JSON.parse(readFileSync(full, 'utf8'));
-          const cells = nb.cells || nb.worksheets?.[0]?.cells || [];
-          const src = c => [].concat(c.source ?? c.input ?? []).join('');
-          text = cells.filter(c => c.cell_type === 'code').map(src).join('\n');
-          loc = cells.map(src).join('\n').split('\n').filter(l => l.trim()).length;
-        } catch { continue; }
-      } else if (size > MAX_BYTES && lang === 'lock') {
-        // a huge lockfile is still a landmark: estimate its lines instead of reading it
-        loc = Math.round(size / 40); text = '';
-      } else if (size > MAX_BYTES) {
-        // anything else this big is mostly generated (a parser, an amalgamation, a code dump), but it can
-        // be a whole single-file app with its assets inline: keep it if it reads like one written by hand
-        if (size > BIG_BYTES) continue;
-        text = readFileSync(full, 'utf8');
-        for (const line of text.split('\n')) if (line.trim()) loc++;
-        if (loc > BIG_LOC || GENERATED.test(text.slice(0, 2000))) continue;
-      } else if (base === 'bun.lockb') { loc = Math.round(size / 40); text = ''; } // binary
-      else text = readFileSync(full, 'utf8');
-    } catch { continue; }
-    // binary under a code file's name (a video segment saved as .ts, an installer with its archive
-    // appended): a NUL byte is git's own test
-    if (text.includes('\0')) continue;
-    // a .tpl is infrastructure when it's a Helm / Go ({{ .Values.x }}) or Terraform (${x}, %{ if }) template,
-    // not when it's a PHP Smarty page ({$title}, {if $x}…{/if}, {include file=…})
-    if (ext === 'tpl' && !text.includes('{{') && SMARTY.test(text)) continue;
+    const lang = langOf(p);
+    if (!lang) continue;
+    const full = path.join(root, p);
+    let f;
+    try { f = building(p, lang, statSync(full).size, () => readFileSync(full, 'utf8')); } catch { continue; }
+    if (!f) continue;
     // manifests, scripts and docs often name entry files (package.json exports, Makefile, README): keep their stems
     // (stems, because exports point at built `x.js` while the source is `x.ts`)
-    if (text && (lang === 'cfg' || lang === 'doc')) for (const m of text.matchAll(SRC_REF)) refs.add(stemOf(m[0]));
-    else if (LINKED.has(lang) && text.includes('.')) for (const m of text.matchAll(STR_REF)) refs.add(stemOf(m[1]));
-    if (!loc) for (const line of text.split('\n')) if (line.trim()) loc++;
-    if (!loc) continue;
-    const a = FARM.has(lang) ? { c: 0, f: 0, lf: 0, x: 0, r: { nb: 'notebook', data: 'field', model: 'silo' }[lang], k: p.slice(p.lastIndexOf('.') + 1).toLowerCase() }
-      : INFRA.has(lang) ? { c: 0, f: 0, lf: 0, x: 0, r: 'infra', k: infraKind(p, text, lang) }
-      : PROSE.has(lang) ? { c: (text.match(/^#{1,3} /gm) || []).length, f: 0, lf: 0, x: 0, r: 'page', k: pageKind(p) }
-      : fileAnatomy(p, text, lang);
-    files.push({ p, lang, loc, a, text, g: signalOf(p, ext, lang, text), imp: new Set(), churn: 0, born: 0, last: 0 });
+    if (f.text && (lang === 'cfg' || lang === 'doc')) for (const m of f.text.matchAll(SRC_REF)) refs.add(stemOf(m[0]));
+    else if (LINKED.has(lang) && f.text.includes('.')) for (const m of f.text.matchAll(STR_REF)) refs.add(stemOf(m[1]));
+    files.push(f);
   }
+  // What share of the repo's lines is infrastructure, prose, notebooks and data? Each is measured
+  // once, over the same total, before anything is dropped (test fixtures don't count towards a
+  // category: a YAML parser's test YAML isn't infrastructure).
+  const kind = f => INFRA.has(f.lang) ? 'infra' : PROSE.has(f.lang) ? 'prose' : FARM.has(f.lang) ? 'farm' : NONCODE.has(f.lang) ? null : 'code';
+  let keep;
   {
-    // What share of the repo's lines is infrastructure, prose, notebooks and data? Each is measured
-    // once, over the same total, before anything is dropped (test fixtures don't count towards a
-    // category: a YAML parser's test YAML isn't infrastructure).
-    const kind = f => INFRA.has(f.lang) ? 'infra' : PROSE.has(f.lang) ? 'prose' : FARM.has(f.lang) ? 'farm' : NONCODE.has(f.lang) ? null : 'code';
     const loc = { code: 0, infra: 0, prose: 0, farm: 0 }, n = { infra: 0, prose: 0, farm: 0 };
     for (const f of files) {
       const k = kind(f);
@@ -240,7 +362,7 @@ export async function scanRepo(repo, { maxCommits = 20000, name } = {}) {
       if (k !== 'code') n[k]++;
     }
     const total = Math.max(1, loc.code + loc.infra + loc.prose + loc.farm);
-    const keep = { infra: n.infra >= 8 && loc.infra / total >= INFRA_MIN, prose: n.prose >= 10 && loc.prose / total >= PROSE_MIN, farm: n.farm >= 8 && loc.farm / total >= FARM_MIN };
+    keep = { infra: n.infra >= 8 && loc.infra / total >= INFRA_MIN, prose: n.prose >= 10 && loc.prose / total >= PROSE_MIN, farm: n.farm >= 8 && loc.farm / total >= FARM_MIN };
     for (let k = files.length - 1; k >= 0; k--) { const c = kind(files[k]); if (c && c !== 'code' && !keep[c]) files.splice(k, 1); }
   }
   files.forEach((f, i) => index.set(f.p, i));
@@ -249,7 +371,10 @@ export async function scanRepo(repo, { maxCommits = 20000, name } = {}) {
 
   await history;
   const recIdx = new Map();
-  for (const [p, h] of alias) {
+  // a file the walk last saw deleted can still be here: the merge that brought the deleting branch in
+  // kept it (a merge shows no changes of its own). Its history is that of the deleted file. (Unless
+  // another file has moved in there since: the history is that file's.)
+  for (const [p, h] of [...[...dead].filter(([p]) => !alias.has(p)), ...alias]) {
     const idx = index.get(p);
     if (idx === undefined) continue;
     recIdx.set(h, idx);
@@ -272,6 +397,35 @@ export async function scanRepo(repo, { maxCommits = 20000, name } = {}) {
   // is written for it (LÖVE's callbacks are in main.lua, but the other scripts are the game too)
   const engine = gameEngine(files, listed, name);
   if (engine) for (const f of files) if (ENGINE_LANG[engine.name].includes(f.lang) && !SAMPLE_DIR.test(f.p)) f.g = engine.name;
+
+  // ---- the files deleted along the way, as they were when they went. Each is read by the same rules
+  // as the files here, so it's only kept when it would have been a building. (A path that has a file
+  // again isn't one of them: that file came back.)
+  const here = new Set(listed);
+  const lost = [...dead].filter(([p, h]) => !here.has(p) && /^100/.test(h.mode) && langOf(p)) // not a submodule or a symlink
+    .map(([p, h]) => ({ p, h, lang: langOf(p) }));
+  const gone = [];
+  try {
+    if (lost.length && canReadBlobs(root)) {
+      const sizes = blobSizes(root, [...new Set(lost.map(l => l.h.blob))]);
+      for (const l of lost) { l.size = sizes.get(l.h.blob); l.reads = l.size !== undefined && reads(l.p, l.lang, l.size); }
+      // the texts building() will look at, smallest first, up to GONE_TEXT in all (a bigger one is
+      // only drawn from its size, if at all, and those are never read)
+      const want = [...new Set(lost.filter(l => l.reads).map(l => l.h.blob))].sort((a, b) => sizes.get(a) - sizes.get(b));
+      let bytes = 0, n = 0;
+      while (n < want.length && bytes + sizes.get(want[n]) <= GONE_TEXT) bytes += sizes.get(want[n++]);
+      const texts = blobTexts(root, want.slice(0, n), bytes);
+      for (const { p, h, lang, size, reads } of lost) {
+        if (size === undefined || reads && !texts.has(h.blob)) continue;
+        const f = building(p, lang, size, () => texts.get(h.blob));
+        if (!f || kind(f) && kind(f) !== 'code' && !keep[kind(f)]) continue;
+        if (engine && ENGINE_LANG[engine.name].includes(f.lang) && !SAMPLE_DIR.test(p)) f.g = engine.name;
+        // last: its last change before it went; churn: its changes, not counting the deletion
+        gone.push({ p, lang: f.lang, loc: f.loc, a: f.a, born: h.born, last: h.edited, died: h.died, churn: h.churn - 1, ...(f.g && { g: f.g }) });
+      }
+    }
+  } catch { gone.length = 0; } // the deleted files are extra: without them the city is still whole
+  gone.sort((x, y) => x.died - y.died || (x.p < y.p ? -1 : 1));
   const edges = files.reduce((n, f) => n + f.imp.size, 0);
   const city = {
     name,
@@ -280,6 +434,8 @@ export async function scanRepo(repo, { maxCommits = 20000, name } = {}) {
     start, end, ...(truncated && { truncated, firstCommit }),
     stats: { files: files.length, loc: files.reduce((n, f) => n + f.loc, 0), edges, commits: touched.length },
     files: files.map(f => ({ p: f.p, lang: f.lang, loc: f.loc, imp: [...f.imp], a: f.a, churn: f.churn, born: f.born, last: f.last, ...(status.get(f) && { s: status.get(f) }), ...(f.g && { g: f.g }) })),
+    // files deleted along the way (none of them is in commits: those name the files above)
+    gone,
     // compact: [time, fileIdx, fileIdx, ...]; skip giant sweeping commits (formatting, renames)
     commits: touched.filter(c => c.f.length < 200).map(c => [c.t, ...c.f]),
     extras: { hardwareFiles, engine, app: appPlatforms(root, listed) },

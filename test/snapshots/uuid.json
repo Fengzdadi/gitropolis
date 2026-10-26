@@ -100,5 +100,14 @@
     "version4.go": {"lang":"go","loc":68,"a":{"c":0,"f":5,"lf":19,"x":4,"r":"source"},"churn":15,"born":1312829110,"last":1625756748,"s":["dead"],"imp":[]},
     "version6.go": {"lang":"go","loc":48,"a":{"c":0,"f":1,"lf":36,"x":1,"r":"source"},"churn":1,"born":1700783418,"last":1700783418,"s":["new"],"imp":[]},
     "version7.go": {"lang":"go","loc":91,"a":{"c":0,"f":4,"lf":28,"x":2,"r":"source"},"churn":3,"born":1700783418,"last":1705087335,"s":["new"],"imp":[]}
+  },
+  "gone": {
+    "Makefile": {"lang":"cfg","loc":26,"a":{"c":0,"f":0,"lf":0,"x":0,"r":"build"},"born":1312829110,"last":1312829110,"died":1312839572,"churn":1},
+    "uuid/Makefile": {"lang":"cfg","loc":15,"a":{"c":0,"f":0,"lf":0,"x":0,"r":"build"},"born":1312839269,"last":1312839269,"died":1338332731,"churn":1},
+    "lib/codereview/codereview.py": {"lang":"py","loc":2910,"a":{"c":12,"f":144,"lf":129,"x":100,"r":"source"},"born":1312839269,"last":1312839269,"died":1433367616,"churn":1},
+    "json.go": {"lang":"go","loc":30,"a":{"c":0,"f":2,"lf":15,"x":2,"r":"source"},"born":1417456797,"last":1444540113,"died":1456458706,"churn":4},
+    "uuid_source.go": {"lang":"go","loc":47,"a":{"c":1,"f":4,"lf":7,"x":5,"r":"source"},"born":1550648598,"last":1551358764,"died":1552508205,"churn":2},
+    "uuid_source_test.go": {"lang":"go","loc":49,"a":{"c":0,"f":1,"lf":53,"x":1,"r":"test"},"born":1550648598,"last":1551363694,"died":1552508205,"churn":4},
+    ".github/workflows/release.yaml": {"lang":"cfg","loc":18,"a":{"c":0,"f":0,"lf":0,"x":0,"r":"deploy"},"born":1692378434,"last":1692378434,"died":1692383153,"churn":1}
   }
 }
