@@ -61,7 +61,7 @@ export const STYLES = {
     building: '#1c1c1f', buildingJitter: 0.03, ground: '#0e4a2b', plate: '#13583a', roughness: 0.5,
     rail: '#b9bcc2', water: '#121514', land: '#0e4a2b', yard: '#13583a', dirt: '#8a6136', sand: '#13583a', dune: '#10502f', cliff: '#0c3f25', plaza: '#13583a', park: '#13583a', lawn: '#10502f', hill: '#141416', road: '#c8803f',
     copper: '#c8803f', leads: '#c9ccd2', silk: '#ecebe2',
-    windows: 0, accent: '#d6a648', edges: { color: '#ecebe2', opacity: 0.05, straight: true },
+    windows: 0, accent: '#d6a648', edges: null,
     toneMapping: THREE.ACESFilmicToneMapping, exposure: 1.05, bloom: null,
     ink: '#ecebe2', inkSoft: 'rgba(236,235,226,.55)', font: "'JetBrains Mono', ui-monospace, monospace", uiFont: "'JetBrains Mono', ui-monospace, monospace", labelCase: 'upper',
   },
@@ -110,7 +110,8 @@ function buildTerrain(scene, layout, S, plateStep, shared, street, blockBorn) {
   // when each block opens (from the street field); without one, everything is there from the start
   const bornOf = b => blockBorn ? blockBorn[layout.blocks.indexOf(b)] : 0;
   const landTop = layout.groundIsWater ? plateStep * 0.8 : 0;
-  if (layout.groundIsWater) add(slab([...layout.land, ...layout.shore], 0, landTop), S.land, 'grass-or-street');
+  // (a circuit board comes up nearly to its blocks, so a trace can run from one to the next)
+  if (layout.groundIsWater) add(slab([...layout.land, ...layout.shore], 0, S.chip ? landTop + plateStep * 0.92 : landTop), S.land, 'grass-or-street');
   // lakes and rivers; on a city whose ground is the sea, they're pools sitting on the land
   if (layout.water.length) add(slab(layout.water, layout.groundIsWater ? landTop : 0, plateStep * 0.05), S.water, 'water');
   const colors = { block: S.plate, park: S.park, plaza: S.plaza, lawn: S.lawn, yard: S.yard, beach: S.sand };
@@ -307,9 +308,8 @@ export function buildStudio(ctx) {
   // the field's lookup tables were only needed to plan routes; the GPU keeps its own copy of the texture
   const trees = S.pixel && layout ? timed('trees', () => buildTrees({ layout, B, streets, unit: layout.unit, plateStep, shared })) : null;
   if (trees) scene.add(trees);
-  const roadY = layout?.groundIsWater ? plateStep * 0.8 + 0.05 : 0.05;
-  if (S.chip && streets) scene.add(timed('traces', () => chip.buildTraces({ lanes: streets.lanes, unit, y: roadY - 0.05, S, shared })));
   if (streets) { streets.drivable = streets.navigable = streets.bornAt = null; streets.curbs = null; streets.lanes = streets.boats = null; streets.texture.onUpdate = t => { t.image.data = null; }; }
+  const roadY = layout?.groundIsWater ? plateStep * 0.8 + 0.05 : 0.05;
 
   // ---- district plinths (classic treemap only)
   if (!layout) {
@@ -424,7 +424,11 @@ export function buildStudio(ctx) {
   mesh.computeBoundingSphere();
   mesh.frustumCulled = false;
   scene.add(mesh);
-  if (S.chip) scene.add(chip.buildLeads({ bodies: mesh, B, H, leads, unit, S, shared, grow: growVertex }), chip.buildSilkscreen({ B, unit, S, shared }));
+  if (S.chip) {
+    scene.add(chip.buildLeads({ bodies: mesh, B, H, leads, unit, S, shared, grow: growVertex }), chip.buildSilkscreen({ B, unit, S, shared }));
+    const top = (layout.groundIsWater ? plateStep * 0.8 : 0) + plateStep; // where the parts stand
+    scene.add(timed('board (routing)', () => chip.buildBoard({ B, files, leads, unit, top, S, shared })));
+  }
   // pixel style: real architecture per file; the box mesh stays as an invisible picking proxy
   let cityMesh = null;
   if (S.pixel && layout) {
@@ -463,7 +467,7 @@ export function buildStudio(ctx) {
       if (S.flat) {
         const d = p2.clone().sub(p0);
         p1.x += -d.z * 0.18; p1.z += d.x * 0.18;
-      } else if (!S.edges.straight) { // (chip: straight, the ratsnest of a board not yet routed)
+      } else {
         p1.y = Math.max(p0.y, p2.y) + dist * 0.3 + unit;
       }
       curve.v0 = p0; curve.v1 = p1; curve.v2 = p2;
