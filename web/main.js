@@ -26,7 +26,9 @@ const fail = msg => {
 addEventListener('error', e => fail(e.message || e.error));
 addEventListener('unhandledrejection', e => fail(e.reason?.stack || e.reason));
 // pixel | maquette | plan | nocturne | neon (the original prototype) | chip (the easter egg)
-const STYLE = params.get('style') || 'pixel';
+// a visit that names no style is pixel, except one in 100,000 that rolls chip and keeps ?style=chip, so it can be shared
+const STYLE = params.get('style') || (Math.random() < 1e-5 ? 'chip' : 'pixel');
+if (!params.has('style') && STYLE === 'chip') { params.set('style', STYLE); history.replaceState(null, '', `${location.pathname}?${params}${location.hash}`); }
 const NEON = STYLE === 'neon';
 const PIXEL = STYLE === 'pixel';
 // art-pixel size in screen pixels, and how far to zoom in (close-ups frame the city's landmark)
@@ -840,13 +842,6 @@ if (route) {
   const a = document.createElement('a'); a.href = gh; a.target = '_blank'; a.rel = 'noopener'; a.title = 'Open this repository on GitHub'; a.textContent = data.name;
   $('#hud h1').replaceChildren(a);
   $('#gh-repo').href = gh; $('#gh-repo').hidden = false; $('#another').hidden = false;
-}
-// a hardware repo gets a quiet way in to the easter egg
-if (data.identity?.chip && STYLE !== 'chip') {
-  const a = document.createElement('a');
-  const q = new URLSearchParams(location.search); q.set('style', 'chip');
-  a.href = `${location.pathname}?${q}`; a.textContent = 'psst: chip'; a.title = 'Hardware sources here: see this city as a circuit board';
-  $('#links').prepend(a);
 }
 const CITY_PHRASE = { board: 'a circuit board', farm: 'a farm village', desert: 'a desert boomtown', industrial: 'a factory town', science: 'a science park', themepark: 'a theme park', resort: 'a seaside resort', capital: 'a planned capital', mountain: 'a mountain city', university: 'a university town', port: 'a port city', smalltown: 'a small town', manhattan: 'Manhattan', hongkong: 'Hong Kong', tokyo: 'Tokyo', la: 'Los Angeles', paris: 'Paris', venice: 'Venice', barcelona: 'Barcelona' };
 const shareLink = route ? `https://gitropolis.dev/${route[1]}/${route[2]}` : 'https://gitropolis.dev';

@@ -59,7 +59,8 @@ if (!/^[1-9]\d*x[1-9]\d*$/.test(frame)) fail(`--size is width x height, like 192
 const [w, h] = frame.split('x').map(Number);
 const maxMB = +num('--max-mb', flag('--max-mb', 9.5)); // GitHub README uploads cap at 10 MB
 const headed = bool('--headed');
-// (neon and chip aren't in --help: neon is the first prototype, chip the easter egg for hardware repos)
+// (neon and chip aren't in --help: neon is the first prototype, chip the easter egg a plain visit rolls now and then)
+const styleAsked = args.includes('--style'); // if not, the live view leaves the page to pick (and maybe roll chip)
 const style = oneOf('--style', flag('--style', 'pixel'), ['pixel', 'maquette', 'plan', 'nocturne', 'neon', 'chip']);
 const pxOpt = num('--pixel', flag('--pixel')); // pixel style: size of one art pixel (default 1; 2 for chunkier art)
 const zoomOpt = num('--zoom', flag('--zoom')); // close-up factor (pixel style)
@@ -107,7 +108,6 @@ console.log(`done in ${city.scanMs}ms\n  ${s.files} buildings · ${s.loc.toLocal
 const id = city.identity;
 console.log(`\n  this repo is ${pink(id.name)}${id.reasons.length ? ' — ' + id.reasons.join('; ') : ''}`);
 for (const st of id.states) console.log(`  + ${st.reason}`);
-if (id.chip && style !== 'chip') console.log(`  (psst: hardware sources found — try --style chip)`);
 console.log('');
 
 // nothing to draw (only images, binaries, vendored code…): say so instead of opening an empty page
@@ -248,7 +248,7 @@ server.listen(port, '127.0.0.1');
 server.on('listening', () => {
   const link = `http://localhost:${port}`;
   if (!rec) {
-    const view = `${link}/?style=${style}&city=${cityOpt}${pxOpt ? `&px=${pxOpt}` : ''}${zoomOpt ? `&zoom=${zoomOpt}` : ''}`;
+    const view = `${link}/?${styleAsked ? `style=${style}&` : ''}city=${cityOpt}${pxOpt ? `&px=${pxOpt}` : ''}${zoomOpt ? `&zoom=${zoomOpt}` : ''}`;
     console.log(`  city open at ${cyan(view)}`);
     if (!noOpen) openBrowser(view);
     return;
