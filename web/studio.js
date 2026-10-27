@@ -19,7 +19,7 @@ export const STYLES = {
     hemi: { sky: '#f6f3ee', ground: '#a69d90', intensity: 1.25 },
     heightScale: 0.42, maxHeight: 4.5,
     building: '#f1ede6', buildingJitter: 0.035, ground: '#d8d1c5', plate: '#e4ded4', roughness: 0.92,
-    rail: '#8f877c', water: '#b7c2c3', land: '#ddd6ca', yard: '#c9c4b8', dirt: '#c8b48f', sand: '#e6d8b5', dune: '#d6c49c', cliff: '#cbbfae', plaza: '#ece7de', park: '#c6cab0', lawn: '#d4d4bf', hill: '#d9d1c4', road: '#c9c1b4',
+    rail: '#8f877c', water: '#b7c2c3', land: '#ddd6ca', yard: '#c9c4b8', dirt: '#c8b48f', sand: '#e6d8b5', dune: '#d6c49c', cliff: '#cbbfae', plaza: '#ece7de', park: '#c6cab0', lawn: '#d4d4bf', hill: '#d9d1c4', road: '#c9c1b4', wall: '#d3cbbd',
     windows: 0, accent: '#d8452b', edges: { color: '#2a2724', opacity: 0.07 },
     toneMapping: THREE.NeutralToneMapping, exposure: 1.15, bloom: null,
     ink: '#2a2724', inkSoft: 'rgba(42,39,36,.55)', font: "'Instrument Serif', Georgia, serif", labelCase: 'none',
@@ -27,7 +27,7 @@ export const STYLES = {
   plan: {
     background: '#f1ede4', fog: null, flat: true,
     building: '#1c1b1a', buildingJitter: 0, ground: '#f1ede4', plate: '#e7e2d7',
-    rail: '#2f5d7c', water: '#dce3e3', land: '#f1ede4', yard: '#e4e0d6', dirt: '#e0d2b6', sand: '#f1e7d0', dune: '#e6d9bc', cliff: '#ddd5c6', plaza: '#ece8df', park: '#e1e3d0', lawn: '#ebebdf', hill: '#e4dfd4', road: '#ddd7cb',
+    rail: '#2f5d7c', water: '#dce3e3', land: '#f1ede4', yard: '#e4e0d6', dirt: '#e0d2b6', sand: '#f1e7d0', dune: '#e6d9bc', cliff: '#ddd5c6', plaza: '#ece8df', park: '#e1e3d0', lawn: '#ebebdf', hill: '#e4dfd4', road: '#ddd7cb', wall: '#6b655c',
     windows: 0, accent: '#d23c2a', edges: { color: '#d23c2a', opacity: 0.22 },
     toneMapping: THREE.NoToneMapping, exposure: 1.0, bloom: null,
     ink: '#1c1b1a', inkSoft: 'rgba(28,27,26,.55)', font: "'Instrument Serif', Georgia, serif", labelCase: 'upper',
@@ -37,7 +37,7 @@ export const STYLES = {
     sun: { color: '#fff4e0', intensity: 2.6, elevation: 50, azimuth: 75 },
     hemi: { sky: '#c4e4ee', ground: '#61944a', intensity: 1.0 },
     building: '#bdb293', buildingJitter: 0.06, ground: '#61944a', plate: '#cdc8d2', roughness: 1,
-    rail: '#4a4458', water: '#2f6188', land: '#61944a', yard: '#9c97a8', dirt: '#968a6e', sand: '#dccfa4', dune: '#bdb293', cliff: '#968a6e', plaza: '#e0d7b8', park: '#3d6b36', lawn: '#93bf62', hill: '#3d6b36', road: '#6e6880',
+    rail: '#4a4458', water: '#2f6188', land: '#61944a', yard: '#9c97a8', dirt: '#968a6e', sand: '#dccfa4', dune: '#bdb293', cliff: '#968a6e', plaza: '#e0d7b8', park: '#3d6b36', lawn: '#93bf62', hill: '#3d6b36', road: '#6e6880', wall: '#b0a58a',
     windows: 0, accent: '#c0413b', edges: null,
     toneMapping: THREE.NoToneMapping, exposure: 1.0, bloom: null,
     ink: '#14121c', inkSoft: 'rgba(20,18,28,.7)', font: "'Pixelify Sans', monospace", uiFont: "'Pixelify Sans', monospace", labelCase: 'none',
@@ -48,7 +48,7 @@ export const STYLES = {
     hemi: { sky: '#56607e', ground: '#17151a', intensity: 1.15 },
     heightScale: 0.55, maxHeight: 6,
     building: '#3d4049', buildingJitter: 0.04, ground: '#14161c', plate: '#24262e', roughness: 0.8,
-    rail: '#6d6050', water: '#0b1626', land: '#1c1e25', yard: '#25272e', dirt: '#2a241c', sand: '#2a2620', dune: '#221f1a', cliff: '#1d1f25', plaza: '#2d2f37', park: '#18211a', lawn: '#1b211d', hill: '#15161c', road: '#0e0f13',
+    rail: '#6d6050', water: '#0b1626', land: '#1c1e25', yard: '#25272e', dirt: '#2a241c', sand: '#2a2620', dune: '#221f1a', cliff: '#1d1f25', plaza: '#2d2f37', park: '#18211a', lawn: '#1b211d', hill: '#15161c', road: '#0e0f13', wall: '#3a3833',
     windows: 1, windowColor: '#ffc27a', accent: '#ffc27a', edges: { color: '#ffc27a', opacity: 0.018 }, hubEdgeBoost: 3,
     toneMapping: THREE.ACESFilmicToneMapping, exposure: 1.1, bloom: { strength: 0.35, radius: 0.4, threshold: 0.85 },
     ink: '#e8e2d6', inkSoft: 'rgba(232,226,214,.55)', font: "'Instrument Serif', Georgia, serif", labelCase: 'none',
@@ -80,7 +80,7 @@ function slabEach(list) {
   return geos.length ? mergeGeometries(geos) : null;
 }
 
-function buildTerrain(scene, layout, S, plateStep, shared, street, blockBorn) {
+function buildTerrain(scene, layout, S, plateStep, shared, street, blockBorn, wall) {
   const mat = color => S.flat ? new THREE.MeshBasicMaterial({ color })
     : new THREE.MeshStandardMaterial({ color, roughness: 0.95, flatShading: true });
   const add = (geo, color, surface) => {
@@ -200,6 +200,17 @@ function buildTerrain(scene, layout, S, plateStep, shared, street, blockBorn) {
     mesh.castShadow = mesh.receiveShadow = !S.flat;
     scene.add(mesh);
   }
+  // the old town's wall (walls.js): stone runs along the streets, square towers with red roofs, all
+  // going up together when the founding years end
+  if (wall) {
+    const wh = u * 0.5, ts = u * 0.46, th = wh * 1.8;
+    const grown = g => { const n = g.attributes.position.count, a = new Float32Array(n * 2); for (let k = 0; k < n; k++) { a[k * 2] = wall.born; a[k * 2 + 1] = landTop; } return g.setAttribute('aGrow', new THREE.BufferAttribute(a, 2)); };
+    add(grown(mergeGeometries(wall.runs.map(([x0, x1, z]) => new THREE.BoxGeometry(x1 - x0, wh, wall.cell * 1.02).translate((x0 + x1) / 2, landTop + wh / 2, z)))), S.wall);
+    if (wall.towers.length) {
+      add(grown(mergeGeometries(wall.towers.map(([x, z]) => new THREE.BoxGeometry(ts, th, ts).translate(x, landTop + th / 2, z)))), S.wall);
+      add(grown(mergeGeometries(wall.towers.map(([x, z]) => new THREE.ConeGeometry(ts * 0.78, ts * 0.8, 4).rotateY(Math.PI / 4).translate(x, landTop + th + ts * 0.4, z)))), S.accent);
+    }
+  }
   for (const h of S.flat ? [] : layout.hills) { // seen from straight above, hills are just blobs
     const mesh = new THREE.Mesh(new THREE.IcosahedronGeometry(1, 2), mat(S.hill));
     mesh.scale.set(h.r, h.h, h.r * 0.8);
@@ -210,7 +221,7 @@ function buildTerrain(scene, layout, S, plateStep, shared, street, blockBorn) {
 }
 
 export function buildStudio(ctx) {
-  const { name, scene, renderer, B, files, districts, unit, SIZE, plateStep, cx, cz, shared, heat, focusAttr, inDeg, hub, t01, layout } = ctx;
+  const { name, scene, renderer, B, files, districts, unit, SIZE, plateStep, cx, cz, shared, heat, focusAttr, inDeg, hub, t01, layout, wall } = ctx;
   // a desert city stands on sand: the open ground and the lawns between blocks become dunes
   const S = layout?.sand ? { ...STYLES[name], land: STYLES[name].sand, lawn: STYLES[name].dune } : STYLES[name];
   const N = files.length;
@@ -277,7 +288,7 @@ export function buildStudio(ctx) {
   scene.add(ground);
 
   // ---- city terrain from a planner: land, raised blocks, parks, plazas, bridges, hills
-  if (layout) timed('terrain', () => buildTerrain(scene, layout, S, plateStep, shared, street, streets?.blockBorn));
+  if (layout) timed('terrain', () => buildTerrain(scene, layout, S, plateStep, shared, street, streets?.blockBorn, wall));
   // district names appear with their land
   // (a district's name goes up with its land, ahead of its first building)
   // (and not before the ground under the name itself has come up: a district's first file can be far off)

@@ -8,6 +8,7 @@ import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
 import { hierarchy, treemap, treemapSquarify } from 'd3-hierarchy';
 import { buildStudio } from './studio.js';
 import { buildLayout, CITY_KINDS } from './layouts.js';
+import { planWall, foundingEnd } from './walls.js';
 import { createPixelPipeline } from './pixel.js';
 import { rubbleMesh, RUBBLE_VERTEX } from './rubble.js';
 import { PERF, HEAP, timed } from './perf.js';
@@ -167,6 +168,11 @@ if (layout) {
     Object.assign(B[i], { x: l.x, z: l.z, w: l.w * 0.88, d: l.d * 0.88, rot: l.rot, y: base + (l.y || 0), h: Math.max(layout.heights[i], unit * 0.1) });
   });
 }
+// an old walled city (twenty years on, its founding files still standing) keeps its old town behind a
+// wall, whatever the plan; it goes up when the founding years end
+const wall = layout && data.identity?.states?.some(s => s.id === 'walled')
+  ? timed('wall', () => { const until = foundingEnd(data), w = planWall({ layout, files, until }); return w && { ...w, born: Math.max(0, t01(until)) }; })
+  : null;
 
 // ------------------------------------------------------------ renderer
 // ?record=1&w=1920&h=1080&fps=30&dur=20 → deterministic frame capture driven by the CLI
@@ -426,7 +432,7 @@ const heat = new Float32Array(N);
 const focusAttr = new Float32Array(N).fill(1);
 const glowAttr = new Float32Array(N); // 1 for the buildings of the district under the pointer
 const studio = NEON ? null : timed('studio (all)', () => buildStudio({ name: STYLE, scene, renderer, B, files, districts, unit, SIZE, plateStep, cx, cz,
-  shared, heat, focusAttr, glowAttr, inDeg, hub, t01, layout }));
+  shared, heat, focusAttr, glowAttr, inDeg, hub, t01, layout, wall }));
 if (studio) {
   document.body.classList.add('studio', `style-${STYLE}`);
   if (studio.style.uiFont) document.body.style.setProperty('--ui-font', studio.style.uiFont);

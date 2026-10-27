@@ -145,7 +145,7 @@ The terminal tells you why your repo got its plan:
 this repo is Tokyo: mostly small buildings (median 99 lines); 3.3 imports per file, so everything connects
 ```
 
-Some repos also get a condition on top of their plan. A repo with no recent commits is a ghost town. One where most files haven't been touched in years is ancient ruins. A sudden rush of commits makes a boomtown, and a repo that's mostly tests is a garden city.
+Some repos also get a condition on top of their plan. A repo with no recent commits is a ghost town. One where most files haven't been touched in years is ancient ruins. A sudden rush of commits makes a boomtown, and a repo that's mostly tests is a garden city. A repo twenty years old whose first five years still stand is an old walled city: a wall with towers and gates goes round the quarter where those founding files cluster.
 
 ## How to read the city
 
