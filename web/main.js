@@ -27,7 +27,8 @@ addEventListener('error', e => fail(e.message || e.error));
 addEventListener('unhandledrejection', e => fail(e.reason?.stack || e.reason));
 // pixel | maquette | plan | nocturne | neon (the original prototype) | chip (the easter egg)
 // a visit that names no style is pixel, except one in 100,000 that rolls chip and keeps ?style=chip, so it can be shared
-const STYLE = params.get('style') || (Math.random() < 1e-5 ? 'chip' : 'pixel');
+// (never a share card or a recording: those are made, not visited)
+const STYLE = params.get('style') || (!params.has('card') && !params.has('record') && Math.random() < 1e-5 ? 'chip' : 'pixel');
 if (!params.has('style') && STYLE === 'chip') { params.set('style', STYLE); history.replaceState(null, '', `${location.pathname}?${params}${location.hash}`); }
 const NEON = STYLE === 'neon';
 const PIXEL = STYLE === 'pixel';
