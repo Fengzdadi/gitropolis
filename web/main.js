@@ -25,8 +25,11 @@ const fail = msg => {
 };
 addEventListener('error', e => fail(e.message || e.error));
 addEventListener('unhandledrejection', e => fail(e.reason?.stack || e.reason));
-// pixel | maquette | plan | nocturne | neon (the original prototype)
-const STYLE = params.get('style') || 'pixel';
+// pixel | maquette | plan | nocturne | neon (the original prototype) | chip (the easter egg)
+// a visit that names no style is pixel, except one in 100,000 that rolls chip and keeps ?style=chip, so it can be shared
+// (never a share card or a recording: those are made, not visited)
+const STYLE = params.get('style') || (!params.has('card') && !params.has('record') && Math.random() < 1e-5 ? 'chip' : 'pixel');
+if (!params.has('style') && STYLE === 'chip') { params.set('style', STYLE); history.replaceState(null, '', `${location.pathname}?${params}${location.hash}`); }
 const NEON = STYLE === 'neon';
 const PIXEL = STYLE === 'pixel';
 // art-pixel size in screen pixels, and how far to zoom in (close-ups frame the city's landmark)
@@ -154,10 +157,11 @@ for (const l of leaves) {
 // when each comes down (2: never), at the end of the timeline at the latest (a deletion can be the last commit)
 B.forEach((b, i) => { b.died = files[i].gone ? Math.min(1, t01(files[i].died)) : 2; });
 
-// city planners (lit styles only): ?city=auto picks the repo's own archetype, ?city=classic keeps the treemap
+// city planners (lit styles only): ?city=auto picks the repo's own archetype, ?city=classic keeps the treemap;
+// a circuit board (?style=chip) has the one plan, whatever the city
 const CITY = params.get('city') || 'auto';
-const cityKind = NEON || CITY === 'classic' ? null : CITY === 'auto' ? data.identity?.city : CITY;
-const layout = cityKind && CITY_KINDS.includes(cityKind) ? timed('layout', () => buildLayout(cityKind, { files, inDeg, hub, SIZE, frontAz: PIXEL ? 45 : undefined })) : null;
+const cityKind = NEON ? null : STYLE === 'chip' ? 'board' : CITY === 'classic' ? null : CITY === 'auto' ? data.identity?.city : CITY;
+const layout = cityKind && (CITY_KINDS.includes(cityKind) || cityKind === 'board') ? timed('layout', () => buildLayout(cityKind, { files, inDeg, hub, SIZE, frontAz: PIXEL ? 45 : undefined })) : null;
 if (layout) {
   unit = layout.unit;
   plateStep = unit * 0.06;
@@ -232,7 +236,7 @@ controls.dampingFactor = 0.06;
 controls.maxPolarAngle = Math.PI * 0.48;
 controls.minDistance = unit * 2;
 controls.maxDistance = SIZE * 2.5;
-controls.autoRotate = true;
+controls.autoRotate = STYLE !== 'chip'; // a board is read from above, not spun
 controls.autoRotateSpeed = 0.35;
 let userMoved = false; // once you've panned or zoomed, a window resize doesn't snap the view back
 controls.addEventListener('start', () => { controls.autoRotate = false; userMoved = true; });
@@ -425,8 +429,10 @@ if (NEON) {
 const heat = new Float32Array(N);
 const focusAttr = new Float32Array(N).fill(1);
 const glowAttr = new Float32Array(N); // 1 for the buildings of the district under the pointer
+// the circuit board's parts are fetched only for it
+const chip = STYLE === 'chip' ? await import('./chip.js') : null;
 const studio = NEON ? null : timed('studio (all)', () => buildStudio({ name: STYLE, scene, renderer, B, files, districts, unit, SIZE, plateStep, cx, cz,
-  shared, heat, focusAttr, glowAttr, inDeg, hub, t01, layout }));
+  shared, heat, focusAttr, glowAttr, inDeg, hub, t01, layout, chip }));
 if (studio) {
   document.body.classList.add('studio', `style-${STYLE}`);
   if (studio.style.uiFont) document.body.style.setProperty('--ui-font', studio.style.uiFont);
@@ -838,7 +844,7 @@ if (route) {
   $('#hud h1').replaceChildren(a);
   $('#gh-repo').href = gh; $('#gh-repo').hidden = false; $('#another').hidden = false;
 }
-const CITY_PHRASE = { farm: 'a farm village', desert: 'a desert boomtown', industrial: 'a factory town', science: 'a science park', themepark: 'a theme park', resort: 'a seaside resort', capital: 'a planned capital', mountain: 'a mountain city', university: 'a university town', port: 'a port city', smalltown: 'a small town', manhattan: 'Manhattan', hongkong: 'Hong Kong', tokyo: 'Tokyo', la: 'Los Angeles', paris: 'Paris', venice: 'Venice', barcelona: 'Barcelona' };
+const CITY_PHRASE = { board: 'a circuit board', farm: 'a farm village', desert: 'a desert boomtown', industrial: 'a factory town', science: 'a science park', themepark: 'a theme park', resort: 'a seaside resort', capital: 'a planned capital', mountain: 'a mountain city', university: 'a university town', port: 'a port city', smalltown: 'a small town', manhattan: 'Manhattan', hongkong: 'Hong Kong', tokyo: 'Tokyo', la: 'Los Angeles', paris: 'Paris', venice: 'Venice', barcelona: 'Barcelona' };
 const shareLink = route ? `https://gitropolis.dev/${route[1]}/${route[2]}` : 'https://gitropolis.dev';
 $('#share').onclick = async () => {
   if (!pix || !layout) { // share cards are drawn in the pixel style; elsewhere, the link
@@ -1048,8 +1054,8 @@ function updateLabels() {
     el.style.left = `${boxes[k].x}px`;
     el.style.top = `${boxes[k].y}px`;
     el.classList.toggle('on', k === hoverLabel);
-    // perspective views fade far names; the isometric pixel view has no near and far
-    el.style.opacity = camera.isOrthographicCamera ? 1 : Math.max(0.15, Math.min(1, 1.6 - camera.position.distanceTo(p) / SIZE));
+    // perspective views fade far names; the isometric pixel view has no near and far, nor a board seen from above
+    el.style.opacity = camera.isOrthographicCamera || STYLE === 'chip' ? 1 : Math.max(0.15, Math.min(1, 1.6 - camera.position.distanceTo(p) / SIZE));
   });
 }
 
@@ -1217,8 +1223,19 @@ async function record() {
     aimPixel(FIT.center.clone().lerp(hubPos, push), FIT.zoom * (1 + 2.0 * push * push));
   }
 
+  // a circuit board is filmed as it's seen, from straight above: a slow push-in on the hub, never turning
+  function shotBoard(u) {
+    planCamera(layout.camera);
+    const k = REC.fixed ? 0 : smooth(0.35, 1, u);
+    const from = controls.target.clone(), off = camera.position.clone().sub(from);
+    pivot.copy(from).lerp(hubPos, k);
+    camera.position.copy(pivot).addScaledVector(off, 1 - 0.6 * k * k);
+    camera.lookAt(pivot);
+  }
+
   function shot(u) {
     if (PIXEL) return shotPixel(u);
+    if (layout?.kind === 'board') return shotBoard(u);
     const e = ease(u);
     pivot.set(0, 0, 0).lerp(hubPos, smooth(0.5, 1, u));
     const theta = theta0 + 1.7 * e;
