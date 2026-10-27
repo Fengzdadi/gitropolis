@@ -59,7 +59,7 @@ for (const name of readdirSync(path.join(HERE, 'snapshots')).filter(f => f.endsW
   const data = city(JSON.parse(readFileSync(path.join(HERE, 'snapshots', name), 'utf8')));
   const gone = data.gone.slice(Math.max(0, data.gone.length - Math.ceil(data.files.length / 4)));
   if (!gone.length) continue;
-  for (const kind of CITY_KINDS) {
+  for (const kind of [...CITY_KINDS, 'board']) { // (board: the chip style's one plan)
     runs++;
     const was = plan(data, kind, []), now = plan(data, kind, gone);
     const say = msg => problems.push(`${name.replace('.json', '')} as ${kind}: ${msg}`);

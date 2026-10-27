@@ -154,10 +154,11 @@ for (const l of leaves) {
 // when each comes down (2: never), at the end of the timeline at the latest (a deletion can be the last commit)
 B.forEach((b, i) => { b.died = files[i].gone ? Math.min(1, t01(files[i].died)) : 2; });
 
-// city planners (lit styles only): ?city=auto picks the repo's own archetype, ?city=classic keeps the treemap
+// city planners (lit styles only): ?city=auto picks the repo's own archetype, ?city=classic keeps the treemap;
+// a circuit board (?style=chip) has the one plan, whatever the city
 const CITY = params.get('city') || 'auto';
-const cityKind = NEON || CITY === 'classic' ? null : CITY === 'auto' ? data.identity?.city : CITY;
-const layout = cityKind && CITY_KINDS.includes(cityKind) ? timed('layout', () => buildLayout(cityKind, { files, inDeg, hub, SIZE, frontAz: PIXEL ? 45 : undefined })) : null;
+const cityKind = NEON ? null : STYLE === 'chip' ? 'board' : CITY === 'classic' ? null : CITY === 'auto' ? data.identity?.city : CITY;
+const layout = cityKind && (CITY_KINDS.includes(cityKind) || cityKind === 'board') ? timed('layout', () => buildLayout(cityKind, { files, inDeg, hub, SIZE, frontAz: PIXEL ? 45 : undefined })) : null;
 if (layout) {
   unit = layout.unit;
   plateStep = unit * 0.06;
@@ -847,7 +848,7 @@ if (data.identity?.chip && STYLE !== 'chip') {
   a.href = `${location.pathname}?${q}`; a.textContent = 'psst: chip'; a.title = 'Hardware sources here: see this city as a circuit board';
   $('#links').prepend(a);
 }
-const CITY_PHRASE = { farm: 'a farm village', desert: 'a desert boomtown', industrial: 'a factory town', science: 'a science park', themepark: 'a theme park', resort: 'a seaside resort', capital: 'a planned capital', mountain: 'a mountain city', university: 'a university town', port: 'a port city', smalltown: 'a small town', manhattan: 'Manhattan', hongkong: 'Hong Kong', tokyo: 'Tokyo', la: 'Los Angeles', paris: 'Paris', venice: 'Venice', barcelona: 'Barcelona' };
+const CITY_PHRASE = { board: 'a circuit board', farm: 'a farm village', desert: 'a desert boomtown', industrial: 'a factory town', science: 'a science park', themepark: 'a theme park', resort: 'a seaside resort', capital: 'a planned capital', mountain: 'a mountain city', university: 'a university town', port: 'a port city', smalltown: 'a small town', manhattan: 'Manhattan', hongkong: 'Hong Kong', tokyo: 'Tokyo', la: 'Los Angeles', paris: 'Paris', venice: 'Venice', barcelona: 'Barcelona' };
 const shareLink = route ? `https://gitropolis.dev/${route[1]}/${route[2]}` : 'https://gitropolis.dev';
 $('#share').onclick = async () => {
   if (!pix || !layout) { // share cards are drawn in the pixel style; elsewhere, the link

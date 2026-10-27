@@ -59,7 +59,7 @@ export const STYLES = {
     sun: { color: '#fff6e8', intensity: 2.6, elevation: 55, azimuth: 130 },
     hemi: { sky: '#dfe9e1', ground: '#0b2a1a', intensity: 0.9 },
     building: '#1c1c1f', buildingJitter: 0.03, ground: '#0e4a2b', plate: '#13583a', roughness: 0.5,
-    rail: '#b9bcc2', water: '#0a3320', land: '#0e4a2b', yard: '#13583a', dirt: '#8a6136', sand: '#13583a', dune: '#10502f', cliff: '#0c3f25', plaza: '#13583a', park: '#13583a', lawn: '#10502f', hill: '#141416', road: '#c8803f',
+    rail: '#b9bcc2', water: '#121514', land: '#0e4a2b', yard: '#13583a', dirt: '#8a6136', sand: '#13583a', dune: '#10502f', cliff: '#0c3f25', plaza: '#13583a', park: '#13583a', lawn: '#10502f', hill: '#141416', road: '#c8803f',
     copper: '#c8803f', leads: '#c9ccd2', silk: '#ecebe2',
     windows: 0, accent: '#d6a648', edges: { color: '#ecebe2', opacity: 0.05, straight: true },
     toneMapping: THREE.ACESFilmicToneMapping, exposure: 1.05, bloom: null,
