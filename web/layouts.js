@@ -1237,7 +1237,7 @@ const PLANNERS = {
     // the board itself, on a dark bench
     return {
       lots, blocks, labels, ground: 'water', land: [rectPoly(-0.5, -0.5, W + 0.5, W + 0.5)],
-      camera: { az: 40, el: 38, dist: 1.15 },
+      camera: { az: 90, el: 89, dist: 1.05 }, // from straight above, the board square to the frame
       height: (i, rel) => Math.min(0.32 + 0.95 * Math.sqrt(rel), 5),
     };
   },

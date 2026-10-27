@@ -233,7 +233,7 @@ controls.dampingFactor = 0.06;
 controls.maxPolarAngle = Math.PI * 0.48;
 controls.minDistance = unit * 2;
 controls.maxDistance = SIZE * 2.5;
-controls.autoRotate = true;
+controls.autoRotate = STYLE !== 'chip'; // a board is read from above, not spun
 controls.autoRotateSpeed = 0.35;
 let userMoved = false; // once you've panned or zoomed, a window resize doesn't snap the view back
 controls.addEventListener('start', () => { controls.autoRotate = false; userMoved = true; });
@@ -1058,8 +1058,8 @@ function updateLabels() {
     el.style.left = `${boxes[k].x}px`;
     el.style.top = `${boxes[k].y}px`;
     el.classList.toggle('on', k === hoverLabel);
-    // perspective views fade far names; the isometric pixel view has no near and far
-    el.style.opacity = camera.isOrthographicCamera ? 1 : Math.max(0.15, Math.min(1, 1.6 - camera.position.distanceTo(p) / SIZE));
+    // perspective views fade far names; the isometric pixel view has no near and far, nor a board seen from above
+    el.style.opacity = camera.isOrthographicCamera || STYLE === 'chip' ? 1 : Math.max(0.15, Math.min(1, 1.6 - camera.position.distanceTo(p) / SIZE));
   });
 }
 
@@ -1227,8 +1227,19 @@ async function record() {
     aimPixel(FIT.center.clone().lerp(hubPos, push), FIT.zoom * (1 + 2.0 * push * push));
   }
 
+  // a circuit board is filmed as it's seen, from straight above: a slow push-in on the hub, never turning
+  function shotBoard(u) {
+    planCamera(layout.camera);
+    const k = REC.fixed ? 0 : smooth(0.35, 1, u);
+    const from = controls.target.clone(), off = camera.position.clone().sub(from);
+    pivot.copy(from).lerp(hubPos, k);
+    camera.position.copy(pivot).addScaledVector(off, 1 - 0.6 * k * k);
+    camera.lookAt(pivot);
+  }
+
   function shot(u) {
     if (PIXEL) return shotPixel(u);
+    if (layout?.kind === 'board') return shotBoard(u);
     const e = ease(u);
     pivot.set(0, 0, 0).lerp(hubPos, smooth(0.5, 1, u));
     const theta = theta0 + 1.7 * e;

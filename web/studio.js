@@ -276,7 +276,7 @@ export function buildStudio(ctx) {
   // ---- ground
   const groundColor = !layout ? S.ground : { water: S.water, land: S.land, road: S.chip ? S.land : S.road }[layout.ground]; // (a board is all solder mask)
   const groundMat = S.flat ? new THREE.MeshBasicMaterial({ color: groundColor })
-    : new THREE.MeshStandardMaterial({ color: groundColor, roughness: layout?.groundIsWater ? 0.35 : S.chip ? 0.6 : 1 });
+    : new THREE.MeshStandardMaterial({ color: groundColor, roughness: S.chip ? 0.9 : layout?.groundIsWater ? 0.35 : 1 }); // (chip: the board's bench, no glare)
   // pixel style: streets come from a distance field over the blocks; asphalt only where streets are
   // (chip: copper traces down them)
   const streets = (S.pixel || S.chip) && layout ? timed('streets (distance field)', () => buildStreets({ layout, B, files, inDeg, SIZE, t01 })) : null;
