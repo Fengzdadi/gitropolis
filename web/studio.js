@@ -2,6 +2,7 @@
 //   maquette  — white architectural model under a low raking sun (Panorama of NYC, Gismondi's Rome)
 //   plan      — black-on-paper figure-ground print seen from straight above (Nolli map, Stamen Toner)
 //   nocturne  — dark, hazy city where only recently edited files are lit from inside (Hopper, Todd Hido)
+//   chip      — the easter egg: a circuit board, its parts from chip.js (passed in as ctx.chip)
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { buildingGeometry, shipGeometry } from './buildings.js';
@@ -52,6 +53,17 @@ export const STYLES = {
     windows: 1, windowColor: '#ffc27a', accent: '#ffc27a', edges: { color: '#ffc27a', opacity: 0.018 }, hubEdgeBoost: 3,
     toneMapping: THREE.ACESFilmicToneMapping, exposure: 1.1, bloom: { strength: 0.35, radius: 0.4, threshold: 0.85 },
     ink: '#e8e2d6', inkSoft: 'rgba(232,226,214,.55)', font: "'Instrument Serif', Georgia, serif", labelCase: 'none',
+  },
+  chip: {
+    background: '#060d09', fog: ['#060d09', 0.9, 3.0], chip: true,
+    sun: { color: '#fff6e8', intensity: 2.6, elevation: 55, azimuth: 130 },
+    hemi: { sky: '#dfe9e1', ground: '#0b2a1a', intensity: 0.9 },
+    building: '#1c1c1f', buildingJitter: 0.03, ground: '#0e4a2b', plate: '#13583a', roughness: 0.5,
+    rail: '#b9bcc2', water: '#0a3320', land: '#0e4a2b', yard: '#13583a', dirt: '#8a6136', sand: '#13583a', dune: '#10502f', cliff: '#0c3f25', plaza: '#13583a', park: '#13583a', lawn: '#10502f', hill: '#141416', road: '#c8803f',
+    copper: '#c8803f', leads: '#c9ccd2', silk: '#ecebe2',
+    windows: 0, accent: '#d6a648', edges: { color: '#ecebe2', opacity: 0.05, straight: true },
+    toneMapping: THREE.ACESFilmicToneMapping, exposure: 1.05, bloom: null,
+    ink: '#ecebe2', inkSoft: 'rgba(236,235,226,.55)', font: "'JetBrains Mono', ui-monospace, monospace", uiFont: "'JetBrains Mono', ui-monospace, monospace", labelCase: 'upper',
   },
 };
 
@@ -210,12 +222,12 @@ function buildTerrain(scene, layout, S, plateStep, shared, street, blockBorn) {
 }
 
 export function buildStudio(ctx) {
-  const { name, scene, renderer, B, files, districts, unit, SIZE, plateStep, cx, cz, shared, heat, focusAttr, inDeg, hub, t01, layout } = ctx;
+  const { name, scene, renderer, B, files, districts, unit, SIZE, plateStep, cx, cz, shared, heat, focusAttr, inDeg, hub, t01, layout, chip } = ctx;
   // a desert city stands on sand: the open ground and the lawns between blocks become dunes
   const S = layout?.sand ? { ...STYLES[name], land: STYLES[name].sand, lawn: STYLES[name].dune } : STYLES[name];
   const N = files.length;
   // each style sets its own skyline proportions: a model city is squat, a night city can soar
-  const H = B.map(b => S.flat ? plateStep * 0.5 : layout ? b.h : Math.min(b.h * (S.heightScale || 1), unit * (S.maxHeight || 99)));
+  const H = B.map(b => S.flat ? plateStep * 0.5 : S.chip ? chip.chipHeight(b, unit) : layout ? b.h : Math.min(b.h * (S.heightScale || 1), unit * (S.maxHeight || 99)));
 
   renderer.toneMapping = S.toneMapping;
   renderer.toneMappingExposure = S.exposure;
@@ -262,11 +274,12 @@ export function buildStudio(ctx) {
   }
 
   // ---- ground
-  const groundColor = !layout ? S.ground : { water: S.water, land: S.land, road: S.road }[layout.ground];
+  const groundColor = !layout ? S.ground : { water: S.water, land: S.land, road: S.chip ? S.land : S.road }[layout.ground]; // (a board is all solder mask)
   const groundMat = S.flat ? new THREE.MeshBasicMaterial({ color: groundColor })
-    : new THREE.MeshStandardMaterial({ color: groundColor, roughness: layout?.groundIsWater ? 0.35 : 1 });
+    : new THREE.MeshStandardMaterial({ color: groundColor, roughness: layout?.groundIsWater ? 0.35 : S.chip ? 0.6 : 1 });
   // pixel style: streets come from a distance field over the blocks; asphalt only where streets are
-  const streets = S.pixel && layout ? timed('streets (distance field)', () => buildStreets({ layout, B, files, inDeg, SIZE, t01 })) : null;
+  // (chip: copper traces down them)
+  const streets = (S.pixel || S.chip) && layout ? timed('streets (distance field)', () => buildStreets({ layout, B, files, inDeg, SIZE, t01 })) : null;
   // only what the street shader needs: copying the whole object would keep the routing closures (and the big field arrays they hold) alive
   // a campus has footpaths, not roads: paved stone, no centre line
   const pathC = layout?.paths ? new THREE.Color(layout.paths === 'dirt' ? S.dirt : S.plaza) : null;
@@ -289,13 +302,14 @@ export function buildStudio(ctx) {
   // Venice has no cars, only boats
   if (streets && layout.paths) { streets.lanes = []; streets.boats = []; } // footpaths: no traffic
   if (streets && layout.kind === 'venice') { streets.lanes = []; streets.boats = [...streets.boats, ...streets.boats.map(b => ({ ...b, pts: [...b.pts].reverse() }))]; }
-  const traffic = streets ? timed('traffic', () => buildTraffic({ streets, unit: layout.unit })) : null;
+  const traffic = S.pixel && streets ? timed('traffic', () => buildTraffic({ streets, unit: layout.unit })) : null;
   if (traffic) scene.add(traffic.mesh);
   // the field's lookup tables were only needed to plan routes; the GPU keeps its own copy of the texture
   const trees = S.pixel && layout ? timed('trees', () => buildTrees({ layout, B, streets, unit: layout.unit, plateStep, shared })) : null;
   if (trees) scene.add(trees);
-  if (streets) { streets.drivable = streets.navigable = streets.bornAt = null; streets.curbs = null; streets.lanes = streets.boats = null; streets.texture.onUpdate = t => { t.image.data = null; }; }
   const roadY = layout?.groundIsWater ? plateStep * 0.8 + 0.05 : 0.05;
+  if (S.chip && streets) scene.add(timed('traces', () => chip.buildTraces({ lanes: streets.lanes, unit, y: roadY - 0.05, S, shared })));
+  if (streets) { streets.drivable = streets.navigable = streets.bornAt = null; streets.curbs = null; streets.lanes = streets.boats = null; streets.texture.onUpdate = t => { t.image.data = null; }; }
 
   // ---- district plinths (classic treemap only)
   if (!layout) {
@@ -334,11 +348,14 @@ export function buildStudio(ctx) {
   const mesh = new THREE.InstancedMesh(geo, mat, N);
   const m = new THREE.Matrix4(), q = new THREE.Quaternion(), c = new THREE.Color();
   const maxChurn = Math.max(1, ...files.map(f => f.churn));
+  // chip: the body stands inside its leads, which take the rest of the footprint
+  const leads = S.chip ? chip.leadMargins(B, unit) : null;
   files.forEach((f, i) => {
     const b = B[i];
     const h = H[i];
+    const [lx, lz] = leads ? leads[i] : [0, 0];
     q.setFromAxisAngle(UP, b.rot || 0);
-    m.compose(new THREE.Vector3(b.x, b.y, b.z), q, new THREE.Vector3(b.w, h, b.d));
+    m.compose(new THREE.Vector3(b.x, b.y, b.z), q, new THREE.Vector3(b.w - lx * 2, h, b.d - lz * 2));
     mesh.setMatrixAt(i, m);
     const j = (Math.sin(i * 12.9898) * 43758.5453 % 1) * S.buildingJitter;
     mesh.setColorAt(i, i === hub ? accent : c.copy(base).offsetHSL(0, 0, j));
@@ -377,7 +394,7 @@ export function buildStudio(ctx) {
       .replace('#include <color_fragment>', `#include <color_fragment>
         if (uFocus >= 0.0) diffuseColor.rgb *= mix(0.35, 1.0, vFocus);
         if (abs(vId - uHover) < 0.5) diffuseColor.rgb = mix(diffuseColor.rgb, uAccent, 0.35);
-        diffuseColor.rgb = mix(diffuseColor.rgb, uAccent, vHeat * 0.6);`)
+        diffuseColor.rgb = mix(diffuseColor.rgb, uAccent, vHeat * 0.6);${S.chip ? chip.LID : ''}`)
       .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
         if (uWindows > 0.0 && abs(vON.y) < 0.5) {
           float u = abs(vON.x) > 0.5 ? vObj.z * vSz.z : vObj.x * vSz.x;
@@ -407,6 +424,7 @@ export function buildStudio(ctx) {
   mesh.computeBoundingSphere();
   mesh.frustumCulled = false;
   scene.add(mesh);
+  if (S.chip) scene.add(chip.buildLeads({ bodies: mesh, B, H, leads, unit, S, shared, grow: growVertex }), chip.buildSilkscreen({ B, unit, S, shared }));
   // pixel style: real architecture per file; the box mesh stays as an invisible picking proxy
   let cityMesh = null;
   if (S.pixel && layout) {
@@ -445,7 +463,7 @@ export function buildStudio(ctx) {
       if (S.flat) {
         const d = p2.clone().sub(p0);
         p1.x += -d.z * 0.18; p1.z += d.x * 0.18;
-      } else {
+      } else if (!S.edges.straight) { // (chip: straight, the ratsnest of a board not yet routed)
         p1.y = Math.max(p0.y, p2.y) + dist * 0.3 + unit;
       }
       curve.v0 = p0; curve.v1 = p1; curve.v2 = p2;

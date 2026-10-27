@@ -25,7 +25,7 @@ const fail = msg => {
 };
 addEventListener('error', e => fail(e.message || e.error));
 addEventListener('unhandledrejection', e => fail(e.reason?.stack || e.reason));
-// pixel | maquette | plan | nocturne | neon (the original prototype)
+// pixel | maquette | plan | nocturne | neon (the original prototype) | chip (the easter egg)
 const STYLE = params.get('style') || 'pixel';
 const NEON = STYLE === 'neon';
 const PIXEL = STYLE === 'pixel';
@@ -425,8 +425,10 @@ if (NEON) {
 const heat = new Float32Array(N);
 const focusAttr = new Float32Array(N).fill(1);
 const glowAttr = new Float32Array(N); // 1 for the buildings of the district under the pointer
+// the circuit board's parts are fetched only for it
+const chip = STYLE === 'chip' ? await import('./chip.js') : null;
 const studio = NEON ? null : timed('studio (all)', () => buildStudio({ name: STYLE, scene, renderer, B, files, districts, unit, SIZE, plateStep, cx, cz,
-  shared, heat, focusAttr, glowAttr, inDeg, hub, t01, layout }));
+  shared, heat, focusAttr, glowAttr, inDeg, hub, t01, layout, chip }));
 if (studio) {
   document.body.classList.add('studio', `style-${STYLE}`);
   if (studio.style.uiFont) document.body.style.setProperty('--ui-font', studio.style.uiFont);
@@ -837,6 +839,13 @@ if (route) {
   const a = document.createElement('a'); a.href = gh; a.target = '_blank'; a.rel = 'noopener'; a.title = 'Open this repository on GitHub'; a.textContent = data.name;
   $('#hud h1').replaceChildren(a);
   $('#gh-repo').href = gh; $('#gh-repo').hidden = false; $('#another').hidden = false;
+}
+// a hardware repo gets a quiet way in to the easter egg
+if (data.identity?.chip && STYLE !== 'chip') {
+  const a = document.createElement('a');
+  const q = new URLSearchParams(location.search); q.set('style', 'chip');
+  a.href = `${location.pathname}?${q}`; a.textContent = 'psst: chip'; a.title = 'Hardware sources here: see this city as a circuit board';
+  $('#links').prepend(a);
 }
 const CITY_PHRASE = { farm: 'a farm village', desert: 'a desert boomtown', industrial: 'a factory town', science: 'a science park', themepark: 'a theme park', resort: 'a seaside resort', capital: 'a planned capital', mountain: 'a mountain city', university: 'a university town', port: 'a port city', smalltown: 'a small town', manhattan: 'Manhattan', hongkong: 'Hong Kong', tokyo: 'Tokyo', la: 'Los Angeles', paris: 'Paris', venice: 'Venice', barcelona: 'Barcelona' };
 const shareLink = route ? `https://gitropolis.dev/${route[1]}/${route[2]}` : 'https://gitropolis.dev';
