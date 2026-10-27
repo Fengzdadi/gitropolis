@@ -192,8 +192,8 @@ export function cityMetrics(city, now = Date.now() / 1000) {
     for (const i of workIdx) { if (all[i].born < start) start = all[i].born; if (all[i].last > end) end = all[i].last; }
   }
   // the scan reads only the newest commits of a long history: rates are measured over the window it
-  // read, but the city is as old as its first commit
-  const seenFrom = start;
+  // read (files born before it don't stretch it), but the city is as old as its first commit
+  const seenFrom = city.truncated ? Math.max(start, city.start) : start;
   if (city.truncated && city.firstCommit) start = Math.min(start, city.firstCommit);
   const span = Math.max(1, end - start), seen = Math.max(1, end - seenFrom);
   const recentWindow = 90 * 86400;

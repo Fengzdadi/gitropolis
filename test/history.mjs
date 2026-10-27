@@ -132,11 +132,83 @@ check('a file deleted on one branch and edited later on another stays deleted', 
 
 check('in a history read only in part, an edited file is no new file to pair with a deleted one', async () => {
   const dir = repo();
-  commit(dir, { 'a/foo.js': src('js'), 'a/foo.ts': src('ts') });
+  const t0 = commit(dir, { 'a/foo.js': src('js'), 'a/foo.ts': src('ts') });
   const t1 = commit(dir, { 'a/foo.js': null, 'a/foo.ts': src('ts2') });
   const city = await scanRepo(dir, { maxCommits: 1 }); // only the last commit: both files were there before it
   const g = gone(city, 'a/foo.js');
-  return [[g?.died, t1], [g?.last, t1], [g?.born, t1]];
+  return [[g?.died, t1], [g?.last, t1], [g?.born, t0], [born(city, 'a/foo.ts'), t0]];
+});
+
+check('in a history read only in part, the files there before it keep their births', async () => {
+  const dir = repo();
+  const t0 = commit(dir, { 'a.js': src('a') });
+  const t1 = commit(dir, { 'b.js': src('b') });
+  commit(dir, { 'c.js': src('c') });
+  const t3 = commit(dir, { 'b.js': src('b2') });
+  const city = await scanRepo(dir, { maxCommits: 1 });
+  return [[born(city, 'a.js'), t0], [born(city, 'b.js'), t1], [city.files.find(f => f.p === 'a.js')?.last, t3]];
+});
+
+check('in a history read only in part, a file moved before it keeps the birth of its old path', async () => {
+  const dir = repo();
+  const t0 = commit(dir, { 'old/x.js': src('x'), 'keep.js': src('k') });
+  commit(dir, { 'old/x.js': null, 'new/x.js': src('x') });
+  commit(dir, { 'keep.js': src('k2') });
+  const city = await scanRepo(dir, { maxCommits: 1 });
+  return [[born(city, 'new/x.js'), t0]];
+});
+
+check('in a history read only in part, a file rewritten in another language before it keeps its birth', async () => {
+  const dir = repo();
+  const t0 = commit(dir, { 'lib/util.js': src('j'), 'keep.js': src('k') });
+  commit(dir, { 'lib/util.js': null, 'lib/util.ts': src('t', 30) }); // nothing alike: only the name says it's the same file
+  commit(dir, { 'keep.js': src('k2') });
+  const city = await scanRepo(dir, { maxCommits: 1 });
+  return [[born(city, 'lib/util.ts'), t0]];
+});
+
+check('in a history read only in part, a new package\'s config is no older than the package', async () => {
+  const dir = repo();
+  const config = '{\n  "compilerOptions": { "strict": true }\n}\n';
+  commit(dir, { 'types/a/tsconfig.json': config, 'types/a/index.ts': src('a') });
+  const t1 = commit(dir, { 'types/a/tsconfig.json': null, 'types/a/index.ts': null, 'types/b/tsconfig.json': config, 'types/b/index.ts': src('b') });
+  commit(dir, { 'types/b/index.ts': src('b2') });
+  const city = await scanRepo(dir, { maxCommits: 1 });
+  return [[born(city, 'types/b/tsconfig.json'), t1], [born(city, 'types/b/index.ts'), t1]];
+});
+
+check('a history exactly as long as the commits read has nothing before it', async () => {
+  const dir = repo();
+  const t0 = commit(dir, { 'a.js': src('a') });
+  commit(dir, { 'b.js': src('b') });
+  const city = await scanRepo(dir, { maxCommits: 2 });
+  return [[born(city, 'a.js'), t0]];
+});
+
+check('in a history read only in part, commit rates are measured over the commits read', async () => {
+  const dir = repo();
+  commit(dir, { 'a.js': src('a'), 'README.md': '# a\n' });
+  clock += 365 * DAY;
+  commit(dir, { 'a.js': src('a2') });
+  clock += 13 * DAY;
+  commit(dir, { 'a.js': src('a3') });
+  const city = await scanRepo(dir, { maxCommits: 2 }); // two commits, two weeks apart
+  return [[city.identity.metrics.commitsPerWeek, 1]];
+});
+
+check('a partial clone is scanned without fetching what it doesn\'t have', async () => {
+  const dir = repo();
+  git(dir, ['config', 'uploadpack.allowFilter', 'true']);
+  const t0 = commit(dir, { 'old/x.js': src('x'), 'keep.js': src('k') });
+  commit(dir, { 'old/x.js': null, 'new/x.js': src('x') + 'export const more = 1;\n' }); // git would read both to pair them
+  commit(dir, { 'keep.js': src('k2') });
+  const copy = mkdtempSync(path.join(os.tmpdir(), 'gitropolis-history-'));
+  made.push(copy);
+  git(copy, ['clone', '-q', '--no-local', '--filter=blob:none', `file://${dir}`, '.']);
+  const missing = () => git(copy, ['rev-list', '--objects', '--all', '--missing=print']).split('\n').filter(l => l.startsWith('?')).length;
+  const before = missing();
+  const city = await scanRepo(copy, { maxCommits: 1 });
+  return [[before > 0, true], [missing(), before], [born(city, 'new/x.js'), t0]];
 });
 
 check('a deleted file drawn from its size alone is drawn without reading it', async () => {

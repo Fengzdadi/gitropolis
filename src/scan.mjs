@@ -1,10 +1,11 @@
 // Scan a git repository into a compact "city blueprint":
 // files (LOC, language), import edges (regex-based), git history (born / last / churn / commits), and
 // the files deleted along the way.
-import { execFileSync, spawn } from 'node:child_process';
+import { execFile, execFileSync, spawn } from 'node:child_process';
 import { readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
 import readline from 'node:readline';
+import { promisify } from 'node:util';
 import { classify } from './classify.mjs';
 import { fileAnatomy, docRole, LOCKFILE } from './anatomy.mjs';
 
@@ -121,6 +122,7 @@ function appPlatforms(root, listed) {
 function git(repo, args) {
   return execFileSync('git', ['-C', repo, ...args], { encoding: 'utf8', maxBuffer: 1 << 30 });
 }
+const execFileAsync = promisify(execFile);
 
 // What a path would be drawn as, from its name alone (null: not a building)
 function langOf(p) {
@@ -197,9 +199,12 @@ function reads(p, lang, size) {
 // (GIT_NO_LAZY_FETCH is git 2.44's: canReadBlobs keeps an older git away from partial clones.)
 const catFile = (root, format, ids, maxBuffer) => execFileSync('git', ['-C', root, 'cat-file', format],
   { input: ids.join('\n') + '\n', maxBuffer, env: { ...process.env, GIT_NO_LAZY_FETCH: '1' }, stdio: ['pipe', 'pipe', 'ignore'] });
+// a partial clone has a promisor remote (older gits mark it with extensions.partialClone)
+function isPartial(root) {
+  try { git(root, ['config', '--get-regexp', '^(remote\\..*\\.promisor|extensions\\.partialclone)$']); return true; } catch { return false; }
+}
 function canReadBlobs(root) {
-  // a partial clone has a promisor remote (older gits mark it with extensions.partialClone)
-  try { git(root, ['config', '--get-regexp', '^(remote\\..*\\.promisor|extensions\\.partialclone)$']); } catch { return true; }
+  if (!isPartial(root)) return true;
   const [major, minor] = git(root, ['version']).match(/(\d+)\.(\d+)/).slice(1).map(Number);
   return major > 2 || major === 2 && minor >= 44;
 }
@@ -229,6 +234,95 @@ function blobTexts(root, ids, bytes) {
   return out;
 }
 
+// Which files that arrived are files that left, under another path: matched on each key in turn, a pair
+// only when both are the only ones of their kind, and in the same family of languages. arrived -> left
+const ending = n => p => p.split('/').slice(-n).join('/');
+const byStem = p => p.replace(/([^/])\.[^./]*$/, '$1'); // (.eslintrc has no stem)
+const MOVE_KEYS = [ending(1), ending(2), ending(3), ending(4), byStem];
+function sameFiles(arrived, left, keys) {
+  const pairs = new Map();
+  const family = new Map([...arrived, ...left].map(p => [p, familyOf(p)]));
+  for (const key of keys) {
+    if (!arrived.length || !left.length) break;
+    const once = paths => {
+      const n = new Map();
+      for (const p of paths) { const k = `${family.get(p)} ${key(p)}`; n.set(k, n.has(k) ? null : p); }
+      return n;
+    };
+    const gone = once(left), took = new Set();
+    for (const [k, to] of once(arrived)) {
+      const from = gone.get(k);
+      if (!to || !from) continue;
+      pairs.set(to, from);
+      took.add(to).add(from);
+    }
+    arrived = arrived.filter(p => !took.has(p)); left = left.filter(p => !took.has(p));
+  }
+  return pairs;
+}
+
+// When the files there before `boundary` were born, for a history read only from `boundary` on.
+// Diffing every older commit would take minutes for a history of a million, so instead: BIRTH_POINTS
+// points evenly spaced in time down the older commits and as many evenly spaced by count (in time alone,
+// a root commit dated 1970 would leave them in an empty stretch; by count alone, a quiet first few years
+// would get hardly any), one diff from each to the next, and a file is born at the first point it's there. A file added between two points may have moved there: git pairs it with its old path when enough
+// of it stayed the same, and otherwise it's matched as pairMoves matches a move git didn't pair. Not a
+// config, doc or lockfile, though: one package's tsconfig.json is the same as the last one's, and over
+// months of history git would pair a new package's with one taken out. In a partial clone git isn't asked
+// to compare files at all (it would fetch every one it doesn't have): there only the names say what moved.
+// born: path before the boundary -> time; first: when the first commit down that line was made
+const BIRTH_POINTS = 48;
+async function birthsBefore(root, boundary, paths) {
+  const partial = isPartial(root);
+  const run = args => execFileAsync('git', ['-C', root, ...args], { encoding: 'utf8', maxBuffer: 1 << 30, env: { ...process.env, GIT_NO_LAZY_FETCH: '1' } }).then(r => r.stdout);
+  // (--skip=1: not the boundary itself; a boundary with no parent leaves nothing)
+  const line = (await run(['rev-list', '--first-parent', '--timestamp', '--skip=1', boundary])).split('\n').filter(Boolean);
+  const born = new Map();
+  if (!line.length) return { born, first: 0 };
+  const at = k => { const [t, id] = line[k].split(' '); return { t: +t, id }; };
+  const pick = new Set();
+  const last = at(0).t, first = at(line.length - 1).t;
+  for (let j = 0, k = 0; j <= BIRTH_POINTS; j++) {
+    pick.add(Math.round(j * (line.length - 1) / BIRTH_POINTS));
+    while (k < line.length - 1 && at(k).t > last - (last - first) * j / BIRTH_POINTS) k++;
+    pick.add(k);
+  }
+  const points = [...pick].sort((a, b) => a - b).map(at);
+  const there = new Set((await run(['ls-tree', '-r', '-z', '--name-only', points[0].id])).split('\0'));
+  const now = new Map(); // path before the boundary -> its path at the point being looked at
+  for (const p of paths) if (there.has(p)) now.set(p, p);
+  // each point's diff from the one before it, a few at a time
+  const diffs = new Array(points.length - 1);
+  let next = 0;
+  await Promise.all(Array.from({ length: 4 }, async () => {
+    while (next < diffs.length) {
+      const k = next++;
+      diffs[k] = await run(['-c', `diff.renameLimit=${RENAME_LIMIT}`, 'diff-tree', '-r', '-z', partial ? '--no-renames' : '-M', '--diff-filter=ADR', '--name-status', points[k + 1].id, points[k].id]);
+    }
+  }));
+  for (let k = 1; k < points.length && now.size; k++) {
+    // "A\0path\0", "D\0path\0", "R097\0old\0new\0"
+    const out = diffs[k - 1].split('\0');
+    const added = new Set(), deleted = [], moved = new Map(); // new path -> old
+    for (let i = 0; i < out.length - 1;) {
+      const st = out[i++];
+      if (st[0] !== 'R') { (st === 'A' ? added.add(out[i]) : deleted.push(out[i])); i++; continue; }
+      const from = out[i++], to = out[i++];
+      if (NONCODE.has(langOf(to))) { added.add(to); deleted.push(from); } else moved.set(to, from);
+    }
+    const missing = [...now].filter(([, q]) => added.has(q));
+    const gaveUp = partial || added.size * deleted.length > RENAME_LIMIT * RENAME_LIMIT;
+    const paired = sameFiles(missing.map(([, q]) => q).filter(q => !NONCODE.has(langOf(q))), deleted.filter(langOf), gaveUp ? MOVE_KEYS : [byStem]);
+    for (const [p, q] of now) {
+      const from = moved.get(q) ?? paired.get(q);
+      if (from) now.set(p, from);
+      else if (added.has(q)) { born.set(p, points[k - 1].t); now.delete(p); }
+    }
+  }
+  for (const p of now.keys()) born.set(p, first);
+  return { born, first };
+}
+
 // name: the repository's name, when the folder it's cloned into has another (the hosted scanner's)
 export async function scanRepo(repo, { maxCommits = 20000, name } = {}) {
   repo = path.resolve(repo);
@@ -245,18 +339,20 @@ export async function scanRepo(repo, { maxCommits = 20000, name } = {}) {
   const commits = [];
   const alias = new Map(); // path at this point in history -> history record
   const dead = new Map(); // path -> the record of the file deleted there (until a file is added there again)
+  let boundary; // the oldest commit read
   const history = new Promise((resolve, reject) => {
     // quotePath=false: non-ASCII names (中文.md, café.js) come back as raw UTF-8, matching ls-files
     // renameLimit: pinned to git's own default, so pairMoves knows when git gave up (and an older git,
     // or one configured otherwise, pairs the same files)
     const proc = spawn('git', ['-C', root, '-c', 'core.quotePath=false', '-c', `diff.renameLimit=${RENAME_LIMIT}`, 'log', `--max-count=${maxCommits}`, '--raw', '--no-abbrev',
-      '--format=@@%ct', '-M', '--reverse'], { stdio: ['ignore', 'pipe', 'ignore'] });
+      '--format=@@%ct %H', '-M', '--reverse'], { stdio: ['ignore', 'pipe', 'ignore'] });
     const rl = readline.createInterface({ input: proc.stdout });
     let cur = null, added = [], deleted = [];
     rl.on('line', line => {
       if (line.startsWith('@@')) {
         if (cur) pairMoves(added, deleted);
-        cur = { t: +line.slice(2), f: [] };
+        else boundary = line.slice(line.indexOf(' ') + 1);
+        cur = { t: parseInt(line.slice(2)), f: [] };
         commits.push(cur);
         added = []; deleted = [];
         return;
@@ -275,8 +371,9 @@ export async function scanRepo(repo, { maxCommits = 20000, name } = {}) {
       // on another branch than the one that deleted it (the walk is one line through a history of
       // branches), and stays deleted.
       if (!h && (h = dead.get(to)) && arrives) { dead.delete(to); delete h.died; }
-      // (a file seen for the first time by an edit was there before the commits read: it isn't new)
-      if (!h) { h = { born: cur.t, last: 0, churn: 0 }; if (arrives) added.push(to); }
+      // (a file seen for the first time by an edit was there before the commits read: it isn't new.
+      // was: its path then, to look up when it was born)
+      if (!h) { h = { born: cur.t, last: 0, churn: 0 }; if (st[0] !== 'A') h.was = from; if (arrives) added.push(to); }
       if (st[0] === 'D') {
         alias.delete(from);
         dead.set(from, h);
@@ -299,33 +396,26 @@ export async function scanRepo(repo, { maxCommits = 20000, name } = {}) {
   // the same name in different folders are two files: one example app's register.html going as another's
   // arrives. Either way they're in the same language (results.py giving way to results.csv is new data).
   function pairMoves(added, deleted) {
-    const ending = n => p => p.split('/').slice(-n).join('/');
-    const byStem = p => p.replace(/([^/])\.[^./]*$/, '$1'); // (.eslintrc has no stem)
     if (!added.length || !deleted.length) return;
     const gaveUp = added.length * deleted.length > RENAME_LIMIT * RENAME_LIMIT;
-    const family = new Map([...added, ...deleted].map(p => [p, familyOf(p)]));
-    for (const key of gaveUp ? [ending(1), ending(2), ending(3), ending(4), byStem] : [byStem]) {
-      if (!added.length || !deleted.length) return;
-      const once = paths => {
-        const n = new Map();
-        for (const p of paths) { const k = `${family.get(p)} ${key(p)}`; n.set(k, n.has(k) ? null : p); }
-        return n;
-      };
-      const gone = once(deleted), took = new Set();
-      for (const [k, to] of once(added)) {
-        const from = gone.get(k);
-        if (!to || !from) continue;
-        // the commit already counts as touching the old file (its deletion); the record made for the
-        // new one is dropped, so its touch isn't counted twice
-        const h = dead.get(from);
-        dead.delete(from); delete h.died;
-        alias.set(to, h);
-        took.add(to).add(from);
-      }
-      added = added.filter(p => !took.has(p)); deleted = deleted.filter(p => !took.has(p));
+    for (const [to, from] of sameFiles(added, deleted, gaveUp ? MOVE_KEYS : [byStem])) {
+      // the commit already counts as touching the old file (its deletion); the record made for the
+      // new one is dropped, so its touch isn't counted twice
+      const h = dead.get(from);
+      dead.delete(from); delete h.died;
+      alias.set(to, h);
     }
   }
   history.catch(() => {}); // (a failure surfaces where it's awaited)
+  // --max-count keeps only the newest commits: when it bit, the files there before them were born before
+  // them too (those the walk saw first by an edit, a move or a deletion, and those it didn't see at all).
+  // Their births are looked up while the files are read.
+  const before = history.then(() => {
+    if (commits.length < maxCommits) return null;
+    const seen = new Set([...alias.keys(), ...dead.keys()]);
+    const was = [...alias.values(), ...dead.values()].filter(h => h.was).map(h => h.was);
+    return birthsBefore(root, boundary, new Set([...was, ...listed.filter(p => !seen.has(p) && langOf(p))]));
+  }).catch(() => null); // (the births are extra: without them the files are as old as the commits read)
 
   const files = [];
   const refs = new Set();
@@ -370,6 +460,10 @@ export async function scanRepo(repo, { maxCommits = 20000, name } = {}) {
   const { tails, jvmUsed } = resolveImports(root, files, index, listed);
 
   await history;
+  const truncated = commits.length >= maxCommits;
+  // firstCommit: when the repo really began (the first commit down the first-parent line)
+  const { born: births = new Map(), first: firstCommit = 0 } = (await before) ?? {};
+  for (const h of [...alias.values(), ...dead.values()]) if (h.was) h.born = births.get(h.was) ?? h.born;
   const recIdx = new Map();
   // a file the walk last saw deleted can still be here: the merge that brought the deleting branch in
   // kept it (a merge shows no changes of its own). Its history is that of the deleted file. (Unless
@@ -384,13 +478,7 @@ export async function scanRepo(repo, { maxCommits = 20000, name } = {}) {
   const touched = commits.filter(c => c.f.length);
   const start = touched.length ? touched[0].t : 0;
   const end = touched.length ? touched[touched.length - 1].t : 0;
-  for (const f of files) { if (!f.born) f.born = f.last = start; }
-  // --max-count keeps only the newest commits: when it bit, remember when the repo really began
-  const truncated = commits.length >= maxCommits;
-  let firstCommit = 0;
-  if (truncated) try {
-    for (const t of git(root, ['log', '--max-parents=0', '--format=%ct', 'HEAD']).split('\n')) if (+t && (!firstCommit || +t < firstCommit)) firstCommit = +t;
-  } catch { }
+  for (const f of files) { if (!f.born) { f.born = births.get(f.p) ?? start; f.last = start; } }
 
   const status = fileStatus(files, start, end, tails, refs, jvmUsed);
   // a game: once its engine is settled, every one of the project's own files in the engine's language
