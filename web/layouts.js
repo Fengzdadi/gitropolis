@@ -1221,13 +1221,16 @@ const PLANNERS = {
       const d = leaf.data.d, w = leaf.x1 - leaf.x0, h = leaf.y1 - leaf.y0;
       const cols = Math.max(1, Math.round(w / Math.sqrt(CELL))), rows = Math.max(1, Math.round(h / Math.sqrt(CELL)));
       const cw = (w - GAP * (cols - 1)) / cols, ch = (h - GAP * (rows - 1)) / rows;
-      // each cell takes an even share of the block's parts, by area
-      const cells = cols * rows, each = d.area / cells;
-      let k = 0;
+      // each cell takes an even share of what's left of the block's parts, by area, and a part goes in
+      // if at least half of it fits: a share fixed up front would leave every cell a little short and
+      // the last one crammed with the rest
+      const cells = cols * rows;
+      let k = 0, left = d.area;
       for (let n = 0; n < cells && k < d.items.length; n++) {
-        const take = [];
+        const take = [], each = left / (cells - n);
         let used = 0;
-        while (k < d.items.length && (n === cells - 1 || !take.length || used + d.items[k].a <= each * 1.05)) { used += d.items[k].a; take.push(d.items[k++]); }
+        while (k < d.items.length && (n === cells - 1 || !take.length || used + d.items[k].a / 2 <= each)) { used += d.items[k].a; take.push(d.items[k++]); }
+        left -= used;
         const c = n % cols, r = Math.floor(n / cols), x0 = leaf.x0 + c * (cw + GAP), z0 = leaf.y0 + r * (ch + GAP);
         blocks.push({ poly: rectPoly(x0, z0, x0 + cw, z0 + ch), type: 'block' });
         lots.push(...packRect(take, x0, z0, x0 + cw, z0 + ch, 0.12));
