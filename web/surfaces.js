@@ -113,7 +113,7 @@ const GROUND = {
     vec2 g = fract(c);
     diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * 0.86, max(step(g.x, 0.12), step(g.y, 0.12)) * sFade(c));`,
   // the open ground: asphalt only where streets are (near blocks, from a distance field), a dashed
-  // centre line found as the ridge of that field, grass everywhere else
+  // centre line where the street's two blocks are equally far, grass everywhere else
   street: /* glsl */`
     vec2 suv = (vSurfWP.xz - uStreetMin) / uStreetSize;
     vec4 st = texture2D(tStreet, suv);
@@ -124,15 +124,15 @@ const GROUND = {
     // (on the same clock as the block rising beside it, so no road appears before its land)
     if (inside > 0.5 && D > 0.5 && D <= uMaxHalf && st.g * 0.97 - ${LAND_LEAD.toFixed(3)} + 0.012 <= uTimeline) {
       col = uAsphalt * (1.0 + (sHash(floor(vSurfWP.xz / P(1.5))) - 0.5) * 0.08);
-      // across-street direction (towards the nearest block); the centre line is where D peaks across it
-      float a = st.b * 3.14159265;
-      vec2 n = vec2(cos(a), sin(a));
-      float du = uPx * 0.9 / uStreetSize;
-      float D1 = texture2D(tStreet, suv + n * du).r * 255.0, D2 = texture2D(tStreet, suv - n * du).r * 255.0;
-      float ridge = step(D1, D + 0.02) * step(D2, D + 0.02) * step(1.5, D);
-      vec2 along = vec2(-n.y, n.x);
-      float dash = step(0.55, fract(dot(vSurfWP.xz, along) / P(8.0)));
-      col = mix(col, uMark, ridge * dash);
+      // the centre line: a pixel wide (wider with the street, close up), dashed every 8 pixels or every
+      // dash, whichever is longer; how far along the street we are comes as an angle over uDashTurn dashes
+      float off = abs(st.b * 255.0 - 128.0) / 32.0 * uTexel;
+      if (st.a > 0.5 && off < max(P(1.0), uDash * 0.125) * 0.5) {
+        vec2 cs = texture2D(tAlong, suv).rg * 2.0 - 1.0;
+        float turn = atan(cs.y, cs.x) / 6.28318531;
+        float dashes = uDashTurn / min(max(P(8.0), uDash) / uDash, uDashTurn);
+        col = mix(col, uMark, step(0.55, fract(turn * dashes)));
+      }
     }
     diffuseColor.rgb = col;`,
 };
@@ -165,9 +165,10 @@ export function addGroundDetail(material, kind, opts) {
     const s = opts.street;
     inject(material, {
       ...opts, withPart: false, fragment: GROUND.street, key: 'street',
-      decl: '\nuniform sampler2D tStreet; uniform vec2 uStreetMin; uniform float uStreetSize, uMaxHalf; uniform vec3 uAsphalt, uGrass, uMark;',
+      decl: '\nuniform sampler2D tStreet, tAlong; uniform vec2 uStreetMin; uniform float uStreetSize, uMaxHalf, uTexel, uDash, uDashTurn; uniform vec3 uAsphalt, uGrass, uMark;',
       uniforms: {
-        tStreet: { value: s.texture }, uStreetMin: { value: s.min }, uStreetSize: { value: s.size },
+        tStreet: { value: s.texture }, tAlong: { value: s.along }, uStreetMin: { value: s.min }, uStreetSize: { value: s.size },
+        uTexel: { value: s.texel }, uDash: { value: s.dash }, uDashTurn: { value: s.dashTurn },
         uMaxHalf: { value: s.maxHalf }, uAsphalt: { value: s.asphalt }, uGrass: { value: s.grass }, uMark: { value: s.mark },
       },
     });

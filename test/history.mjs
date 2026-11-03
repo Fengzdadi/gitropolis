@@ -234,6 +234,31 @@ check('a building is its first author\'s, moved, deleted or edited by others (on
     [city.authors.join(), 'Ann,Bob'], [city.authors.includes('ann at home'), false]];
 });
 
+check('a building names who made the most of its commits, when that isn\'t its builder', async () => {
+  const dir = repo();
+  const ann = 'Ann <ann@example.com>', bob = 'Bob <bob@example.com>';
+  commit(dir, { 'a.js': src('a'), 'b.js': src('b'), 'c.js': src('c') }, 'start', ann);
+  commit(dir, { 'a.js': src('a2'), 'c.js': src('c2') }, 'edit', bob);
+  commit(dir, { 'lib/a.js': src('a2'), 'a.js': null }, 'move', bob);
+  commit(dir, { 'c.js': src('c3') }, 'edit', ann);
+  const city = await scanRepo(dir);
+  const most = p => { const f = city.files.find(f => f.p === p); return f.m === undefined ? undefined : city.authors[f.m]; };
+  // lib/a.js: Bob made two of its three commits (one a move); b.js is Ann's alone; c.js a tie, its builder's
+  return [[builder(city, 'lib/a.js'), 'Ann'], [most('lib/a.js'), 'Bob'], [most('b.js'), undefined], [most('c.js'), undefined]];
+});
+
+check('each author\'s face: a commit of theirs, and their login when GitHub\'s no-reply email names it', async () => {
+  const dir = repo();
+  commit(dir, { 'a.js': src('a') }, 'start', 'Ann <123+ann-h@users.noreply.github.com>');
+  commit(dir, { 'b.js': src('b') }, 'add', 'Bob <bob@example.com>');
+  git(dir, ['remote', 'add', 'origin', 'git@github.com:someone/the-repo.git']);
+  const city = await scanRepo(dir);
+  const face = name => city.faces[city.authors.indexOf(name)];
+  const head = git(dir, ['rev-parse', 'HEAD']).trim();
+  return [[face('Ann').u, 'ann-h'], [face('Bob').u, undefined], [face('Bob').c, head.slice(0, 12)], [city.github, 'someone/the-repo'],
+    [JSON.stringify(city).includes('example.com'), false]];
+});
+
 check('a file there before the commits read has no builder', async () => {
   const dir = repo();
   commit(dir, { 'old.js': src('o') }, 'start', 'Ann <ann@example.com>');

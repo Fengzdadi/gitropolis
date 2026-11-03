@@ -1,8 +1,8 @@
 // Streets, derived rather than drawn: rasterise every city block, then a vector distance transform
 // tells each patch of ground how far it is from the nearest block and in which direction. That one
 // field gives us, for any city layout, where the streets are (near blocks), where their centre lines
-// run (where the distance peaks) and how wide each street is — so we can paint asphalt only where
-// streets actually are and drive traffic down the right lanes.
+// run (where two blocks are equally far) and how wide each street is — so we can paint asphalt only
+// where streets actually are and drive traffic down the right lanes.
 import * as THREE from 'three';
 import { LAND_LEAD } from './surfaces.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
@@ -83,17 +83,14 @@ export function buildStreets({ layout, B, files, inDeg, SIZE, t01 }) {
     for (let i = 1; i < W; i++) relax(j * W + i, j * W + i - 1, -1, 0);
   }
 
-  // --- pack: R = distance in texels, B = across-street direction (to the nearest block) mod π
+  // --- pack: R = distance in texels; B, A = the street's centre line (below)
   const data = new Uint8Array(W * W * 4);
   const D = new Float32Array(W * W);
   for (let p = 0; p < W * W; p++) {
     const d = vx[p] === INF ? 255 : Math.sqrt(d2(p));
     D[p] = d;
     data[p * 4] = Math.min(255, Math.round(d));
-    let a = Math.atan2(vz[p], vx[p]);
-    if (a < 0) a += Math.PI;
-    data[p * 4 + 2] = Math.round((a / Math.PI) * 255) % 256;
-    data[p * 4 + 3] = 255;
+    data[p * 4 + 2] = 255;
   }
   const texture = new THREE.DataTexture(data, W, W, THREE.RGBAFormat);
   texture.magFilter = THREE.LinearFilter;
@@ -102,6 +99,186 @@ export function buildStreets({ layout, B, files, inDeg, SIZE, t01 }) {
 
   // streets are at most this far from a block (half an LA freeway); farther is open land
   const maxHalf = Math.min(250, Math.max(3, (layout.unit * 1.2) / tex));
+
+  // --- centre lines: a street's centre is where its two blocks are equally far, so it runs where the
+  // nearest block changes from one texel to the next. From there a band a few texels wide either side
+  // learns which block is across the street; in it the distances to the two blocks' outlines give
+  // B = signed distance to the centre line (128 on it, 1/32 texel a step: signed, so it filters to 0
+  // on a line that falls between texels), A = 255 where a line may be drawn, and a second texture
+  // where along it the dashes fall: the length round the lower-numbered block's outline, as an angle
+  // (cos, sin) so it interpolates without a seam, over DASH_TURN dashes
+  const own = p => (vx[p] === INF ? -1 : label[p + vz[p] * W + vx[p]]);
+  const street = p => label[p] < 0 && D[p] <= maxHalf;
+  const other = new (blocks.length < 32767 ? Int16Array : Int32Array)(W * W).fill(-1);
+  const band = [];
+  // the centre: two street texels side by side whose nearest blocks differ, and face each other (not
+  // two blocks side by side, whose boundary runs on out into the street they both front)
+  const meet = (p, q) => {
+    if (!street(q)) return;
+    const mine = own(p), theirs = own(q);
+    if (mine < 0 || theirs < 0 || theirs === mine) return;
+    if (vx[p] * vx[q] + vz[p] * vz[q] > -0.5 * Math.hypot(vx[p], vz[p]) * Math.hypot(vx[q], vz[q])) return;
+    if (other[p] < 0) { other[p] = theirs; band.push(p); }
+    if (other[q] < 0) { other[q] = mine; band.push(q); }
+  };
+  for (let j = 0; j < W; j++) {
+    for (let i = 0; i < W; i++) {
+      const p = j * W + i;
+      if (!street(p)) continue;
+      if (i < W - 1) meet(p, p + 1);
+      if (j < W - 1) meet(p, p + W);
+    }
+  }
+  // out from the centre: far enough that every texel near the line has its neighbours filled in
+  const spread = (p, q) => {
+    if (other[q] >= 0 || !street(q)) return;
+    const theirs = own(q), across = theirs === own(p) ? other[p] : own(p);
+    if (theirs < 0 || across === theirs) return;
+    other[q] = across;
+    band.push(q);
+  };
+  for (let from = 0, depth = 0; depth < 8; depth++) {
+    const to = band.length;
+    for (let n = from; n < to; n++) {
+      const p = band[n], i = p % W;
+      if (i > 0) spread(p, p - 1);
+      if (i < W - 1) spread(p, p + 1);
+      if (p >= W) spread(p, p - W);
+      if (p < W * W - W) spread(p, p + W);
+    }
+    from = to;
+  }
+  // how far each street texel is from the water, in texels (8-neighbour steps, never more than the
+  // true distance; 255 = farther than a street is wide): which streets run along a bank, and how near
+  // the water a car may come
+  const toWater = new Uint8Array(W * W).fill(255);
+  let shore = [];
+  for (let p = 0; p < W * W; p++) {
+    if (wet[p] || !street(p)) continue;
+    const i = p % W;
+    if ((i > 0 && wet[p - 1]) || (i < W - 1 && wet[p + 1]) || (p >= W && wet[p - W]) || (p < W * W - W && wet[p + W])) { toWater[p] = 1; shore.push(p); }
+  }
+  for (let d = 2; d <= Math.min(254, maxHalf) && shore.length; d++) {
+    const next = [];
+    for (const p of shore) {
+      const i = p % W;
+      for (let dj = -W; dj <= W; dj += W) {
+        for (let di = -1; di <= 1; di++) {
+          const q = p + dj + di;
+          if ((di < 0 && i === 0) || (di > 0 && i === W - 1) || q < 0 || q >= W * W || toWater[q] !== 255 || wet[q] || !street(q)) continue;
+          toWater[q] = d;
+          next.push(q);
+        }
+      }
+    }
+    shore = next;
+  }
+  // the nearest point of a river bank or shore to (x, z): how far, and which way (fx, fz)
+  const banks = layout.groundIsWater ? [...layout.land, ...layout.shore, ...layout.water] : layout.water;
+  const bank = (x, z) => {
+    let best = Infinity, fx = 0, fz = 0;
+    for (const poly of banks) {
+      for (let m = 0; m < poly.length; m++) {
+        const a = poly[m], b = poly[(m + 1) % poly.length], ex = b[0] - a[0], ez = b[1] - a[1], L2 = ex * ex + ez * ez || 1;
+        const t = Math.max(0, Math.min(1, ((x - a[0]) * ex + (z - a[1]) * ez) / L2));
+        const px = a[0] + ex * t - x, pz = a[1] + ez * t - z;
+        if (px * px + pz * pz < best) { best = px * px + pz * pz; fx = px; fz = pz; }
+      }
+    }
+    const d = Math.sqrt(best);
+    return { d, fx: fx / (d || 1), fz: fz / (d || 1) };
+  };
+  // dashes a little over a quarter of a lot long, a power of two so the shader's pixel sizes divide it
+  const dash = 2 ** Math.round(Math.log2(layout.unit * 0.28)), DASH_TURN = 16;
+  const along = new Uint8Array(W * W * 2).fill(128);
+  const cum = new Map(); // block -> running length round its outline at each corner
+  const outline = id => {
+    if (!cum.has(id)) { const poly = blocks[id].poly, c = [0]; for (let k = 0; k < poly.length; k++) { const a = poly[k], b = poly[(k + 1) % poly.length]; c.push(c[k] + Math.hypot(b[0] - a[0], b[1] - a[1])); } cum.set(id, c); }
+    return cum.get(id);
+  };
+  // the side of a block's outline a street runs along at (x, z): of the sides about as near, the one
+  // running most along the street (across it is (nx, nz)). Distances are to that side's line, which
+  // carries on across the mouth of a side street, and so does the centre line; `over` is how far
+  // (x, z) is past the side's end, out into a junction
+  const ds = new Float64Array(Math.max(1, ...blocks.map(b => b.poly.length)));
+  const nearSide = (poly, x, z, nx, nz) => {
+    const n = poly.length;
+    let dMin = Infinity;
+    for (let m = 0; m < n; m++) {
+      const a = poly[m], b = poly[(m + 1) % n], ex = b[0] - a[0], ez = b[1] - a[1], L2 = ex * ex + ez * ez || 1;
+      const t = Math.max(0, Math.min(1, ((x - a[0]) * ex + (z - a[1]) * ez) / L2));
+      const dx = x - a[0] - ex * t, dz = z - a[1] - ez * t;
+      ds[m] = dx * dx + dz * dz;
+      if (ds[m] < dMin) dMin = ds[m];
+    }
+    const near = (Math.sqrt(dMin) + tex) ** 2;
+    let k = 0, bestAcross = Infinity;
+    for (let m = 0; m < n; m++) {
+      if (ds[m] > near) continue;
+      const a = poly[m], b = poly[(m + 1) % n], L = Math.hypot(b[0] - a[0], b[1] - a[1]) || 1;
+      const across = Math.abs(((b[0] - a[0]) * nx + (b[1] - a[1]) * nz) / L);
+      if (across < bestAcross) { bestAcross = across; k = m; }
+    }
+    const a = poly[k], b = poly[(k + 1) % poly.length], ex = b[0] - a[0], ez = b[1] - a[1], L = Math.hypot(ex, ez) || 1;
+    const t = ((x - a[0]) * ex + (z - a[1]) * ez) / L, side = ((x - a[0]) * ez - (z - a[1]) * ex) / L;
+    // (fx, fz): from (x, z) towards the side
+    return { k, t, d: Math.abs(side), fx: -Math.sign(side) * ez / L, fz: Math.sign(side) * ex / L, over: Math.max(0, -t, t - L) };
+  };
+  for (const p of band) {
+    if (wet[p]) continue;
+    const i = p % W, j = (p - i) / W;
+    const x = x0 + (i + 0.5) * tex, z = x0 + (j + 0.5) * tex;
+    const nL = Math.hypot(vx[p], vz[p]) || 1, nx = vx[p] / nL, nz = vz[p] / nL; // across the street
+    const a = Math.min(own(p), other[p]), b = Math.max(own(p), other[p]);
+    const sa = nearSide(blocks[a].poly, x, z, nx, nz), sb = nearSide(blocks[b].poly, x, z, nx, nz);
+    const width = (sa.d + sb.d) / tex;
+    if (width > maxHalf * 2 || width < 3) continue; // no block across; an alley
+    if (sa.fx * sb.fx + sa.fz * sb.fz > -0.5) continue; // not across the street from each other
+    // a river between them: the street runs along its bank (below), not across the river
+    if (toWater[p] * tex < Math.max(sa.d, sb.d)) {
+      const w = bank(x, z);
+      if ((w.fx * sa.fx + w.fz * sa.fz > 0.5 && w.d < sa.d) || (w.fx * sb.fx + w.fz * sb.fz > 0.5 && w.d < sb.d)) continue;
+    }
+    const off = (sb.d - sa.d) / 2 / tex;
+    data[p * 4 + 2] = Math.max(0, Math.min(255, Math.round(128 + off * 32)));
+    // across a side street narrower than this one the line carries on; out in a junction it stops.
+    // (Only near the line, so the mask's edge never falls where B changes sign)
+    if (Math.abs(off) < 3 && Math.max(sa.over, sb.over) <= (sa.d + sb.d) / 2 * 0.6) data[p * 4 + 3] = 255;
+    const turn = (outline(a)[sa.k] + sa.t) / (dash * DASH_TURN) * 2 * Math.PI;
+    along[p * 2] = Math.round(127.5 + 127.5 * Math.cos(turn));
+    along[p * 2 + 1] = Math.round(127.5 + 127.5 * Math.sin(turn));
+  }
+  // streets with a block on one side only: the asphalt stops maxHalf from the block where open land
+  // lies beyond, or at the bank of a river; the centre line runs halfway across
+  for (let p = 0; p < W * W; p++) {
+    if (data[p * 4 + 2] !== 255 || wet[p] || !street(p) || own(p) < 0) continue;
+    const d = D[p], w = toWater[p];
+    const byLand = Math.abs(d - maxHalf / 2) < 6, byWater = w < 255 && w >= d / 1.42 - 6 && w <= d + 6;
+    if (!byLand && !byWater) continue;
+    const i = p % W, j = (p - i) / W;
+    const x = x0 + (i + 0.5) * tex, z = x0 + (j + 0.5) * tex;
+    const nL = Math.hypot(vx[p], vz[p]) || 1, nx = vx[p] / nL, nz = vz[p] / nL; // towards the block
+    const a = own(p), sa = nearSide(blocks[a].poly, x, z, nx, nz);
+    let far = Infinity;
+    if (byWater) { const b = bank(x, z); if (b.fx * sa.fx + b.fz * sa.fz < -0.5) far = b.d; }
+    if (byLand) {
+      // open land past the far edge (not a wide street with a block across it)
+      const qi = Math.round(i - nx * (maxHalf - d + 2)), qj = Math.round(j - nz * (maxHalf - d + 2)), q = qj * W + qi;
+      if (qi >= 0 && qj >= 0 && qi < W && qj < W && label[q] < 0 && D[q] > maxHalf) far = Math.min(far, maxHalf * tex - sa.d);
+    }
+    if (!(far < Infinity) || (sa.d + far) / tex < 3) continue;
+    const off = (far - sa.d) / 2 / tex;
+    data[p * 4 + 2] = Math.max(0, Math.min(255, Math.round(128 + off * 32)));
+    if (Math.abs(off) < 3 && sa.over <= (sa.d + far) / 2 * 0.6) data[p * 4 + 3] = 255;
+    const turn = (outline(a)[sa.k] + sa.t) / (dash * DASH_TURN) * 2 * Math.PI;
+    along[p * 2] = Math.round(127.5 + 127.5 * Math.cos(turn));
+    along[p * 2 + 1] = Math.round(127.5 + 127.5 * Math.sin(turn));
+  }
+  const alongTexture = new THREE.DataTexture(along, W, W, THREE.RGFormat);
+  alongTexture.magFilter = THREE.LinearFilter;
+  alongTexture.minFilter = THREE.LinearFilter;
+  alongTexture.unpackAlignment = 1;
+  alongTexture.needsUpdate = true;
 
   // --- which block each building stands on, for traffic weights and when the block "opens"
   const sample = (x, z) => {
@@ -138,7 +315,9 @@ export function buildStreets({ layout, B, files, inDeg, SIZE, t01 }) {
   const bornAt = (x, z) => { const p = sample(x, z); return p < 0 ? 0 : bornOf(p); };
 
   // --- lanes: every block is circled by a lane halfway between its kerb and the street's centre line,
-  // so the two blocks either side of a street give it traffic in both directions
+  // so the two blocks either side of a street give it traffic in both directions. Each side of a block
+  // keeps its own distance, so a block with a wide road on one side and a canal on another drives
+  // both right
   const lanes = [], curbs = [];
   blocks.forEach((b, id) => {
     if (b.type === 'park') return;
@@ -146,29 +325,51 @@ export function buildStreets({ layout, B, files, inDeg, SIZE, t01 }) {
     let area = 0;
     for (let k = 0, m = poly.length - 1; k < poly.length; m = k++) area += (poly[m][0] - poly[k][0]) * (poly[m][1] + poly[k][1]);
     const out = area > 0 ? 1 : -1; // sign that turns an edge normal outward
-    const gaps = [];
+    const gaps = poly.map(() => NaN), roads = poly.map(() => NaN);
     for (let k = 0; k < poly.length; k++) {
       const [ax, az] = poly[k], [bx, bz] = poly[(k + 1) % poly.length];
       const L = Math.hypot(bx - ax, bz - az);
       if (L < tex * 2) continue;
       const nx = out * (bz - az) / L, nz = -out * (bx - ax) / L;
-      // walk outward until the distance stops growing: that's the street's centre
-      let best = 0;
-      for (let s = 1; s < maxHalf; s++) {
-        const p = sample((ax + bx) / 2 + nx * s * tex, (az + bz) / 2 + nz * s * tex);
-        if (p < 0 || label[p] >= 0) break;
-        if (D[p] < best - 0.5) break;
-        best = Math.max(best, D[p]);
-      }
-      gaps.push(best);
+      // walk outward until the distance stops growing: that's the street's centre. A street with no
+      // block across has its centre halfway to the river bank, or to where the asphalt stops. A long
+      // side is walked from five places and the middle answer kept, so one bridge doesn't decide it
+      const walks = (L > tex * 16 ? [0.2, 0.35, 0.5, 0.65, 0.8] : [0.5]).map(f => {
+        let best = 0, s = 1;
+        for (; s < maxHalf; s++) {
+          const p = sample(ax + (bx - ax) * f + nx * s * tex, az + (bz - az) * f + nz * s * tex);
+          if (p < 0 || label[p] >= 0) break;
+          if (wet[p]) return [best, s / 2];
+          if (D[p] < best - 0.5) break;
+          best = Math.max(best, D[p]);
+        }
+        return [best, s >= maxHalf ? maxHalf / 2 : best];
+      });
+      const mid = i => walks.map(w => w[i]).sort((p, q) => p - q)[walks.length >> 1];
+      gaps[k] = mid(0);
+      roads[k] = mid(1);
     }
-    if (!gaps.length) return;
-    gaps.sort((p, q) => p - q);
-    const half = gaps[Math.floor(gaps.length * 0.3)];
+    const sides = gaps.filter(g => g === g).sort((p, q) => p - q);
+    if (!sides.length) return;
+    const typical = roads.filter(r => r === r).sort((p, q) => p - q);
+    const half = sides[Math.floor(sides.length * 0.3)], road = typical[Math.floor(typical.length * 0.3)];
     if (half < 1.5) return; // alleys too narrow for a car
-    lanes.push({ pts: offset(poly, out, half * tex * 0.5), lane: half * tex * 0.5, weight: 0.15 + 0.85 * Math.sqrt(weight[id] / maxW), born: Math.max(0, born[id] - LAND_LEAD) }); // traffic comes with the road
-    // a line just off the kerb, where street trees go
-    curbs.push({ pts: offset(poly, out, half * tex * 0.2), half: half * tex, born: born[id] });
+    // sides too short to measure (rounded corners) take the narrower of the sides either side of them
+    const fill = v => v.map((x, k) => {
+      if (x === x) return x;
+      let p = k, q = k;
+      do p = (p - 1 + v.length) % v.length; while (v[p] !== v[p]);
+      do q = (q + 1) % v.length; while (v[q] !== v[q]);
+      return Math.min(v[p], v[q]);
+    });
+    const lane = fill(roads).map(r => r * tex * 0.5), gap = fill(gaps);
+    if (road >= 1.5) lanes.push({ pts: offset(poly, out, lane), lane: road * tex * 0.5, weight: 0.15 + 0.85 * Math.sqrt(weight[id] / maxW), born: Math.max(0, born[id] - LAND_LEAD) }); // traffic comes with the road
+    // a line just off the kerb, where street trees go, kept far enough in from the lane that a tree's
+    // canopy (up to ~0.18 unit) clears a passing bus (~0.1 unit either side of the lane); a side too
+    // narrow for that gets none (where cars drive)
+    const room = lane.map(l => l - layout.unit * 0.28);
+    const kerb = room.map((r, k) => Math.max(0, Math.min(gap[k] * tex * 0.2, r)));
+    curbs.push({ pts: offset(poly, out, kerb), bare: room.map(r => road >= 1.5 && r < 0), half: half * tex, born: born[id] });
   });
 
   // --- boats: loops out on the water around each island
@@ -184,18 +385,25 @@ export function buildStreets({ layout, B, files, inDeg, SIZE, t01 }) {
   const at = (x, z) => sample(x, z);
   const drivable = (x, z) => { const p = at(x, z); return p >= 0 && label[p] < 0 && !wet[p] && D[p] <= maxHalf + 1; };
   const navigable = (x, z) => { const p = at(x, z); return p >= 0 && wet[p] === 1; };
-  return { texture, min: new THREE.Vector2(x0, x0), size: S, texel: tex, maxHalf, lanes, curbs, boats, drivable, navigable, blockBorn: born, bornAt };
+  // how far a car at (x, z) is from the water, at least
+  const clearance = (x, z) => { const p = at(x, z); return p < 0 || toWater[p] === 255 ? Infinity : (toWater[p] - 0.5) * tex; };
+  return { texture, alongTexture, dash, dashTurn: DASH_TURN, min: new THREE.Vector2(x0, x0), size: S, texel: tex, maxHalf, lanes, curbs, boats, drivable, navigable, clearance, blockBorn: born, bornAt };
 }
 
 // push a polygon outward by `d` (mitred corners, clamped so sharp corners don't spike)
+// d is one distance, or one per side (side k runs from poly[k] to poly[k + 1])
 function offset(poly, out, d) {
   const n = poly.length;
   return poly.map((p, k) => {
     const a = poly[(k - 1 + n) % n], b = poly[(k + 1) % n];
     const e1 = norm([p[0] - a[0], p[1] - a[1]]), e2 = norm([b[0] - p[0], b[1] - p[1]]);
     const n1 = [out * e1[1], -out * e1[0]], n2 = [out * e2[1], -out * e2[0]];
+    const d1 = typeof d === 'number' ? d : d[(k - 1 + n) % n], d2 = typeof d === 'number' ? d : d[k];
+    const det = n1[0] * n2[1] - n1[1] * n2[0];
+    // two sides at different distances meet where their offset lines cross; nearly straight on, halfway
+    if (d1 !== d2 && Math.abs(det) > 0.3) return [p[0] + (d1 * n2[1] - d2 * n1[1]) / det, p[1] + (d2 * n1[0] - d1 * n2[0]) / det];
     const m = norm([n1[0] + n2[0], n1[1] + n2[1]]);
-    const s = d / Math.max(0.35, m[0] * n1[0] + m[1] * n1[1]);
+    const s = (d1 + d2) / 2 / Math.max(0.35, m[0] * n1[0] + m[1] * n1[1]);
     return [p[0] + m[0] * s, p[1] + m[1] * s];
   });
 }
@@ -252,7 +460,8 @@ export function buildTraffic({ streets, unit }) {
   const routes = [];
   const prep = (r, kind) => {
     const step = Math.max(streets.texel, r.lane * 0.5);
-    const pts = [], ok = [];
+    // each sample also keeps how far it is from the water: a car shows only where all of it is clear
+    const pts = [], ok = [], room = [];
     for (let k = 0; k < r.pts.length; k++) {
       const a = r.pts[k], b = r.pts[(k + 1) % r.pts.length];
       const L = Math.hypot(b[0] - a[0], b[1] - a[1]), n = Math.max(1, Math.round(L / step));
@@ -260,11 +469,12 @@ export function buildTraffic({ streets, unit }) {
         const x = a[0] + (b[0] - a[0]) * t / n, z = a[1] + (b[1] - a[1]) * t / n;
         pts.push([x, z]);
         ok.push(kind === 'boat' ? streets.navigable(x, z) : streets.drivable(x, z));
+        room.push(kind === 'boat' ? Infinity : streets.clearance(x, z));
       }
     }
     const good = ok.filter(Boolean).length;
     if (good < 3) return;
-    routes.push({ ...r, kind, pts, ok, step: null, cum: null, good });
+    routes.push({ ...r, kind, pts, ok, room, step: null, cum: null, good });
   };
   streets.lanes.forEach(r => prep(r, 'car'));
   streets.boats.forEach(r => prep(r, 'boat'));
@@ -299,9 +509,9 @@ export function buildTraffic({ streets, unit }) {
   const remap = new Map(used.map((ri, k) => [ri, k]));
   const kept = used.map(ri => {
     const r = routes[ri], n = r.pts.length;
-    const xy = new Float32Array(n * 2), cum = new Float32Array(r.cum), ok = new Uint8Array(n);
+    const xy = new Float32Array(n * 2), cum = new Float32Array(r.cum), ok = new Uint8Array(n), room = new Float32Array(r.room);
     r.pts.forEach(([x, z], k) => { xy[k * 2] = x; xy[k * 2 + 1] = z; ok[k] = r.ok[k] ? 1 : 0; });
-    return { kind: r.kind, born: r.born, L: r.L, n, xy, cum, ok };
+    return { kind: r.kind, born: r.born, L: r.L, n, xy, cum, ok, room };
   });
   for (const v of vehicles) v.ri = remap.get(v.ri);
   routes.length = 0;
@@ -333,7 +543,7 @@ export function buildTraffic({ streets, unit }) {
         let lo = 0, hi = r.cum.length - 1;
         while (hi - lo > 1) { const mid = (lo + hi) >> 1; if (r.cum[mid] <= s) lo = mid; else hi = mid; }
         const nx = (lo + 1) % r.n;
-        if (!r.ok[lo] || !r.ok[nx]) { mesh.setMatrixAt(k, hidden); return; }
+        if (!r.ok[lo] || !r.ok[nx] || r.room[lo] < v.len / 2 || r.room[nx] < v.len / 2) { mesh.setMatrixAt(k, hidden); return; }
         const ax = r.xy[lo * 2], az = r.xy[lo * 2 + 1], bx = r.xy[nx * 2], bz = r.xy[nx * 2 + 1];
         const t = (s - r.cum[lo]) / Math.max(1e-6, r.cum[lo + 1] - r.cum[lo]);
         pos.set(ax + (bx - ax) * t, v.type === 'boat' ? 0 : baseY, az + (bz - az) * t);

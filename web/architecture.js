@@ -290,11 +290,13 @@ export function buildCityMesh({ buildingGeometry, specs, B, files, t01, shared, 
       .replace('#include <common>', '#include <common>\nvarying vec3 vState; uniform float uFocus, uLit;')
       .replace('#include <color_fragment>', `#include <color_fragment>
         // a building touched by a commit flashes warm; when one is focused, the rest of the city recedes
-        // (further when a builder's buildings are lit, scattered through the city, and those warm a little)
+        // (when one person's buildings are lit, scattered through the city, the rest fade to pale ghosts
+        // instead: darkened, they'd read as dark buildings, not as someone else's)
         diffuseColor.rgb = mix(diffuseColor.rgb, vec3(1.0, 0.9, 0.6), vState.r * 0.75);
         if (uFocus >= 0.0) {
-          diffuseColor.rgb *= mix(0.55 - 0.3 * uLit, 1.0, vState.g);
-          diffuseColor.rgb = mix(diffuseColor.rgb, vec3(1.0, 0.85, 0.5), vState.g * uLit * 0.25);
+          float l = dot(diffuseColor.rgb, vec3(0.299, 0.587, 0.114));
+          vec3 ghost = mix(mix(diffuseColor.rgb, vec3(l), 0.8), vec3(0.76, 0.75, 0.73), 0.4), theirs = mix(vec3(l), diffuseColor.rgb, 1.3) * 1.08;
+          diffuseColor.rgb = uLit > 0.5 ? mix(ghost, theirs, vState.g) : diffuseColor.rgb * mix(0.55, 1.0, vState.g);
         }
         // the district under the pointer lights up a little
         diffuseColor.rgb = mix(diffuseColor.rgb, vec3(1.0, 0.93, 0.7), vState.b * 0.2);`);

@@ -297,7 +297,7 @@ export function buildStudio(ctx) {
   // only what the street shader needs: copying the whole object would keep the routing closures (and the big field arrays they hold) alive
   // a campus has footpaths, not roads: paved stone, no centre line
   const pathC = layout?.paths ? new THREE.Color(layout.paths === 'dirt' ? S.dirt : S.plaza) : null;
-  const street = streets && { texture: streets.texture, min: streets.min, size: streets.size, maxHalf: streets.maxHalf, asphalt: pathC || new THREE.Color(S.road), grass: new THREE.Color(S.land), mark: pathC || new THREE.Color('#e0d7b8') };
+  const street = streets && { texture: streets.texture, along: streets.alongTexture, dash: streets.dash, dashTurn: streets.dashTurn, texel: streets.texel, min: streets.min, size: streets.size, maxHalf: streets.maxHalf, asphalt: pathC || new THREE.Color(S.road), grass: new THREE.Color(S.land), mark: pathC || new THREE.Color('#e0d7b8') };
   if (S.pixel && layout) addGroundDetail(groundMat, layout.ground === 'water' ? 'water' : 'street', { shared, street });
   const ground = new THREE.Mesh(new THREE.PlaneGeometry(SIZE * 14, SIZE * 14).rotateX(-Math.PI / 2), groundMat);
   ground.receiveShadow = true;
@@ -321,7 +321,7 @@ export function buildStudio(ctx) {
   // the field's lookup tables were only needed to plan routes; the GPU keeps its own copy of the texture
   const trees = S.pixel && layout ? timed('trees', () => buildTrees({ layout, B, streets, unit: layout.unit, plateStep, shared })) : null;
   if (trees) scene.add(trees);
-  if (streets) { streets.drivable = streets.navigable = streets.bornAt = null; streets.curbs = null; streets.lanes = streets.boats = null; streets.texture.onUpdate = t => { t.image.data = null; }; }
+  if (streets) { streets.drivable = streets.navigable = streets.clearance = streets.bornAt = null; streets.curbs = null; streets.lanes = streets.boats = null; streets.texture.onUpdate = streets.alongTexture.onUpdate = t => { t.image.data = null; }; }
   const roadY = layout?.groundIsWater ? plateStep * 0.8 + 0.05 : 0.05;
 
   // ---- district plinths (classic treemap only)
@@ -386,7 +386,7 @@ export function buildStudio(ctx) {
     transformed *= step(0.001, grow);`;
   const decl = `attribute vec4 aInfo; attribute float aDied, aHeat, aFocus; uniform float uTimeline;`;
   mat.onBeforeCompile = sh => {
-    Object.assign(sh.uniforms, { uTimeline: shared.uTimeline, uTime: shared.uTime, uFocus: shared.uFocus, uHover: shared.uHover,
+    Object.assign(sh.uniforms, { uTimeline: shared.uTimeline, uTime: shared.uTime, uFocus: shared.uFocus, uHover: shared.uHover, uLit: shared.uLit,
       uWin: { value: unit / 7 }, uWinColor: { value: new THREE.Color(S.windowColor || '#ffffff') }, uWindows: { value: S.windows },
       uAccent: { value: accent } });
     sh.vertexShader = sh.vertexShader
@@ -401,11 +401,13 @@ export function buildStudio(ctx) {
         vInfo = aInfo; vHeat = aHeat; vFocus = aFocus; vId = float(gl_InstanceID);`);
     sh.fragmentShader = sh.fragmentShader
       .replace('#include <common>', `#include <common>
-        uniform float uTimeline, uTime, uFocus, uHover, uWin, uWindows; uniform vec3 uWinColor, uAccent;
+        uniform float uTimeline, uTime, uFocus, uHover, uLit, uWin, uWindows; uniform vec3 uWinColor, uAccent;
         varying vec3 vWP, vObj, vSz, vON; varying vec4 vInfo; varying float vHeat, vFocus, vId;
         float hash2(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }`)
       .replace('#include <color_fragment>', `#include <color_fragment>
-        if (uFocus >= 0.0) diffuseColor.rgb *= mix(0.35, 1.0, vFocus);
+        // one person's buildings lit: the rest fade to pale ghosts (darkened, they'd read as dark buildings)
+        float lum = dot(diffuseColor.rgb, vec3(0.299, 0.587, 0.114));
+        if (uFocus >= 0.0) diffuseColor.rgb = uLit > 0.5 ? mix(mix(mix(diffuseColor.rgb, vec3(lum), 0.8), vec3(0.76, 0.75, 0.73), 0.4), mix(vec3(lum), diffuseColor.rgb, 1.3) * 1.08, vFocus) : diffuseColor.rgb * mix(0.35, 1.0, vFocus);
         if (abs(vId - uHover) < 0.5) diffuseColor.rgb = mix(diffuseColor.rgb, uAccent, 0.35);
         diffuseColor.rgb = mix(diffuseColor.rgb, uAccent, vHeat * 0.6);${S.chip ? chip.LID : ''}`)
       .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>

@@ -89,7 +89,7 @@
     "data/openwebtext/readme.md": {"lang":"doc","loc":9,"a":{"c":0,"f":0,"lf":0,"x":0,"r":"readme"},"churn":1,"born":1672189099,"last":1672189099,"imp":[],"by":"Andrej Karpathy"},
     "data/shakespeare/prepare.py": {"lang":"py","loc":28,"a":{"c":0,"f":0,"lf":0,"x":0,"r":"source"},"churn":5,"born":1672536588,"last":1706222084,"imp":[],"by":"Andrej Karpathy"},
     "data/shakespeare/readme.md": {"lang":"doc","loc":5,"a":{"c":0,"f":0,"lf":0,"x":0,"r":"readme"},"churn":1,"born":1672536588,"last":1672536588,"imp":[],"by":"Andrej Karpathy"},
-    "data/shakespeare_char/prepare.py": {"lang":"py","loc":59,"a":{"c":0,"f":2,"lf":2,"x":2,"r":"source"},"churn":6,"born":1673414839,"last":1678263379,"imp":[],"by":"Andrej Karpathy"},
+    "data/shakespeare_char/prepare.py": {"lang":"py","loc":59,"a":{"c":0,"f":2,"lf":2,"x":2,"r":"source"},"churn":6,"born":1673414839,"last":1678263379,"imp":[],"by":"Andrej Karpathy","most":"DG"},
     "data/shakespeare_char/readme.md": {"lang":"doc","loc":5,"a":{"c":0,"f":0,"lf":0,"x":0,"r":"readme"},"churn":1,"born":1673414839,"last":1673414839,"imp":[],"by":"Andrej Karpathy"},
     "model.py": {"lang":"py","loc":290,"a":{"c":6,"f":17,"lf":55,"x":6,"r":"source"},"churn":30,"born":1672189099,"last":1684290618,"g":"ml","imp":[],"by":"Andrej Karpathy"},
     "sample.py": {"lang":"py","loc":82,"a":{"c":0,"f":0,"lf":0,"x":0,"r":"source"},"churn":14,"born":1672189099,"last":1687212309,"g":"ml","imp":["model.py"],"by":"Andrej Karpathy"},
