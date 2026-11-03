@@ -27,9 +27,9 @@ addEventListener('error', e => fail(e.message || e.error));
 addEventListener('unhandledrejection', e => fail(e.reason?.stack || e.reason));
 // pixel | maquette | plan | nocturne | neon (the original prototype) | chip (the easter egg)
 // a visit that names no style is pixel, except one in 100,000 that rolls chip and keeps ?style=chip, so it can be shared
-// (never a share card or a recording: those are made, not visited)
+// (never a share card or a recording: those are made, not visited; an empty ?style= names none either)
 const STYLE = params.get('style') || (!params.has('card') && !params.has('record') && Math.random() < 1e-5 ? 'chip' : 'pixel');
-if (!params.has('style') && STYLE === 'chip') { params.set('style', STYLE); history.replaceState(null, '', `${location.pathname}?${params}${location.hash}`); }
+if (!params.get('style') && STYLE === 'chip') { params.set('style', STYLE); history.replaceState(null, '', `${location.pathname}?${params}${location.hash}`); }
 const NEON = STYLE === 'neon';
 const PIXEL = STYLE === 'pixel';
 // art-pixel size in screen pixels, and how far to zoom in (close-ups frame the city's landmark)
