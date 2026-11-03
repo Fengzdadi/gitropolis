@@ -270,7 +270,7 @@ export function buildStudio(ctx) {
   // only what the street shader needs: copying the whole object would keep the routing closures (and the big field arrays they hold) alive
   // a campus has footpaths, not roads: paved stone, no centre line
   const pathC = layout?.paths ? new THREE.Color(layout.paths === 'dirt' ? S.dirt : S.plaza) : null;
-  const street = streets && { texture: streets.texture, min: streets.min, size: streets.size, maxHalf: streets.maxHalf, asphalt: pathC || new THREE.Color(S.road), grass: new THREE.Color(S.land), mark: pathC || new THREE.Color('#e0d7b8') };
+  const street = streets && { texture: streets.texture, along: streets.alongTexture, dash: streets.dash, dashTurn: streets.dashTurn, texel: streets.texel, min: streets.min, size: streets.size, maxHalf: streets.maxHalf, asphalt: pathC || new THREE.Color(S.road), grass: new THREE.Color(S.land), mark: pathC || new THREE.Color('#e0d7b8') };
   if (S.pixel && layout) addGroundDetail(groundMat, layout.ground === 'water' ? 'water' : 'street', { shared, street });
   const ground = new THREE.Mesh(new THREE.PlaneGeometry(SIZE * 14, SIZE * 14).rotateX(-Math.PI / 2), groundMat);
   ground.receiveShadow = true;
@@ -294,7 +294,7 @@ export function buildStudio(ctx) {
   // the field's lookup tables were only needed to plan routes; the GPU keeps its own copy of the texture
   const trees = S.pixel && layout ? timed('trees', () => buildTrees({ layout, B, streets, unit: layout.unit, plateStep, shared })) : null;
   if (trees) scene.add(trees);
-  if (streets) { streets.drivable = streets.navigable = streets.bornAt = null; streets.curbs = null; streets.lanes = streets.boats = null; streets.texture.onUpdate = t => { t.image.data = null; }; }
+  if (streets) { streets.drivable = streets.navigable = streets.bornAt = null; streets.curbs = null; streets.lanes = streets.boats = null; streets.texture.onUpdate = streets.alongTexture.onUpdate = t => { t.image.data = null; }; }
   const roadY = layout?.groundIsWater ? plateStep * 0.8 + 0.05 : 0.05;
 
   // ---- district plinths (classic treemap only)

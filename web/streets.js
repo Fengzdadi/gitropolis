@@ -1,8 +1,8 @@
 // Streets, derived rather than drawn: rasterise every city block, then a vector distance transform
 // tells each patch of ground how far it is from the nearest block and in which direction. That one
 // field gives us, for any city layout, where the streets are (near blocks), where their centre lines
-// run (where the distance peaks) and how wide each street is — so we can paint asphalt only where
-// streets actually are and drive traffic down the right lanes.
+// run (where two blocks are equally far) and how wide each street is — so we can paint asphalt only
+// where streets actually are and drive traffic down the right lanes.
 import * as THREE from 'three';
 import { LAND_LEAD } from './surfaces.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
@@ -83,17 +83,14 @@ export function buildStreets({ layout, B, files, inDeg, SIZE, t01 }) {
     for (let i = 1; i < W; i++) relax(j * W + i, j * W + i - 1, -1, 0);
   }
 
-  // --- pack: R = distance in texels, B = across-street direction (to the nearest block) mod π
+  // --- pack: R = distance in texels; B, A = the street's centre line (below)
   const data = new Uint8Array(W * W * 4);
   const D = new Float32Array(W * W);
   for (let p = 0; p < W * W; p++) {
     const d = vx[p] === INF ? 255 : Math.sqrt(d2(p));
     D[p] = d;
     data[p * 4] = Math.min(255, Math.round(d));
-    let a = Math.atan2(vz[p], vx[p]);
-    if (a < 0) a += Math.PI;
-    data[p * 4 + 2] = Math.round((a / Math.PI) * 255) % 256;
-    data[p * 4 + 3] = 255;
+    data[p * 4 + 2] = 255;
   }
   const texture = new THREE.DataTexture(data, W, W, THREE.RGBAFormat);
   texture.magFilter = THREE.LinearFilter;
@@ -102,6 +99,105 @@ export function buildStreets({ layout, B, files, inDeg, SIZE, t01 }) {
 
   // streets are at most this far from a block (half an LA freeway); farther is open land
   const maxHalf = Math.min(250, Math.max(3, (layout.unit * 1.2) / tex));
+
+  // --- centre lines: a street's centre is where its two blocks are equally far. A second sweep finds,
+  // for each texel, the nearest texel of some *other* block than its nearest one; near the centre the
+  // distances to the two blocks' outlines then give B = signed distance to the centre line (128 on it,
+  // 1/32 texel a step: signed, so it filters to 0 on a line that falls between texels), A = 255 where
+  // a line may be drawn, and a second texture where along it the dashes fall: the length round the
+  // lower-numbered block's outline, as an angle (cos, sin) so it interpolates without a seam, over
+  // DASH_TURN dashes
+  const own = new Int32Array(W * W).fill(-1);
+  for (let p = 0; p < W * W; p++) if (vx[p] !== INF) own[p] = label[p + vz[p] * W + vx[p]];
+  const wx = new Int16Array(W * W).fill(INF), wz = new Int16Array(W * W).fill(INF), other = new Int32Array(W * W).fill(-1);
+  const relax2 = (p, q, ox, oz) => {
+    const mine = own[p];
+    if (vx[q] !== INF && own[q] !== mine) {
+      const cx = vx[q] + ox, cz = vz[q] + oz;
+      if (wx[p] === INF || cx * cx + cz * cz < wx[p] * wx[p] + wz[p] * wz[p]) { wx[p] = cx; wz[p] = cz; other[p] = own[q]; }
+    }
+    if (wx[q] !== INF && other[q] !== mine) {
+      const cx = wx[q] + ox, cz = wz[q] + oz;
+      if (wx[p] === INF || cx * cx + cz * cz < wx[p] * wx[p] + wz[p] * wz[p]) { wx[p] = cx; wz[p] = cz; other[p] = other[q]; }
+    }
+  };
+  for (let j = 0; j < W; j++) {
+    for (let i = 0; i < W; i++) {
+      const p = j * W + i;
+      if (i > 0) relax2(p, p - 1, -1, 0);
+      if (j > 0) { relax2(p, p - W, 0, -1); if (i > 0) relax2(p, p - W - 1, -1, -1); if (i < W - 1) relax2(p, p - W + 1, 1, -1); }
+    }
+    for (let i = W - 2; i >= 0; i--) relax2(j * W + i, j * W + i + 1, 1, 0);
+  }
+  for (let j = W - 1; j >= 0; j--) {
+    for (let i = W - 1; i >= 0; i--) {
+      const p = j * W + i;
+      if (i < W - 1) relax2(p, p + 1, 1, 0);
+      if (j < W - 1) { relax2(p, p + W, 0, 1); if (i < W - 1) relax2(p, p + W + 1, 1, 1); if (i > 0) relax2(p, p + W - 1, -1, 1); }
+    }
+    for (let i = 1; i < W; i++) relax2(j * W + i, j * W + i - 1, -1, 0);
+  }
+  // dashes a little over a quarter of a lot long, a power of two so the shader's pixel sizes divide it
+  const dash = 2 ** Math.round(Math.log2(layout.unit * 0.28)), DASH_TURN = 16;
+  const along = new Uint8Array(W * W * 2).fill(128);
+  const cum = new Map(); // block -> running length round its outline at each corner
+  const outline = id => {
+    if (!cum.has(id)) { const poly = blocks[id].poly, c = [0]; for (let k = 0; k < poly.length; k++) { const a = poly[k], b = poly[(k + 1) % poly.length]; c.push(c[k] + Math.hypot(b[0] - a[0], b[1] - a[1])); } cum.set(id, c); }
+    return cum.get(id);
+  };
+  // the side of a block's outline a street runs along at (x, z): of the sides about as near, the one
+  // running most along the street (across it is (nx, nz)). Distances are to that side's line, which
+  // carries on across the mouth of a side street, and so does the centre line; `over` is how far
+  // (x, z) is past the side's end, out into a junction
+  const ds = new Float64Array(Math.max(1, ...blocks.map(b => b.poly.length)));
+  const nearSide = (poly, x, z, nx, nz) => {
+    const n = poly.length;
+    let dMin = Infinity;
+    for (let m = 0; m < n; m++) {
+      const a = poly[m], b = poly[(m + 1) % n], ex = b[0] - a[0], ez = b[1] - a[1], L2 = ex * ex + ez * ez || 1;
+      const t = Math.max(0, Math.min(1, ((x - a[0]) * ex + (z - a[1]) * ez) / L2));
+      const dx = x - a[0] - ex * t, dz = z - a[1] - ez * t;
+      ds[m] = dx * dx + dz * dz;
+      if (ds[m] < dMin) dMin = ds[m];
+    }
+    const near = (Math.sqrt(dMin) + tex) ** 2;
+    let k = 0, bestAcross = Infinity;
+    for (let m = 0; m < n; m++) {
+      if (ds[m] > near) continue;
+      const a = poly[m], b = poly[(m + 1) % n], L = Math.hypot(b[0] - a[0], b[1] - a[1]) || 1;
+      const across = Math.abs(((b[0] - a[0]) * nx + (b[1] - a[1]) * nz) / L);
+      if (across < bestAcross) { bestAcross = across; k = m; }
+    }
+    const a = poly[k], b = poly[(k + 1) % poly.length], ex = b[0] - a[0], ez = b[1] - a[1], L = Math.hypot(ex, ez) || 1;
+    const t = ((x - a[0]) * ex + (z - a[1]) * ez) / L;
+    return { k, t, d: Math.abs((x - a[0]) * ez - (z - a[1]) * ex) / L, over: Math.max(0, -t, t - L) };
+  };
+  for (let j = 0; j < W; j++) {
+    for (let i = 0; i < W; i++) {
+      const p = j * W + i;
+      if (label[p] >= 0 || wet[p] || wx[p] === INF || own[p] < 0 || other[p] < 0) continue;
+      const d1 = D[p], dOther = Math.hypot(wx[p], wz[p]);
+      if (dOther > maxHalf || d1 + dOther < 3 || dOther - d1 > 10) continue; // no block across; an alley; far off the centre
+      const x = x0 + (i + 0.5) * tex, z = x0 + (j + 0.5) * tex;
+      let nx = wx[p] - vx[p], nz = wz[p] - vz[p];
+      const nL = Math.hypot(nx, nz) || 1; nx /= nL; nz /= nL;
+      const a = Math.min(own[p], other[p]), b = Math.max(own[p], other[p]);
+      const sa = nearSide(blocks[a].poly, x, z, nx, nz), sb = nearSide(blocks[b].poly, x, z, nx, nz);
+      const off = (sb.d - sa.d) / 2 / tex;
+      data[p * 4 + 2] = Math.max(0, Math.min(255, Math.round(128 + off * 32)));
+      // across a side street narrower than this one the line carries on; out in a junction it stops.
+      // (Only near the line, so the mask's edge never falls where B changes sign)
+      if (Math.abs(off) < 3 && Math.max(sa.over, sb.over) <= (sa.d + sb.d) / 2 * 0.6) data[p * 4 + 3] = 255;
+      const turn = (outline(a)[sa.k] + sa.t) / (dash * DASH_TURN) * 2 * Math.PI;
+      along[p * 2] = Math.round(127.5 + 127.5 * Math.cos(turn));
+      along[p * 2 + 1] = Math.round(127.5 + 127.5 * Math.sin(turn));
+    }
+  }
+  const alongTexture = new THREE.DataTexture(along, W, W, THREE.RGFormat);
+  alongTexture.magFilter = THREE.LinearFilter;
+  alongTexture.minFilter = THREE.LinearFilter;
+  alongTexture.unpackAlignment = 1;
+  alongTexture.needsUpdate = true;
 
   // --- which block each building stands on, for traffic weights and when the block "opens"
   const sample = (x, z) => {
@@ -184,7 +280,7 @@ export function buildStreets({ layout, B, files, inDeg, SIZE, t01 }) {
   const at = (x, z) => sample(x, z);
   const drivable = (x, z) => { const p = at(x, z); return p >= 0 && label[p] < 0 && !wet[p] && D[p] <= maxHalf + 1; };
   const navigable = (x, z) => { const p = at(x, z); return p >= 0 && wet[p] === 1; };
-  return { texture, min: new THREE.Vector2(x0, x0), size: S, texel: tex, maxHalf, lanes, curbs, boats, drivable, navigable, blockBorn: born, bornAt };
+  return { texture, alongTexture, dash, dashTurn: DASH_TURN, min: new THREE.Vector2(x0, x0), size: S, texel: tex, maxHalf, lanes, curbs, boats, drivable, navigable, blockBorn: born, bornAt };
 }
 
 // push a polygon outward by `d` (mitred corners, clamped so sharp corners don't spike)
