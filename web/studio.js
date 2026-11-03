@@ -37,7 +37,7 @@ export const STYLES = {
     sun: { color: '#fff4e0', intensity: 2.6, elevation: 50, azimuth: 75 },
     hemi: { sky: '#c4e4ee', ground: '#61944a', intensity: 1.0 },
     building: '#bdb293', buildingJitter: 0.06, ground: '#61944a', plate: '#cdc8d2', roughness: 1,
-    rail: '#4a4458', water: '#2f6188', land: '#61944a', yard: '#9c97a8', dirt: '#968a6e', sand: '#dccfa4', dune: '#bdb293', cliff: '#968a6e', plaza: '#e0d7b8', park: '#3d6b36', lawn: '#93bf62', hill: '#3d6b36', road: '#6e6880', wall: '#b0a58a',
+    rail: '#4a4458', water: '#2f6188', land: '#61944a', yard: '#9c97a8', dirt: '#968a6e', sand: '#dccfa4', dune: '#bdb293', cliff: '#968a6e', plaza: '#e0d7b8', park: '#3d6b36', lawn: '#93bf62', hill: '#3d6b36', road: '#6e6880', wall: '#968a6e',
     windows: 0, accent: '#c0413b', edges: null,
     toneMapping: THREE.NoToneMapping, exposure: 1.0, bloom: null,
     ink: '#14121c', inkSoft: 'rgba(20,18,28,.7)', font: "'Pixelify Sans', monospace", uiFont: "'Pixelify Sans', monospace", labelCase: 'none',
@@ -201,13 +201,15 @@ function buildTerrain(scene, layout, S, plateStep, shared, street, blockBorn, wa
     scene.add(mesh);
   }
   // the old town's wall (walls.js): stone runs along the streets, square towers with red roofs, all
-  // going up together when the founding years end
+  // going up together when the founding years end. They stand from the ground up: round a whole city
+  // on the sea they cross the water between its islands, and stand in it rather than over it
   if (wall) {
     const wh = u * 0.5, ts = u * 0.46, th = wh * 1.8;
-    const grown = g => { const n = g.attributes.position.count, a = new Float32Array(n * 2); for (let k = 0; k < n; k++) { a[k * 2] = wall.born; a[k * 2 + 1] = landTop; } return g.setAttribute('aGrow', new THREE.BufferAttribute(a, 2)); };
-    add(grown(mergeGeometries(wall.runs.map(([x0, x1, z]) => new THREE.BoxGeometry(x1 - x0, wh, wall.cell * 1.02).translate((x0 + x1) / 2, landTop + wh / 2, z)))), S.wall);
+    const grown = g => { const n = g.attributes.position.count, a = new Float32Array(n * 2); for (let k = 0; k < n; k++) { a[k * 2] = wall.born; a[k * 2 + 1] = 0; } return g.setAttribute('aGrow', new THREE.BufferAttribute(a, 2)); };
+    if (wall.walls.length) add(grown(mergeGeometries(wall.walls.map(([xa, za, xb, zb, t]) => new THREE.BoxGeometry(Math.hypot(xb - xa, zb - za), landTop + wh, t)
+      .rotateY(-Math.atan2(zb - za, xb - xa)).translate((xa + xb) / 2, (landTop + wh) / 2, (za + zb) / 2)))), S.wall);
     if (wall.towers.length) {
-      add(grown(mergeGeometries(wall.towers.map(([x, z]) => new THREE.BoxGeometry(ts, th, ts).translate(x, landTop + th / 2, z)))), S.wall);
+      add(grown(mergeGeometries(wall.towers.map(([x, z]) => new THREE.BoxGeometry(ts, landTop + th, ts).translate(x, (landTop + th) / 2, z)))), S.wall);
       add(grown(mergeGeometries(wall.towers.map(([x, z]) => new THREE.ConeGeometry(ts * 0.78, ts * 0.8, 4).rotateY(Math.PI / 4).translate(x, landTop + th + ts * 0.4, z)))), S.accent);
     }
   }
