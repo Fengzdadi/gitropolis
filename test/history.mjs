@@ -28,8 +28,8 @@ function repo() {
   git(dir, ['config', 'user.name', 'test']); git(dir, ['config', 'user.email', 'test@example.com']);
   return dir;
 }
-// files: { path: text, or null to delete it }; returns the commit's time
-function commit(dir, files, msg = 'change') {
+// files: { path: text, or null to delete it }; by: its author, "Name <email>"; returns the commit's time
+function commit(dir, files, msg = 'change', by) {
   clock += DAY;
   for (const [p, text] of Object.entries(files)) {
     if (text === null) { rmSync(path.join(dir, p)); continue; }
@@ -37,7 +37,7 @@ function commit(dir, files, msg = 'change') {
     writeFileSync(path.join(dir, p), text);
   }
   git(dir, ['add', '-A']);
-  git(dir, ['commit', '-q', '-m', msg]);
+  git(dir, ['commit', '-q', '-m', msg, ...(by ? [`--author=${by}`] : [])]);
   return clock;
 }
 // merge `branch` into the current one; on a conflict, `resolve` settles each path (true keeps it, false deletes it)
@@ -55,6 +55,7 @@ const cases = [];
 const check = (name, fn) => cases.push([name, fn]);
 const born = (city, p) => city.files.find(f => f.p === p)?.born;
 const gone = (city, p) => city.gone.find(g => g.p === p);
+const builder = (city, p) => { const b = (city.files.find(f => f.p === p) ?? gone(city, p))?.b; return b === undefined ? undefined : city.authors[b]; };
 
 check('a file rewritten in another format keeps its birth (same folder and stem)', async () => {
   const dir = repo();
@@ -218,6 +219,28 @@ check('a deleted file drawn from its size alone is drawn without reading it', as
   commit(dir, { 'package-lock.json': null });
   const city = await scanRepo(dir);
   return [[lock.length > 1_000_000, true], [gone(city, 'package-lock.json')?.loc, Math.round(lock.length / 40)]];
+});
+
+check('a building is its first author\'s, moved, deleted or edited by others (one name per person)', async () => {
+  const dir = repo();
+  const ann = 'Ann <ann@example.com>', bob = 'Bob <bob@example.com>';
+  commit(dir, { 'a.js': src('a'), 'lib/old.js': src('old'), '.mailmap': 'Ann <ann@example.com> <ann@home.example.com>\n' }, 'start', ann);
+  commit(dir, { 'a.js': src('a2'), 'lib/old.js': null, 'src/old.js': src('old') }, 'move', bob);
+  commit(dir, { 'b.js': src('b') }, 'add', bob);
+  commit(dir, { 'c.js': src('c') }, 'add', 'ann at home <ann@home.example.com>');
+  commit(dir, { 'b.js': null }, 'remove', ann);
+  const city = await scanRepo(dir);
+  return [[builder(city, 'a.js'), 'Ann'], [builder(city, 'src/old.js'), 'Ann'], [builder(city, 'b.js'), 'Bob'], [builder(city, 'c.js'), 'Ann'],
+    [city.authors.join(), 'Ann,Bob'], [city.authors.includes('ann at home'), false]];
+});
+
+check('a file there before the commits read has no builder', async () => {
+  const dir = repo();
+  commit(dir, { 'old.js': src('o') }, 'start', 'Ann <ann@example.com>');
+  commit(dir, { 'old.js': src('o2') }, 'edit', 'Bob <bob@example.com>');
+  commit(dir, { 'new.js': src('n') }, 'add', 'Bob <bob@example.com>');
+  const city = await scanRepo(dir, { maxCommits: 2 });
+  return [[builder(city, 'old.js'), undefined], [builder(city, 'new.js'), 'Bob']];
 });
 
 let failed = 0;

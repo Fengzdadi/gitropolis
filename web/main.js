@@ -323,6 +323,7 @@ const shared = {
   uFogColor: { value: FOG },
   uFogDensity: { value: fogDensity },
   uFocus: { value: -1 },
+  uLit: { value: 0 }, // 1 while one builder's buildings are lit: the rest recede further than around one focused building
   uHover: { value: -1 },
   uPixel: { value: renderer.getPixelRatio() * viewH() * 0.5 },
 };
@@ -1094,6 +1095,7 @@ renderer.domElement.addEventListener('pointermove', e => {
     row(['lines', `${f.loc.toLocaleString()} · `], ['commits', String(f.churn)]),
     ...(f.gone ? [] : [row(['imports', `${f.imp.length} · `], ['imported by', String(inDeg[hoverId])])]),
     row(['born', `${fmtDate(f.born)} · `], ['last edit', fmtDate(f.last)]),
+    ...(f.b !== undefined && authors[f.b] !== undefined ? [row(['built by', authors[f.b]])] : []),
     ...(f.gone ? [row(['deleted', fmtDate(f.died)])] : []),
     ...(hoverLabel >= 0 ? [row(['district', `${labelSource[hoverLabel].path} · ${labelMembers[hoverLabel].filter(i => i < LIVE).length.toLocaleString()} files`])] : []));
   tip.style.display = 'block';
@@ -1106,7 +1108,9 @@ renderer.domElement.addEventListener('pointerup', e => {
   if (!downAt || Math.hypot(e.clientX - downAt[0], e.clientY - downAt[1]) > 4) return;
   focus(pick(e));
 });
+let lit = -1; // the builder whose buildings are lit (who built what, below)
 function focus(id) {
+  if (lit >= 0) { lit = -1; shared.uLit.value = 0; syncWho(); }
   shared.uFocus.value = id;
   focusAttr.fill(id < 0 ? 1 : 0);
   if (id >= 0) {
@@ -1117,6 +1121,76 @@ function focus(id) {
   buildings.geometry.attributes.aFocus.needsUpdate = true;
 }
 addEventListener('keydown', e => { if (e.code === 'Escape') focus(-1); });
+
+// ---- who built what: one builder's buildings lit, the rest of the city receding (a city scanned
+// before builders were recorded has none, and one built by one person has nothing to pick between)
+const authors = data.authors || [];
+const builtBy = authors.map(() => 0);
+for (let i = 0; i < LIVE; i++) if (files[i].b !== undefined) builtBy[files[i].b]++;
+const builders = authors.map((a, k) => k).filter(k => builtBy[k]).sort((x, y) => builtBy[y] - builtBy[x] || x - y);
+const whoBtn = $('#who'), whoPanel = $('#builders'), whoFind = $('#who-find'), whoList = $('#builders .list');
+const WHO_ROWS = 60; // the rest are a search away
+function light(k) {
+  focus(-1);
+  if (k < 0) return;
+  lit = k;
+  // focused on no building in particular (N is none of them): no arcs, only the builder's buildings stand out
+  shared.uFocus.value = N; shared.uLit.value = 1;
+  for (let i = 0; i < N; i++) focusAttr[i] = files[i].b === k ? 1 : 0;
+  buildings.geometry.attributes.aFocus.needsUpdate = true;
+  syncWho();
+  note(`${authors[k]} built ${builtBy[k].toLocaleString()} of ${LIVE.toLocaleString()} buildings · Esc to clear`);
+}
+function syncWho() {
+  whoBtn.classList.toggle('on', lit >= 0);
+  whoBtn.title = lit >= 0 ? `Lit: ${authors[lit]}'s buildings (B to pick another)` : 'Who built what (B)';
+  for (const el of whoList.children) el.classList?.toggle('on', +el.dataset.k === lit);
+  // the address says whose buildings are lit, so the link shows them too
+  if (REC) return;
+  const u = new URL(location.href);
+  if (lit >= 0) u.searchParams.set('by', authors[lit]); else u.searchParams.delete('by');
+  history.replaceState(history.state, '', u);
+}
+function listWho() {
+  const q = whoFind.value.trim().toLowerCase();
+  const match = q ? builders.filter(k => authors[k].toLowerCase().includes(q)) : builders;
+  // built from text nodes: a name is data, never markup
+  const rows = match.slice(0, WHO_ROWS).map(k => {
+    const b = document.createElement('button'), name = document.createElement('span'), n = document.createElement('span');
+    name.textContent = authors[k]; n.textContent = builtBy[k].toLocaleString();
+    b.dataset.k = k; b.title = `Light up ${authors[k]}'s buildings`;
+    b.classList.toggle('on', k === lit);
+    b.append(name, n);
+    b.onclick = () => { light(k === lit ? -1 : k); showWho(false); };
+    return b;
+  });
+  if (match.length > WHO_ROWS) { const m = document.createElement('div'); m.className = 'more'; m.textContent = `and ${(match.length - WHO_ROWS).toLocaleString()} more: type a name`; rows.push(m); }
+  if (!match.length) { const m = document.createElement('div'); m.className = 'more'; m.textContent = 'no builder by that name'; rows.push(m); }
+  whoList.replaceChildren(...rows);
+}
+function showWho(open) {
+  whoPanel.hidden = !open;
+  whoBtn.setAttribute('aria-expanded', String(open));
+  if (!open) return;
+  listWho();
+  if (!whoFind.hidden) whoFind.focus();
+}
+if (builders.length > 1) {
+  whoBtn.hidden = false;
+  whoFind.hidden = builders.length <= 8;
+  whoBtn.onclick = () => showWho(whoPanel.hidden);
+  whoFind.oninput = listWho;
+  whoFind.onkeydown = e => { if (e.key === 'Enter') whoList.querySelector('button')?.click(); };
+  addEventListener('keydown', e => {
+    if (e.code === 'Escape') showWho(false);
+    if (e.code !== 'KeyB' || e.metaKey || e.ctrlKey || e.target.closest?.('input, textarea')) return;
+    e.preventDefault(); // (or the b lands in the search box it opens)
+    showWho(whoPanel.hidden);
+  });
+  renderer.domElement.addEventListener('pointerdown', () => showWho(false));
+  const k = authors.indexOf(params.get('by'));
+  if (k >= 0 && builtBy[k]) light(k);
+}
 
 
 // ------------------------------------------------------------ loop

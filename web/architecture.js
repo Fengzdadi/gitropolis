@@ -282,16 +282,20 @@ export function buildCityMesh({ buildingGeometry, specs, B, files, t01, shared, 
   stateTex.needsUpdate = true;
   const mat = new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true });
   mat.onBeforeCompile = sh => {
-    Object.assign(sh.uniforms, { uTimeline: shared.uTimeline, uFocus: shared.uFocus, tState: { value: stateTex } });
+    Object.assign(sh.uniforms, { uTimeline: shared.uTimeline, uFocus: shared.uFocus, uLit: shared.uLit, tState: { value: stateTex } });
     sh.vertexShader = sh.vertexShader
       .replace('#include <common>', `#include <common>\nattribute vec4 aMeta; uniform float uTimeline; uniform sampler2D tState; varying vec3 vState;`)
       .replace('#include <begin_vertex>', `#include <begin_vertex>\n${grow}\nvState = texture2D(tState, vec2((mod(aMeta.x, ${SW}.0) + 0.5) / ${SW}.0, (floor(aMeta.x / ${SW}.0) + 0.5) / ${SH}.0)).rgb;`);
     sh.fragmentShader = sh.fragmentShader
-      .replace('#include <common>', '#include <common>\nvarying vec3 vState; uniform float uFocus;')
+      .replace('#include <common>', '#include <common>\nvarying vec3 vState; uniform float uFocus, uLit;')
       .replace('#include <color_fragment>', `#include <color_fragment>
         // a building touched by a commit flashes warm; when one is focused, the rest of the city recedes
+        // (further when a builder's buildings are lit, scattered through the city, and those warm a little)
         diffuseColor.rgb = mix(diffuseColor.rgb, vec3(1.0, 0.9, 0.6), vState.r * 0.75);
-        if (uFocus >= 0.0) diffuseColor.rgb *= mix(0.55, 1.0, vState.g);
+        if (uFocus >= 0.0) {
+          diffuseColor.rgb *= mix(0.55 - 0.3 * uLit, 1.0, vState.g);
+          diffuseColor.rgb = mix(diffuseColor.rgb, vec3(1.0, 0.85, 0.5), vState.g * uLit * 0.25);
+        }
         // the district under the pointer lights up a little
         diffuseColor.rgb = mix(diffuseColor.rgb, vec3(1.0, 0.93, 0.7), vState.b * 0.2);`);
   };
