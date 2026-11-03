@@ -81,6 +81,12 @@ function layout(g, format, info, { W, H, full, scale }) {
   const width = (txt, px, w) => { font(px, w); return g.measureText(txt).width; };
   // largest size (down to a floor) at which a line fits
   const fit = (txt, px, max, w = 600, min = 14) => { while (px > min && width(txt, px, w) > max) px -= 1; return px; };
+  // a line cut short with … where even at its floor it won't fit (an author's name can be any length)
+  const short = (txt, px, max, w = 600) => {
+    if (width(txt, px, w) <= max) return txt;
+    while (txt.length > 1 && width(`${txt}…`, px, w) > max) txt = txt.slice(0, -1);
+    return `${txt.trimEnd()}…`;
+  };
   const wrap = (txt, px, max, lines) => {
     font(px); const out = []; let cur = '';
     for (const word of txt.split(' ')) {
@@ -130,25 +136,36 @@ function layout(g, format, info, { W, H, full, scale }) {
     const repo = info.owner ? `${info.owner}/${info.repo}` : info.repo;
     const life = `${p.commits.toLocaleString('en')} commit${p.commits === 1 ? '' : 's'} · ${p.years[0]}${p.years[1] !== p.years[0] ? `–${p.years[1]}` : ''}`;
     if (full) {
+      // their tag in one corner (face, name, how many, where), the address in the other; when the two
+      // won't both fit along the foot (a long name or repo, a square card), the address sits on the tag
       const z = n => Math.round(n * (scale || (format === 'story' ? 1.7 : format === 'square' ? 1.25 : 1.6)));
-      const fs = z(56), line = `${p.verb} ${num} ${of} in ${repo}`;
-      const np = fit(p.name, z(30), W * 0.55), lp = fit(line, z(18), W * 0.55, 400);
-      const tagW = fs + P * 3 + Math.max(width(p.name, np, 600), width(line, lp)), tagH = P * 2 + Math.max(fs, np + z(28));
-      const urlP = z(16), urlW = width(info.url, urlP, 600) + z(14) * 2, urlH = urlP + z(14) * 2;
-      bands = { top: 0, bottom: 0, fill: format === 'story' ? 2.8 : 1.8 };
+      const l1 = `${p.verb} ${num} ${of}`, l2 = `in ${repo}`, room = W - M * 2 - P * 3;
+      const np = fit(p.name, z(30), room * 0.6, 600, z(20)), lp = Math.min(fit(l1, z(18), room * 0.6, 400), fit(l2, z(18), room * 0.6, 400));
+      const name = short(p.name, np, room * 0.6), where = short(l2, lp, room * 0.6, 400);
+      const textW = Math.max(width(name, np, 600), width(l1, lp), width(where, lp)), textH = np + z(22) * 2;
+      const fs = Math.max(z(56), Math.round(textH));
+      const tagW = fs + P * 3 + textW, tagH = P * 2 + fs;
+      const urlP = fit(info.url, z(16), W - M * 2 - z(14) * 2, 600, 11), url = short(info.url, urlP, W - M * 2 - z(14) * 2);
+      const urlW = width(url, urlP, 600) + z(14) * 2, urlH = urlP + z(14) * 2;
+      const stack = M + tagW + z(16) + urlW > W - M, foot = tagH + (stack ? urlH + z(12) : 0);
+      // (the city, and their buildings in it, framed clear of the foot)
+      bands = { top: 0, bottom: (M + foot + 12) / H, fill: format === 'story' ? 2.8 : 1.8 };
       paint = date => {
         if (date) {
           const dp = z(26), dw = width('0000-00', dp, 600) + z(14) * 2, dh = dp + z(14) * 2;
           panel(W - M - dw, M, dw, dh);
           text(date, W - M - z(14), M + z(14) + dp * 0.85, dp, INK, 600, 'right');
         }
-        const x = M, y = H - M - tagH;
+        const x = M, y = H - M - tagH, tx = x + P * 2 + fs;
         panel(x, y, tagW, tagH);
         face(x + P, y + P, fs);
-        text(p.name, x + P * 2 + fs, y + P + np * 0.9, np, INK, 600);
-        text(line, x + P * 2 + fs, y + P + np + z(24), lp, SOFT);
-        panel(W - M - urlW, H - M - urlH, urlW, urlH);
-        text(info.url, W - M - z(14), H - M - z(14) - urlP * 0.15, urlP, INK, 600, 'right');
+        const ty = y + P + (fs - textH) / 2;
+        text(name, tx, ty + np * 0.9, np, INK, 600);
+        text(l1, tx, ty + np + z(20), lp, SOFT);
+        text(where, tx, ty + np + z(20) + z(22), lp, SOFT);
+        const ux = stack ? M : W - M - urlW, uy = stack ? y - z(12) - urlH : H - M - urlH;
+        panel(ux, uy, urlW, urlH);
+        text(url, ux + urlW - z(14), uy + urlH - z(14) - urlP * 0.15, urlP, INK, 600, 'right');
       };
     } else if (format === 'landscape') {
       const PW = 384, iw = PW - P * 2, fs = 96;
@@ -158,20 +175,22 @@ function layout(g, format, info, { W, H, full, scale }) {
         const x = M + P; let y = M + P + BORDER;
         face(x + BORDER, y, fs);
         y += fs + 14;
-        const np = fit(p.name, 38, iw); y += np; text(p.name, x, y, np, INK, 600);
+        const np = fit(p.name, 38, iw, 600, 24); y += np; text(short(p.name, np, iw), x, y, np, INK, 600);
         if (p.login) { y += 26; text(`@${p.login}`, x, y, 18, SOFT); }
         y += 46; text(p.verb, x, y, 20, SOFT);
         y += 62; text(num, x, y, 64, ACCENT, 600); text(` ${of}`, x + width(num, 64, 600), y, 20, SOFT);
         y += 34; text('in', x, y, 20, SOFT);
-        text(repo, x + width('in ', 20), y, fit(repo, 24, iw - width('in ', 20)), INK, 600);
+        const rp = fit(repo, 24, iw - width('in ', 20));
+        text(short(repo, rp, iw - width('in ', 20)), x + width('in ', 20), y, rp, INK, 600);
         let b = H - M - P - 4;
-        text(info.url, x, b, fit(info.url, 20, iw, 600, 11), INK, 600);
+        const up = fit(info.url, 20, iw, 600, 11);
+        text(short(info.url, up, iw), x, b, up, INK, 600);
         b -= 30; text(life, x, b, fit(life, 17, iw, 400, 11), SOFT);
         if (p.where) for (const l of wrap(p.where, 16, iw, 2).reverse()) { b -= 24; text(l, x, b, 16, SOFT); }
       };
     } else {
       const story = format === 'story', big = story ? 1.7 : 1.2, iw = W - M * 2 - P * 2, z = n => Math.round(n * big);
-      const fs = z(84), np = fit(p.name, z(44), iw - fs - P);
+      const fs = z(84), np = fit(p.name, z(44), iw - fs - P, 600, z(24)), name = short(p.name, np, iw - fs - P);
       const topH = P * 2 + fs + BORDER * 2;
       const where = p.where ? wrap(p.where, z(16), iw, story ? 2 : 1) : [];
       const botH = P * 2 + z(22) + z(76) + z(36) + where.length * z(24) + z(26) + z(40);
@@ -181,24 +200,29 @@ function layout(g, format, info, { W, H, full, scale }) {
         const x = M + P;
         face(x + BORDER, M + P + BORDER, fs);
         const tx = x + fs + P + BORDER * 2;
-        text(p.name, tx, M + P + fs * 0.45 + np * 0.35, np, INK, 600);
+        text(name, tx, M + P + fs * 0.45 + np * 0.35, np, INK, 600);
         if (p.login) text(`@${p.login}`, tx, M + P + fs * 0.45 + np * 0.35 + z(30), z(18), SOFT);
         const by = H - M - botH;
         panel(M, by, W - M * 2, botH);
         let y = by + P + z(22); text(p.verb, x, y, z(20), SOFT);
         y += z(76); text(num, x, y, z(68), ACCENT, 600); text(` ${of}`, x + width(num, z(68), 600), y, z(22), SOFT);
-        y += z(36); text('in', x, y, z(20), SOFT); text(repo, x + width('in ', z(20)), y, fit(repo, z(26), iw - width('in ', z(20))), INK, 600);
+        const rw = iw - width('in ', z(20)), rp = fit(repo, z(26), rw);
+        y += z(36); text('in', x, y, z(20), SOFT); text(short(repo, rp, rw), x + width('in ', z(20)), y, rp, INK, 600);
         for (const l of where) { y += z(24); text(l, x, y, z(16), SOFT); }
         y += z(26); text(life, x, y, z(16), SOFT);
-        y += z(40); text(info.url, x, y, fit(info.url, z(24), iw, 600, 11), INK, 600);
+        const up = fit(info.url, z(24), iw, 600, 11);
+        y += z(40); text(short(info.url, up, iw), x, y, up, INK, 600);
       };
     }
   } else if (full) {
     // full bleed: the city is the picture, with a small name tag in one corner and the address in the other
+    // (or on the tag, when the two won't both fit along the foot)
     const z = n => Math.round(n * (scale || (format === 'story' ? 1.7 : format === 'square' ? 1.25 : format === 'social' || format === 'brand' ? 1.6 : 1)));
-    const name = info.owner ? `${info.owner}/${info.repo}` : info.repo;
-    const np = fit(name, z(30), W * 0.6), tagW = Math.max(width(name, np, 600), width(`${lead}${info.phrase}`, z(20), 600)) + P * 2;
-    const tagH = P * 2 + np + z(30), urlP = z(16), urlW = width(info.url, urlP, 600) + z(14) * 2, urlH = urlP + z(14) * 2;
+    const whole = info.owner ? `${info.owner}/${info.repo}` : info.repo;
+    const np = fit(whole, z(30), W * 0.6), name = short(whole, np, W * 0.6);
+    const tagW = Math.max(width(name, np, 600), width(`${lead}${info.phrase}`, z(20), 600)) + P * 2;
+    const tagH = P * 2 + np + z(30), urlP = fit(info.url, z(16), W - M * 2 - z(14) * 2, 600, 11), url = short(info.url, urlP, W - M * 2 - z(14) * 2);
+    const urlW = width(url, urlP, 600) + z(14) * 2, urlH = urlP + z(14) * 2, stack = M + tagW + z(16) + urlW > W - M;
     bands = { top: 0, bottom: 0, fill: format === 'story' ? 2.8 : 1.8 }; // how far past 'fits' it may zoom
     paint = date => {
       if (date) { // films: the date ticks along in the top corner
@@ -211,8 +235,9 @@ function layout(g, format, info, { W, H, full, scale }) {
       text(name, x + P, y + P + np * 0.9, np, INK, 600);
       text(lead, x + P, y + P + np + z(24), z(18), SOFT);
       text(info.phrase, x + P + width(lead, z(18)), y + P + np + z(24), z(20), ACCENT, 600);
-      panel(W - M - urlW, H - M - urlH, urlW, urlH);
-      text(info.url, W - M - z(14), H - M - z(14) - urlP * 0.15, urlP, INK, 600, 'right');
+      const ux = stack ? M : W - M - urlW, uy = stack ? y - z(12) - urlH : H - M - urlH;
+      panel(ux, uy, urlW, urlH);
+      text(url, ux + urlW - z(14), uy + urlH - z(14) - urlP * 0.15, urlP, INK, 600, 'right');
     };
   } else if (format === 'landscape') {
     const PW = 384, iw = PW - P * 2;
