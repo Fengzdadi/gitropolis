@@ -324,6 +324,22 @@ async function birthsBefore(root, boundary, paths) {
 }
 
 // name: the repository's name, when the folder it's cloned into has another (the hosted scanner's)
+// the author with the most of a file's commits (a tie goes to whoever built it, then to whoever came first)
+function most(h) {
+  let top = h.by, n = h.who.get(h.by) || 0;
+  for (const [a, k] of h.who) if (k > n) { top = a; n = k; }
+  return top;
+}
+// "<id>+<login>@users.noreply.github.com", or "<login>@…" from before GitHub put ids in them
+const NOREPLY = /^(?:\d+\+)?([A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?)@users\.noreply\.github\.com$/i;
+// "owner/name" when the repo came from GitHub (its origin remote, over https or ssh)
+function githubRepo(root) {
+  try {
+    const url = git(root, ['config', '--get', 'remote.origin.url']).trim();
+    return /^(?:https?:\/\/(?:[^@/]+@)?|ssh:\/\/git@|git@)github\.com[:/]([\w.-]+\/[\w.-]+?)(?:\.git)?\/?$/.exec(url)?.[1] ?? null;
+  } catch { return null; }
+}
+
 export async function scanRepo(repo, { maxCommits = 20000, name } = {}) {
   repo = path.resolve(repo);
   const t0 = Date.now();
@@ -340,21 +356,30 @@ export async function scanRepo(repo, { maxCommits = 20000, name } = {}) {
   const alias = new Map(); // path at this point in history -> history record
   const dead = new Map(); // path -> the record of the file deleted there (until a file is added there again)
   let boundary; // the oldest commit read
+  const face = new Map(); // author -> { c: their latest commit, u: their GitHub login (when their email gives it), n: their commits, t: [first, last] }
   const history = new Promise((resolve, reject) => {
     // quotePath=false: non-ASCII names (中文.md, café.js) come back as raw UTF-8, matching ls-files
     // renameLimit: pinned to git's own default, so pairMoves knows when git gave up (and an older git,
     // or one configured otherwise, pairs the same files)
     const proc = spawn('git', ['-C', root, '-c', 'core.quotePath=false', '-c', `diff.renameLimit=${RENAME_LIMIT}`, 'log', `--max-count=${maxCommits}`, '--raw', '--no-abbrev',
-      '--format=@@%ct %H %aN', '-M', '--reverse'], { stdio: ['ignore', 'pipe', 'ignore'] });
+      '--format=@@%ct%x1f%H%x1f%aE%x1f%aN', '-M', '--reverse'], { stdio: ['ignore', 'pipe', 'ignore'] });
     const rl = readline.createInterface({ input: proc.stdout });
     let cur = null, added = [], deleted = [];
     rl.on('line', line => {
       if (line.startsWith('@@')) {
-        // "@@<time> <hash> <author>" (%aN: the name .mailmap gives them, so one person's two emails are one builder)
-        const at = line.indexOf(' '), by = line.indexOf(' ', at + 1);
+        // "@@<time>␟<hash>␟<email>␟<author>" (%aN, %aE: as .mailmap gives them, so one person's two emails
+        // are one builder). The email is only read for a GitHub login; it never leaves the scan.
+        const [t, hash, email, a] = line.slice(2).split('\x1f');
         if (cur) pairMoves(added, deleted);
-        else boundary = line.slice(at + 1, by);
-        cur = { t: parseInt(line.slice(2)), a: line.slice(by + 1) || undefined, f: [] }; // (a commit can have no name on it)
+        else boundary = hash;
+        cur = { t: parseInt(t), a: a || undefined, f: [] }; // (a commit can have no name on it)
+        if (cur.a) {
+          const fc = face.get(cur.a) ?? { n: 0, t: [cur.t, cur.t] };
+          fc.c = hash.slice(0, 12);
+          fc.u = NOREPLY.exec(email)?.[1] ?? fc.u;
+          fc.n++; fc.t[1] = cur.t;
+          face.set(cur.a, fc);
+        }
         commits.push(cur);
         added = []; deleted = [];
         return;
@@ -375,7 +400,7 @@ export async function scanRepo(repo, { maxCommits = 20000, name } = {}) {
       if (!h && (h = dead.get(to)) && arrives) { dead.delete(to); delete h.died; }
       // (a file seen for the first time by an edit was there before the commits read: it isn't new.
       // was: its path then, to look up when it was born. by: who added it, when the walk saw them do it)
-      if (!h) { h = { born: cur.t, last: 0, churn: 0 }; if (st[0] !== 'A') h.was = from; else h.by = cur.a; if (arrives) added.push(to); }
+      if (!h) { h = { born: cur.t, last: 0, churn: 0, who: new Map() }; if (st[0] !== 'A') h.was = from; else h.by = cur.a; if (arrives) added.push(to); }
       if (st[0] === 'D') {
         alias.delete(from);
         dead.set(from, h);
@@ -384,6 +409,7 @@ export async function scanRepo(repo, { maxCommits = 20000, name } = {}) {
       } else if (h.died === undefined) alias.set(to, h);
       h.last = cur.t;
       h.churn++;
+      if (cur.a) h.who.set(cur.a, (h.who.get(cur.a) || 0) + 1);
       cur.f.push(h);
     });
     proc.on('error', reject);
@@ -474,7 +500,7 @@ export async function scanRepo(repo, { maxCommits = 20000, name } = {}) {
     const idx = index.get(p);
     if (idx === undefined) continue;
     recIdx.set(h, idx);
-    Object.assign(files[idx], { born: h.born, last: h.last, churn: h.churn, by: h.by });
+    Object.assign(files[idx], { born: h.born, last: h.last, churn: h.churn, by: h.by, most: most(h) });
   }
   for (const c of commits) c.f = [...new Set(c.f.map(h => recIdx.get(h)).filter(i => i !== undefined))];
   const touched = commits.filter(c => c.f.length);
@@ -511,27 +537,38 @@ export async function scanRepo(repo, { maxCommits = 20000, name } = {}) {
         if (!f || kind(f) && kind(f) !== 'code' && !keep[kind(f)]) continue;
         if (engine && ENGINE_LANG[engine.name].includes(f.lang) && !SAMPLE_DIR.test(p)) f.g = engine.name;
         // last: its last change before it went; churn: its changes, not counting the deletion
-        gone.push({ p, lang: f.lang, loc: f.loc, a: f.a, born: h.born, last: h.edited, died: h.died, churn: h.churn - 1, ...(f.g && { g: f.g }), by: h.by });
+        gone.push({ p, lang: f.lang, loc: f.loc, a: f.a, born: h.born, last: h.edited, died: h.died, churn: h.churn - 1, ...(f.g && { g: f.g }), by: h.by, most: most(h) });
       }
     }
   } catch { gone.length = 0; } // the deleted files are extra: without them the city is still whole
   gone.sort((x, y) => x.died - y.died || (x.p < y.p ? -1 : 1));
   // who built the city, those who built the most first; each building names its builder by place in the
-  // list (b), and one added before the commits read has none. Names only: the emails stay in the repo
-  const built = new Map();
-  for (const f of [...files, ...gone]) if (f.by !== undefined) built.set(f.by, (built.get(f.by) || 0) + 1);
-  const authors = [...built].sort((x, y) => y[1] - x[1] || (x[0] < y[0] ? -1 : 1)).map(([a]) => a);
+  // list (b), and one added before the commits read has none, and whoever made the most of its commits
+  // (m) when that's someone else. Names only: the emails stay in the repo
+  const built = new Map(), kept = new Map();
+  for (const f of [...files, ...gone]) {
+    if (f.by !== undefined) built.set(f.by, (built.get(f.by) || 0) + 1);
+    if (f.most !== undefined) kept.set(f.most, (kept.get(f.most) || 0) + 1);
+  }
+  const authors = [...new Set([...built.keys(), ...kept.keys()])]
+    .sort((x, y) => (built.get(y) || 0) - (built.get(x) || 0) || (kept.get(y) || 0) - (kept.get(x) || 0) || (x < y ? -1 : 1));
   const builder = new Map(authors.map((a, i) => [a, i]));
-  for (const g of gone) { const { by } = g; delete g.by; if (by !== undefined) g.b = builder.get(by); }
+  const whose = f => ({ ...(f.by !== undefined && { b: builder.get(f.by) }), ...(f.most !== undefined && f.most !== f.by && { m: builder.get(f.most) }) });
+  for (const g of gone) { const w = whose(g); delete g.by; delete g.most; Object.assign(g, w); }
   const edges = files.reduce((n, f) => n + f.imp.size, 0);
+  const github = githubRepo(root);
   const city = {
     name,
     scannedAt: Math.floor(Date.now() / 1000),
     scanMs: Date.now() - t0,
     start, end, ...(truncated && { truncated, firstCommit }),
     stats: { files: files.length, loc: files.reduce((n, f) => n + f.loc, 0), edges, commits: touched.length },
-    files: files.map(f => ({ p: f.p, lang: f.lang, loc: f.loc, imp: [...f.imp], a: f.a, churn: f.churn, born: f.born, last: f.last, ...(status.get(f) && { s: status.get(f) }), ...(f.g && { g: f.g }), ...(f.by !== undefined && { b: builder.get(f.by) }) })),
+    files: files.map(f => ({ p: f.p, lang: f.lang, loc: f.loc, imp: [...f.imp], a: f.a, churn: f.churn, born: f.born, last: f.last, ...(status.get(f) && { s: status.get(f) }), ...(f.g && { g: f.g }), ...whose(f) })),
     authors,
+    // where each author's face is: a commit of theirs (GitHub knows whose account made it) and their
+    // login, when their email is GitHub's no-reply address for it; and how many commits they made, when
+    faces: authors.map(a => face.get(a)),
+    ...(github && { github }),
     // files deleted along the way (none of them is in commits: those name the files above)
     gone,
     // compact: [time, fileIdx, fileIdx, ...]; skip giant sweeping commits (formatting, renames)

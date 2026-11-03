@@ -1,7 +1,8 @@
 // gitropolis.dev: github.com/owner/repo → gitropolis.dev/owner/repo.
 //
 // Link previews: /owner/repo pages carry og/twitter tags pointing at /api/card/owner/repo.png, a share
-// card drawn by the page itself in a headless browser (?card=og) and kept in R2 per commit.
+// card drawn by the page itself in a headless browser (?card=og) and kept in R2 per commit. A link to
+// one person's part (?by=Name) previews their card: /api/card/owner/repo.png?by=Name.
 //
 // Static pages are the CLI's own web/ folder. The one dynamic route, /api/city/owner/repo, finds the
 // default branch's head commit on GitHub, serves the city for that commit from R2 if it has been
@@ -87,21 +88,28 @@ async function city(owner, repo, req, env, ctx) {
 const CARD = 2;               // bump when the card's look (or its encoding) changes
 const esc = t => t.replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const cardKey = (info, v = CARD) => `cards/v${SCANNER}.${v}/${info.full.toLowerCase()}/${info.sha}.png`;
+// a person's card: their name hashed, so any name makes a plain key
+const personKey = async (info, who) => {
+  const h = new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(`${who.by}\n${who.most}`)));
+  return `cards/v${SCANNER}.${CARD}/${info.full.toLowerCase()}/${info.sha}/by/${[...h.slice(0, 12)].map(b => b.toString(16).padStart(2, '0')).join('')}.png`;
+};
 const cityKey = info => `cities/v${SCANNER}/${info.full.toLowerCase()}/${info.sha}.json`;
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
 // Draw a repo's share card: the page itself, in a headless browser, in its ?card=og mode. Kept in R2.
-async function renderCard(info, origin, env) {
+// (who: one person's card instead, with their face looked up here, where GitHub can be asked with a token)
+async function renderCard(info, origin, env, who = null) {
   let browser;
   try {
     browser = await puppeteer.launch(env.BROWSER);
     const page = await browser.newPage();
-    await page.goto(new URL(`/${info.full}?card=og`, origin).toString(), { waitUntil: 'domcontentloaded', timeout: 30_000 });
+    const q = new URLSearchParams({ card: 'og', ...(who && { by: who.by, ...(who.most && { most: '1' }), ...(who.face && { face: who.face }) }) });
+    await page.goto(new URL(`/${info.full}?${q}`, origin).toString(), { waitUntil: 'domcontentloaded', timeout: 30_000 });
     await page.waitForFunction('window.__card', { timeout: 60_000 });
     const url = await page.evaluate(() => window.__card);
     if (!url.startsWith('data:image/png;base64,')) throw new Error(url);
     const png = Uint8Array.from(atob(url.slice(22)), c => c.charCodeAt(0));
-    await env.CITIES.put(cardKey(info), png, { httpMetadata: { contentType: 'image/png' } });
+    await env.CITIES.put(who ? who.key : cardKey(info), png, { httpMetadata: { contentType: 'image/png' } });
     return png;
   } finally {
     await browser?.close().catch(() => {});
@@ -113,11 +121,11 @@ async function renderCard(info, origin, env) {
 // already being drawn, or null when it couldn't be. (The mark is in this data centre's cache, so
 // crawlers arriving through different data centres can still each draw one.)
 const BUSY = Symbol('busy');
-async function drawOnce(info, origin, env) {
-  const busy = new Request(`https://card.busy/${info.full.toLowerCase()}/${info.sha}`);
+async function drawOnce(info, origin, env, who = null) {
+  const busy = new Request(`https://card.busy/${who ? who.key : `${info.full.toLowerCase()}/${info.sha}`}`);
   if (await caches.default.match(busy)) return BUSY;
   await caches.default.put(busy, new Response('1', { headers: { 'cache-control': 'max-age=90' } }));
-  try { return await renderCard(info, origin, env); } catch (err) { console.log('card failed', info.full, String(err)); return null; }
+  try { return await renderCard(info, origin, env, who); } catch (err) { console.log('card failed', info.full, String(err)); return null; }
 }
 
 // Link-preview crawlers don't wait long, and one that times out remembers "no picture" for days. So a
@@ -136,6 +144,8 @@ async function card(owner, repo, req, env, ctx) {
   try { info = await lookup(owner, repo, env, ctx); } catch { return fallback(); }
   if (info.missing || info.private) return fallback();
   const headers = { 'content-type': 'image/png', 'cache-control': 'public, max-age=3600' };
+  const by = new URL(req.url).searchParams.get('by');
+  if (by) return personCard(info, by, new URL(req.url).searchParams.has('most'), req, env, ctx);
   const hit = await env.CITIES.get(cardKey(info));
   if (hit) return new Response(hit.body, { headers });
   if (!env.BROWSER || !(await env.CITIES.head(cityKey(info)))) return fallback();
@@ -153,6 +163,42 @@ async function card(owner, repo, req, env, ctx) {
     if (done) png = await done.arrayBuffer();
   }
   return png && png !== BUSY ? new Response(png, { headers }) : fallback();
+}
+
+// One person's card. Drawn when first asked for (there's one per person, too many to draw ahead; the
+// page asks for it as soon as someone opens the share dialog on their buildings, so it's ready by the
+// time the link is posted), and only for someone who built part of a city that has been built.
+async function personCard(info, by, most, req, env, ctx) {
+  const repoCard = () => Response.redirect(new URL(`/api/card/${info.full}.png`, req.url).toString(), 302);
+  const headers = { 'content-type': 'image/png', 'cache-control': 'public, max-age=3600' };
+  if (by.length > 200) return repoCard();
+  const who = { by, most, key: await personKey(info, { by, most }) };
+  const hit = await env.CITIES.get(who.key);
+  if (hit) return new Response(hit.body, { headers });
+  const city = env.BROWSER && await env.CITIES.get(cityKey(info));
+  if (!city) return repoCard();
+  const { authors = [], faces = [] } = await city.json();
+  const k = authors.indexOf(by);
+  if (k < 0) return repoCard();
+  who.face = await faceOf(info, faces[k], env).catch(() => null);
+  let png = await drawOnce(info, req.url, env, who);
+  for (let i = 0; png === BUSY && i < 12; i++) {
+    await sleep(2000);
+    const done = await env.CITIES.get(who.key);
+    if (done) png = await done.arrayBuffer();
+  }
+  return png && png !== BUSY ? new Response(png, { headers }) : repoCard();
+}
+// "login/id" for a person's GitHub account, from the account that made a commit of theirs: the page
+// draws their avatar from it (it can't ask GitHub itself in the headless browser: no token there)
+async function faceOf(info, face, env) {
+  if (!face?.c) return null;
+  const r = await fetch(`https://api.github.com/repos/${info.full}/commits/${face.c}`, {
+    headers: { 'user-agent': 'gitropolis', accept: 'application/vnd.github+json', ...(env.GITHUB_TOKEN && { authorization: `Bearer ${env.GITHUB_TOKEN}` }) },
+  });
+  if (!r.ok) return null;
+  const a = (await r.json()).author;
+  return a?.login && Number.isInteger(a.id) ? `${a.login}/${a.id}` : null;
 }
 
 // what a badge needs to know about a built city, kept beside it (a city file can run to megabytes),
@@ -198,18 +244,23 @@ async function badge(owner, repo, url, env, ctx) {
 // /owner/repo: the page, with link-preview tags for this repo
 async function page(owner, repo, req, env) {
   const res = await env.ASSETS.fetch(new Request(new URL('/', req.url), req));
-  const name = `${owner}/${repo}`, url = new URL(`/${name}`, req.url).toString();
-  const image = new URL(`/api/card/${name}.png`, req.url).toString();
-  const desc = `github.com/${name} as a pixel-art city, built from its code and git history.`;
+  // ?by=Name: a link to one person's part, previewed with their card
+  const asked = new URL(req.url).searchParams, by = asked.get('by')?.slice(0, 200), most = by && asked.has('most');
+  const q = by ? `?${new URLSearchParams({ by, ...(most && { most: '' }) })}`.replace(/=$/, '') : '';
+  const name = `${owner}/${repo}`, url = new URL(`/${name}${q}`, req.url).toString();
+  const image = new URL(`/api/card/${name}.png${q}`, req.url).toString();
+  const desc = by ? `${by}'s buildings in github.com/${name}, a pixel-art city built from its code and git history.`
+    : `github.com/${name} as a pixel-art city, built from its code and git history.`;
+  const title = by ? `${by} in ${name} · gitropolis` : `${name} · gitropolis`;
   const tags = [
     ['property', 'og:type', 'website'], ['property', 'og:site_name', 'gitropolis'], ['property', 'og:url', url],
-    ['property', 'og:title', `${name} · gitropolis`], ['property', 'og:description', desc],
+    ['property', 'og:title', title], ['property', 'og:description', desc],
     ['property', 'og:image', image], ['property', 'og:image:width', '2400'], ['property', 'og:image:height', '1260'],
-    ['name', 'twitter:card', 'summary_large_image'], ['name', 'twitter:title', `${name} · gitropolis`],
+    ['name', 'twitter:card', 'summary_large_image'], ['name', 'twitter:title', title],
     ['name', 'twitter:description', desc], ['name', 'twitter:image', image], ['name', 'description', desc],
   ].map(([attr, k, v]) => `<meta ${attr}="${k}" content="${esc(v)}">`).join('');
   return new HTMLRewriter()
-    .on('title', { element(e) { e.setInnerContent(`${name} · gitropolis`); } })
+    .on('title', { element(e) { e.setInnerContent(title); } })
     .on('meta[property^="og:"], meta[name^="twitter:"], meta[name="description"]', { element(e) { e.remove(); } }) // the front page's
     .on('head', { element(e) { e.append(tags, { html: true }); } })
     .transform(res);

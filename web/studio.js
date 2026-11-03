@@ -356,7 +356,7 @@ export function buildStudio(ctx) {
     transformed *= step(0.001, grow);`;
   const decl = `attribute vec4 aInfo; attribute float aDied, aHeat, aFocus; uniform float uTimeline;`;
   mat.onBeforeCompile = sh => {
-    Object.assign(sh.uniforms, { uTimeline: shared.uTimeline, uTime: shared.uTime, uFocus: shared.uFocus, uHover: shared.uHover,
+    Object.assign(sh.uniforms, { uTimeline: shared.uTimeline, uTime: shared.uTime, uFocus: shared.uFocus, uHover: shared.uHover, uLit: shared.uLit,
       uWin: { value: unit / 7 }, uWinColor: { value: new THREE.Color(S.windowColor || '#ffffff') }, uWindows: { value: S.windows },
       uAccent: { value: accent } });
     sh.vertexShader = sh.vertexShader
@@ -371,11 +371,13 @@ export function buildStudio(ctx) {
         vInfo = aInfo; vHeat = aHeat; vFocus = aFocus; vId = float(gl_InstanceID);`);
     sh.fragmentShader = sh.fragmentShader
       .replace('#include <common>', `#include <common>
-        uniform float uTimeline, uTime, uFocus, uHover, uWin, uWindows; uniform vec3 uWinColor, uAccent;
+        uniform float uTimeline, uTime, uFocus, uHover, uLit, uWin, uWindows; uniform vec3 uWinColor, uAccent;
         varying vec3 vWP, vObj, vSz, vON; varying vec4 vInfo; varying float vHeat, vFocus, vId;
         float hash2(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }`)
       .replace('#include <color_fragment>', `#include <color_fragment>
-        if (uFocus >= 0.0) diffuseColor.rgb *= mix(0.35, 1.0, vFocus);
+        // one person's buildings lit: the rest fade to pale ghosts (darkened, they'd read as dark buildings)
+        float lum = dot(diffuseColor.rgb, vec3(0.299, 0.587, 0.114));
+        if (uFocus >= 0.0) diffuseColor.rgb = uLit > 0.5 ? mix(mix(mix(diffuseColor.rgb, vec3(lum), 0.8), vec3(0.76, 0.75, 0.73), 0.4), mix(vec3(lum), diffuseColor.rgb, 1.3) * 1.08, vFocus) : diffuseColor.rgb * mix(0.35, 1.0, vFocus);
         if (abs(vId - uHover) < 0.5) diffuseColor.rgb = mix(diffuseColor.rgb, uAccent, 0.35);
         diffuseColor.rgb = mix(diffuseColor.rgb, uAccent, vHeat * 0.6);`)
       .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>

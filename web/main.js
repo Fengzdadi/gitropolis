@@ -252,18 +252,18 @@ if (PIXEL) {
 // margins: centre it on screen, leave a margin, keep clear of the title above.
 const ISO_DIR = (() => { const A = Math.PI / 4, E = Math.PI / 6; return new THREE.Vector3(Math.cos(E) * Math.cos(A), Math.sin(E), Math.cos(E) * Math.sin(A)); })();
 let FIT = null;
-function fitFrame(aspect = viewW() / viewH(), bands = clearBands()) {
+function fitFrame(aspect = viewW() / viewH(), bands = clearBands(), only = null) { // (only: frame just these buildings)
   const cam = camera.clone();
   cam.position.copy(ISO_DIR).multiplyScalar(SIZE * 2); cam.lookAt(0, 0, 0); cam.updateMatrixWorld();
   const inv = cam.matrixWorldInverse, v = new THREE.Vector3();
   let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
   const add = (x, y, z) => { v.set(x, y, z).applyMatrix4(inv); x0 = Math.min(x0, v.x); x1 = Math.max(x1, v.x); y0 = Math.min(y0, v.y); y1 = Math.max(y1, v.y); };
   B.forEach((b, i) => {
-    if (!(b.w > 0.01) || !Number.isFinite(b.x)) return;
+    if (!(b.w > 0.01) || !Number.isFinite(b.x) || only && !only.has(i)) return;
     for (const sx of [-0.5, 0.5]) for (const sz of [-0.5, 0.5]) add(b.x + sx * b.w, b.y, b.z + sz * b.d);
     add(b.x, b.y + b.h, b.z);
   });
-  for (const bl of layout?.blocks || []) for (const [x, z] of bl.poly) add(x, plateStep + (bl.h || 0), z);
+  if (!only) for (const bl of layout?.blocks || []) for (const [x, z] of bl.poly) add(x, plateStep + (bl.h || 0), z);
   if (!Number.isFinite(x0)) return { center: new THREE.Vector3(), zoom: 1 };
   const { top, bottom, left = 0, right = 0 } = bands;
   // the city may use 90% of the width and what's left of the height between the title and the timeline
@@ -517,6 +517,51 @@ const buildings = studio ? studio.buildings : (() => {
   mesh.frustumCulled = false;
   scene.add(mesh);
   return mesh;
+})();
+// ---- markers: with one person's buildings lit, a little yellow arrow bobs over each of them, so a
+// handful of small buildings in a big city are found at a glance (and on their share card too: these
+// are in the scene, not on the page). Not when they have so many the city would be covered in them.
+const MARKS_UPTO = 24;
+const marks = (() => {
+  const pos = new Float32Array(N * 3), life = new Float32Array(N * 2);
+  B.forEach((b, i) => { pos.set([b.x || 0, (b.y || 0) + (b.h || 0), b.z || 0], i * 3); life.set([b.born ?? 0, b.died ?? 2], i * 2); });
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  geo.setAttribute('aLife', new THREE.BufferAttribute(life, 2));
+  geo.setAttribute('aOn', new THREE.BufferAttribute(focusAttr, 1).setUsage(THREE.DynamicDrawUsage));
+  const pts = new THREE.Points(geo, new THREE.ShaderMaterial({
+    uniforms: { ...shared, uMarks: { value: 0 }, uArt: { value: PIXEL ? 1 : 0 }, uSize: { value: unit * 1.0 },
+      uFill: { value: new THREE.Color('#f2c14e') }, uInk: { value: new THREE.Color('#14121c') } },
+    depthTest: false, depthWrite: false, transparent: true,
+    vertexShader: GLSL_COMMON + `uniform float uMarks, uArt, uSize, uPx, uLit; attribute vec2 aLife; attribute float aOn;
+      void main(){
+        bool up = uMarks > 0.5 && uLit > 0.5 && aOn > 0.5 && uTimeline >= aLife.x * 0.97 + 0.03 && uTimeline < aLife.y * 0.97;
+        if (!up) { gl_Position = vec4(0., 0., -2., 1.); return; }
+        // it floats a little above the roof, bobbing (pixel art: in whole art pixels)
+        float bob = sin(uTime * 3.0 + position.x * 0.7) * 0.5 + 0.5;
+        vec3 p = position + vec3(0.0, uArt > 0.5 ? uPx * (14.0 + 2.0 * floor(bob * 3.0)) : uSize * (0.5 + bob * 0.3), 0.0);
+        vec4 mv = viewMatrix * modelMatrix * vec4(p, 1.);
+        gl_PointSize = uArt > 0.5 ? 18.0 : uSize * uPixel / -mv.z; // (pixel art: each of its 9×9 pixels two art pixels wide)
+        gl_Position = projectionMatrix * mv;
+      }`,
+    fragmentShader: `uniform vec3 uFill, uInk;
+      // a 9×9 pixel arrow pointing down, inked round its edge
+      bool inside(float x, float y) {
+        if (x < 0.0 || x > 8.0 || y < 0.0 || y > 7.0) return false;
+        float w = y <= 3.0 ? 4.0 : 7.0 - y;
+        return abs(x - 4.0) <= w && !(y == 0.0 && abs(x - 4.0) == 4.0);
+      }
+      void main(){
+        vec2 c = floor(gl_PointCoord * 9.0);
+        if (!inside(c.x, c.y)) discard;
+        bool edge = !(inside(c.x - 1.0, c.y) && inside(c.x + 1.0, c.y) && inside(c.x, c.y - 1.0) && inside(c.x, c.y + 1.0));
+        gl_FragColor = vec4(edge ? uInk : uFill, 1.0);
+      }`,
+  }));
+  pts.frustumCulled = false;
+  pts.renderOrder = 10;
+  scene.add(pts);
+  return pts;
 })();
 // ---- the lots the deleted files leave (neon): dark rubble on a slab, its edge faintly lit
 let rubble = studio?.rubble || null;
@@ -848,16 +893,26 @@ $('#share').onclick = async () => {
     setTimeout(() => { $('#share').textContent = 'share'; }, 1800);
     return;
   }
-  openShareDialog(shareInfo());
+  const share = shareInfo();
+  // a person's link previews with their card, drawn when first asked for: ask now, so it's ready
+  // by the time the link is posted
+  if (route && share.info.person) fetch(`/api/card/${route[1]}/${route[2]}.png${new URL(share.link).search}`).catch(() => {});
+  openShareDialog(share);
 };
 // what a share card or film says about this city
 function shareInfo() {
-  const [owner, repo] = route ? [route[1], route[2]] : data.name.includes('/') ? data.name.split('/').slice(-2) : ['', data.name];
+  let [owner, repo] = route ? [route[1], route[2]] : data.name.includes('/') ? data.name.split('/').slice(-2) : ['', data.name];
   const year = t => new Date(t * 1000).getFullYear();
+  // with someone's buildings lit, the card is theirs, and its link opens the city on them (on
+  // gitropolis.dev, which a city scanned here can be seen on too when it came from GitHub)
+  const p = lit >= 0 ? personInfo(lit) : null;
+  const home = route ? shareLink : data.github && `https://gitropolis.dev/${data.github}`;
+  const link = p && home ? `${home}?${new URLSearchParams({ by: authors[lit], ...(mode === 'm' && { most: '' }) })}`.replace(/=$/, '') : shareLink;
+  if (p && !route && data.github) [owner, repo] = data.github.split('/');
   return {
-    link: shareLink,
-    badge: route ? shareLink : null,
-    filename: `gitropolis-${owner ? owner + '-' : ''}${repo}`.replace(/[^\w.-]+/g, '-'),
+    link,
+    badge: route && !p ? shareLink : null,
+    filename: `gitropolis-${owner ? owner + '-' : ''}${repo}${p ? `-by-${p.name}` : ''}`.replace(/[^\w.-]+/g, '-'),
     capture: captureCity,
     stage: stageCity,
     info: {
@@ -872,7 +927,8 @@ function shareInfo() {
         const max = Math.max(1, ...bins);
         return bins.map(v => v ? 0.15 + 0.85 * Math.sqrt(v / max) : 0);
       },
-      url: shareLink.replace(/^https:\/\//, ''),
+      url: link.replace(/^https:\/\//, ''),
+      ...(p && { person: p }),
     },
   };
 }
@@ -885,9 +941,19 @@ function stageCity(artW, artH, bands) {
   staged = true; playing = false;
   camera.left = -ISO_H * artW / artH; camera.right = -camera.left;
   const fit = fitFrame(artW / artH, bands);
+  // a person's card frames their buildings (though never so close the city around them is lost)
+  if (lit >= 0) {
+    const only = new Set();
+    for (let i = 0; i < LIVE; i++) if (focusAttr[i]) only.add(i);
+    const theirs = fitFrame(artW / artH, bands, only);
+    Object.assign(fit, { center: theirs.center, zoom: Math.min(theirs.zoom, fit.zoom * 2.5) });
+  }
   aimPixel(fit.center, fit.zoom);
-  shared.uFocus.value = -1; if (shared.uHover) shared.uHover.value = -1;
-  const calm = () => { heat.fill(0); buildings.geometry.attributes.aHeat.needsUpdate = true; };
+  // someone's buildings lit stay lit: the card is theirs (any other focus is the live view's own)
+  if (lit < 0) shared.uFocus.value = -1;
+  if (shared.uHover) shared.uHover.value = -1;
+  // (and the pixel city's per-building state brought up to date: a card drawn headless has had no frame yet)
+  const calm = () => { heat.fill(0); buildings.geometry.attributes.aHeat.needsUpdate = true; studio?.update?.(); };
   return {
     // the finished city, no commit flashes
     still() { setTimeline(1); calm(); return pix.capture(artW, artH); },
@@ -1085,11 +1151,14 @@ renderer.domElement.addEventListener('pointermove', e => {
   // built from text nodes: a file name is data, never markup (a repo can name a file <img onerror=…>)
   const row = (...parts) => { const d = document.createElement('div'); for (const [k, v] of parts) { if (k) { const s = document.createElement('span'); s.textContent = k; d.append(s, ' '); } d.append(v); } return d; };
   const name = document.createElement('b'); name.textContent = f.p;
+  // a person: their face and their name
+  const who = (k, a) => { const d = row([k, authors[a]]); d.classList.add('who'); d.insertBefore(faceEl(a), d.lastChild); return d; };
   tip.replaceChildren(name,
     row(['lines', `${f.loc.toLocaleString()} · `], ['commits', String(f.churn)]),
     ...(f.gone ? [] : [row(['imports', `${f.imp.length} · `], ['imported by', String(inDeg[hoverId])])]),
     row(['born', `${fmtDate(f.born)} · `], ['last edit', fmtDate(f.last)]),
-    ...(f.b !== undefined && authors[f.b] !== undefined ? [row(['built by', authors[f.b]])] : []),
+    ...(f.b !== undefined ? [who('built by', f.b)] : []),
+    ...(f.m !== undefined ? [who('most commits', f.m)] : []),
     ...(f.gone ? [row(['deleted', fmtDate(f.died)])] : []),
     ...(hoverLabel >= 0 ? [row(['district', `${labelSource[hoverLabel].path} · ${labelMembers[hoverLabel].filter(i => i < LIVE).length.toLocaleString()} files`])] : []));
   tip.style.display = 'block';
@@ -1114,76 +1183,241 @@ function focus(id) {
   }
   buildings.geometry.attributes.aFocus.needsUpdate = true;
 }
-addEventListener('keydown', e => { if (e.code === 'Escape') focus(-1); });
+addEventListener('keydown', e => { if (e.code === 'Escape' && !whoEscape()) focus(-1); });
 
-// ---- who built what: one builder's buildings lit, the rest of the city receding (a city scanned
-// before builders were recorded has none, and one built by one person has nothing to pick between)
+// ---- who built what: everyone who built the city, and one person's buildings lit, the rest of the
+// city fading to ghosts, with a card saying what they built and where. (A city scanned before builders
+// were recorded has none, and one built by one person has nothing to pick between.)
 const authors = data.authors || [];
-const builtBy = authors.map(() => 0);
-for (let i = 0; i < LIVE; i++) if (files[i].b !== undefined) builtBy[files[i].b]++;
-const builders = authors.map((a, k) => k).filter(k => builtBy[k]).sort((x, y) => builtBy[y] - builtBy[x] || x - y);
-const whoBtn = $('#who'), whoPanel = $('#builders'), whoFind = $('#who-find'), whoList = $('#builders .list');
-const WHO_ROWS = 60; // the rest are a search away
+const faces = data.faces || [];
+const OWN = { b: f => f.b, m: f => f.m ?? f.b }; // whose a building is: who built it, or who made the most of its commits
+const tally = {};
+for (const m in OWN) {
+  tally[m] = authors.map(() => 0);
+  for (let i = 0; i < LIVE; i++) { const k = OWN[m](files[i]); if (k !== undefined) tally[m][k]++; }
+}
+const people = authors.map((a, k) => k).filter(k => tally.b[k] || tally.m[k])
+  .sort((x, y) => tally.b[y] - tally.b[x] || tally.m[y] - tally.m[x] || x - y);
+let mode = params.has('most') ? 'm' : 'b', whoOpen = false;
+const whoBtn = $('#who'), whoPanel = $('#builders'), whoFind = $('#who-find'), whoBody = $('#builders .body');
+const whoBack = $('#builders .back'), whoTitle = $('#builders .title');
+const WHO_ROWS = 400; // the rest are a search away
 function light(k) {
   focus(-1);
-  if (k < 0) return;
-  lit = k;
-  // focused on no building in particular (N is none of them): no arcs, only the builder's buildings stand out
-  shared.uFocus.value = N; shared.uLit.value = 1;
-  for (let i = 0; i < N; i++) focusAttr[i] = files[i].b === k ? 1 : 0;
-  buildings.geometry.attributes.aFocus.needsUpdate = true;
+  if (k >= 0) {
+    lit = k;
+    // focused on no building in particular (N is none of them): no arcs, only their buildings stand out
+    shared.uFocus.value = N; shared.uLit.value = 1;
+    let n = 0;
+    for (let i = 0; i < N; i++) { focusAttr[i] = OWN[mode](files[i]) === k ? 1 : 0; n += focusAttr[i]; }
+    buildings.geometry.attributes.aFocus.needsUpdate = true;
+    // markers over them when they're few; and they flash, as when a commit touches them, to catch the eye
+    marks.material.uniforms.uMarks.value = n <= MARKS_UPTO ? 1 : 0;
+    marks.geometry.attributes.aOn.needsUpdate = true;
+    for (let i = 0; i < N; i++) if (focusAttr[i]) heat[i] = 1;
+  }
+  frameWho();
   syncWho();
-  note(`${authors[k]} built ${builtBy[k].toLocaleString()} of ${LIVE.toLocaleString()} buildings · Esc to clear`);
+}
+function showWho(open) {
+  whoOpen = open;
+  whoPanel.hidden = !open;
+  whoBtn.setAttribute('aria-expanded', String(open));
+  if (!open && lit >= 0) light(-1); else syncWho();
+  if (open && lit < 0 && !whoFind.hidden && matchMedia('(pointer: fine)').matches) whoFind.focus();
+}
+function setMode(m) {
+  mode = m;
+  if (lit >= 0) light(tally[m][lit] ? lit : -1);
+}
+// the pixel city's camera glides to frame the lit person's buildings (clear of the panel), and back
+// to the whole city after
+let glideId = 0;
+function frameWho() {
+  if (!PIXEL || REC) return;
+  if (!FIT || FIT.aspect !== viewW() / viewH() || FIT.h !== viewH()) FIT = fitFrame();
+  let to = FIT;
+  if (lit >= 0) {
+    const only = new Set();
+    for (let i = 0; i < LIVE; i++) if (focusAttr[i]) only.add(i);
+    const r = whoPanel.getBoundingClientRect();
+    to = fitFrame(viewW() / viewH(), { ...clearBands(), right: r.width ? (innerWidth - r.left + 16) / innerWidth : 0 }, only);
+    to.zoom = Math.min(to.zoom, FIT.zoom * 3); // (one small building isn't a close-up)
+  }
+  const c0 = controls.target.clone(), z0 = camera.zoom, t0 = performance.now(), id = ++glideId;
+  const step = () => {
+    if (id !== glideId) return;
+    const u = Math.min(1, (performance.now() - t0) / 700), e = u * u * (3 - 2 * u);
+    aimPixel(c0.clone().lerp(to.center, e), z0 + (to.zoom - z0) * e);
+    if (u < 1) requestAnimationFrame(step);
+  };
+  step();
 }
 function syncWho() {
-  whoBtn.classList.toggle('on', lit >= 0);
-  whoBtn.title = lit >= 0 ? `Lit: ${authors[lit]}'s buildings (B to pick another)` : 'Who built what (B)';
-  for (const el of whoList.children) el.classList?.toggle('on', +el.dataset.k === lit);
+  whoBtn.classList.toggle('on', whoOpen || lit >= 0);
+  whoBtn.title = 'Who built what (B)';
+  whoBack.hidden = lit < 0;
+  whoTitle.textContent = lit >= 0 ? '' : 'who built what';
+  whoFind.hidden = lit >= 0 || people.length <= 8;
+  if (lit >= 0) cardWho(lit); else listWho();
   // the address says whose buildings are lit, so the link shows them too
   if (REC) return;
   const u = new URL(location.href);
   if (lit >= 0) u.searchParams.set('by', authors[lit]); else u.searchParams.delete('by');
-  history.replaceState(history.state, '', u);
+  if (lit >= 0 && mode === 'm') u.searchParams.set('most', ''); else u.searchParams.delete('most');
+  history.replaceState(history.state, '', u.toString().replace(/([?&]most)=(?=&|$)/, '$1'));
 }
+// built from text nodes throughout: a name is data, never markup
+const tag = (name, cls, text) => { const e = document.createElement(name); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; };
 function listWho() {
   const q = whoFind.value.trim().toLowerCase();
-  const match = q ? builders.filter(k => authors[k].toLowerCase().includes(q)) : builders;
-  // built from text nodes: a name is data, never markup
-  const rows = match.slice(0, WHO_ROWS).map(k => {
-    const b = document.createElement('button'), name = document.createElement('span'), n = document.createElement('span');
-    name.textContent = authors[k]; n.textContent = builtBy[k].toLocaleString();
-    b.dataset.k = k; b.title = `Light up ${authors[k]}'s buildings`;
-    b.classList.toggle('on', k === lit);
-    b.append(name, n);
-    b.onclick = () => { light(k === lit ? -1 : k); showWho(false); };
-    return b;
+  const all = q ? people.filter(k => authors[k].toLowerCase().includes(q)) : people, match = all.slice(0, WHO_ROWS);
+  const rows = match.map(k => {
+    const r = tag('div', 'row'), b = tag('button');
+    b.title = `Light up ${authors[k]}'s buildings`;
+    b.append(tag('span', '', authors[k]), tag('span', '', tally.b[k] ? tally.b[k].toLocaleString() : '–'));
+    b.onclick = () => light(k);
+    r.append(faceEl(k, true), b);
+    return r;
   });
-  if (match.length > WHO_ROWS) { const m = document.createElement('div'); m.className = 'more'; m.textContent = `and ${(match.length - WHO_ROWS).toLocaleString()} more: type a name`; rows.push(m); }
-  if (!match.length) { const m = document.createElement('div'); m.className = 'more'; m.textContent = 'no builder by that name'; rows.push(m); }
-  whoList.replaceChildren(...rows);
+  if (all.length > match.length) rows.push(tag('div', 'more', `and ${(all.length - match.length).toLocaleString()} more: type a name`));
+  if (q && !match.length) rows.push(tag('div', 'more', 'nobody by that name'));
+  const sub = tag('div', 'sum', `${people.length.toLocaleString()} people · buildings each one added`);
+  const list = tag('div', 'list');
+  list.append(...rows);
+  whoBody.replaceChildren(sub, list);
 }
-function showWho(open) {
-  whoPanel.hidden = !open;
-  whoBtn.setAttribute('aria-expanded', String(open));
-  if (!open) return;
-  listWho();
-  if (!whoFind.hidden) whoFind.focus();
+const ym = t => fmtDate(t);
+function cardWho(k) {
+  const f = faces[k] || {};
+  const top = tag('div', 'who');
+  const id = tag('div', 'id');
+  id.append(tag('b', '', authors[k]));
+  const gh = tag('a', 'gh'); gh.hidden = true; id.append(gh);
+  whoIs(k).then(v => { if (!v) return; gh.textContent = `@${v.login} ↗`; gh.href = `https://github.com/${encodeURIComponent(v.login)}`; gh.target = '_blank'; gh.rel = 'noopener'; gh.hidden = false; });
+  if (f.n) id.append(tag('small', '', `${f.n.toLocaleString()} commit${f.n > 1 ? 's' : ''} · ${ym(f.t[0])}${f.t[1] !== f.t[0] ? ` → ${ym(f.t[1])}` : ''}`));
+  top.append(faceEl(k), id);
+  // both counts side by side; the one picked says which of their buildings are lit
+  const stats = tag('div', 'stats');
+  stats.setAttribute('role', 'group'); stats.setAttribute('aria-label', 'Light up the buildings they');
+  for (const [m, text] of [['b', 'built'], ['m', 'most commits']]) {
+    const b = tag('button');
+    b.append(tag('span', '', tally[m][k].toLocaleString()), tag('small', '', text));
+    b.title = m === 'b' ? 'Buildings whose file they added' : 'Buildings where they made the most of the commits';
+    b.setAttribute('aria-pressed', String(m === mode));
+    b.onclick = () => setMode(m);
+    stats.append(b);
+  }
+  const spots = whereOf(k).map(([d, c]) => `${d >= 0 ? labelSource[d].data.name : 'elsewhere'} ${c}`);
+  const share = tag('button', 'share', 'share their buildings');
+  share.onclick = () => $('#share').click();
+  whoBody.replaceChildren(top, stats, tag('div', 'sum', `of ${LIVE.toLocaleString()} buildings${spots.length ? ` · in ${spots.join(' · ')}` : ''}`),
+    ...(pix && layout ? [share] : []));
 }
-if (builders.length > 1) {
+// what a share card says about one person
+function personInfo(k) {
+  const f = faces[k] || {}, v = known.get(k);
+  const year = t => new Date(t * 1000).getFullYear();
+  return {
+    name: authors[k], initial: (authors[k].match(/[\p{L}\p{N}]/u)?.[0] ?? '?').toUpperCase(),
+    login: v?.login, img: v?.img,
+    n: tally[mode][k], of: LIVE, verb: mode === 'b' ? 'built' : 'made the most commits on',
+    where: whereOf(k).map(([d, c]) => `${d >= 0 ? labelSource[d].data.name : 'elsewhere'} ${c}`).join(' · ') || null,
+    commits: f.n || 0, years: f.t ? f.t.map(year) : [year(data.start), year(data.end)],
+  };
+}
+// the districts someone's buildings stand in, most first (none in a city without named districts)
+function whereOf(k) {
+  const where = new Map();
+  for (let i = 0; i < LIVE; i++) if (OWN[mode](files[i]) === k) where.set(fileLabel[i], (where.get(fileLabel[i]) || 0) + 1);
+  return [...where].some(([d]) => d >= 0) ? [...where].sort((x, y) => y[1] - x[1]).slice(0, 4) : [];
+}
+
+// Faces: a GitHub avatar, linking to their profile, for an author GitHub knows; otherwise their initial.
+// A login comes from the scan (a no-reply email names it) or from GitHub, asked once which account made
+// a commit of theirs (and remembered: GitHub lets a visitor ask 60 times an hour)
+const GH = data.github || (route && `${route[1]}/${route[2]}`);
+const known = new Map(); // author -> { login, img } | null, once settled
+const asking = new Map();
+let ghTired = false; // GitHub said no more for now
+function whoIs(k) {
+  if (known.has(k)) return Promise.resolve(known.get(k));
+  if (asking.has(k)) return asking.get(k);
+  const f = faces[k], settle = v => { known.set(k, v); return v; };
+  // a card drawn headless for a link preview is handed the face of the person it's for ("login/id"),
+  // looked up by the site; it asks GitHub nothing itself
+  if (params.get('card')) {
+    const m = authors[k] === params.get('by') && /^([A-Za-z0-9-]{1,39})\/(\d{1,12})$/.exec(params.get('face') || '');
+    return Promise.resolve(settle(m ? { login: m[1], img: `https://avatars.githubusercontent.com/u/${m[2]}?v=4&s=64` } : null));
+  }
+  if (f?.u) return Promise.resolve(settle({ login: f.u, img: `https://avatars.githubusercontent.com/${encodeURIComponent(f.u)}?s=64` }));
+  if (REC || !GH || !f?.c || ghTired) return Promise.resolve(null);
+  const key = `gitropolis.face:${GH}:${f.c}`;
+  try { const v = localStorage.getItem(key); if (v !== null) return Promise.resolve(settle(v ? JSON.parse(v) : null)); } catch {}
+  const p = fetch(`https://api.github.com/repos/${GH}/commits/${f.c}`, { headers: { Accept: 'application/vnd.github+json' } })
+    .then(async r => {
+      if (r.status === 403 || r.status === 429) { ghTired = true; asking.delete(k); return null; }
+      const a = r.ok ? (await r.json()).author : null;
+      const v = a?.login && /^https:\/\/avatars\.githubusercontent\.com\//.test(a.avatar_url)
+        ? { login: a.login, img: `${a.avatar_url}${a.avatar_url.includes('?') ? '&' : '?'}s=64` } : null;
+      try { localStorage.setItem(key, v ? JSON.stringify(v) : ''); } catch {}
+      return settle(v);
+    })
+    .catch(() => { asking.delete(k); return null; });
+  asking.set(k, p);
+  return p;
+}
+// a face, linking to GitHub once it's known. In a list (lazy) it's only asked for once it scrolls into
+// view: GitHub is asked about everyone seen
+const sighted = new IntersectionObserver(es => { for (const e of es) if (e.isIntersecting) { sighted.unobserve(e.target); e.target.ask(); } });
+function faceEl(k, lazy = false) {
+  const el = document.createElement('a');
+  el.className = 'face';
+  el.textContent = (authors[k].match(/[\p{L}\p{N}]/u)?.[0] ?? '?').toUpperCase();
+  const show = v => {
+    if (!v) return;
+    const img = new Image();
+    img.alt = ''; img.src = v.img; img.referrerPolicy = 'no-referrer';
+    // (once one has loaded, it's there at once: the tooltip is made anew on every move)
+    if (v.loaded) el.replaceChildren(img); else img.onload = () => { v.loaded = true; el.replaceChildren(img); };
+    el.href = `https://github.com/${encodeURIComponent(v.login)}`; el.target = '_blank'; el.rel = 'noopener';
+    el.title = `${v.login} on GitHub`;
+  };
+  if (known.has(k)) show(known.get(k));
+  else if (lazy) { el.ask = () => whoIs(k).then(show); sighted.observe(el); }
+  else whoIs(k).then(show);
+  return el;
+}
+
+if (people.length > 1) {
   whoBtn.hidden = false;
-  whoFind.hidden = builders.length <= 8;
-  whoBtn.onclick = () => showWho(whoPanel.hidden);
+  whoBtn.onclick = () => showWho(!whoOpen);
+  whoBack.onclick = () => light(-1);
+  $('#builders .x').onclick = () => showWho(false);
   whoFind.oninput = listWho;
-  whoFind.onkeydown = e => { if (e.key === 'Enter') whoList.querySelector('button')?.click(); };
+  whoFind.onkeydown = e => { if (e.key === 'Enter') whoBody.querySelector('.row button')?.click(); };
   addEventListener('keydown', e => {
-    if (e.code === 'Escape') showWho(false);
     if (e.code !== 'KeyB' || e.metaKey || e.ctrlKey || e.target.closest?.('input, textarea')) return;
     e.preventDefault(); // (or the b lands in the search box it opens)
-    showWho(whoPanel.hidden);
+    showWho(!whoOpen);
   });
-  renderer.domElement.addEventListener('pointerdown', () => showWho(false));
   const k = authors.indexOf(params.get('by'));
-  if (k >= 0 && builtBy[k]) light(k);
+  if (k >= 0 && tally[mode][k]) { showWho(true); light(k); }
+  // a sign names who founded its district: whoever built the most of it
+  labelEls.forEach(({ el }, d) => {
+    const n = new Map();
+    for (const i of labelMembers[d]) if (i < LIVE && files[i].b !== undefined) n.set(files[i].b, (n.get(files[i].b) || 0) + 1);
+    const [top] = [...n].sort((x, y) => y[1] - x[1])[0] ?? [];
+    if (top !== undefined) el.prepend(faceEl(top));
+  });
+}
+// Esc steps back: from one person lit to everyone, and from everyone to the city (a focused building
+// first lets go of its focus)
+function whoEscape() {
+  if (lit >= 0) { light(-1); return true; }
+  if (!whoOpen || shared.uFocus.value >= 0) return false;
+  showWho(false);
+  return true;
 }
 
 

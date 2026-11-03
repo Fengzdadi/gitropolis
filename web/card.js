@@ -1,5 +1,6 @@
 // Share cards: the finished city as a poster, sized for where it's going (a link preview, a square
 // post, a story), with the repo's name, what kind of city it is, its history and where to see it.
+// Or one person's part in it: their buildings lit in the city, their face, how many they built and where.
 // The city is rendered off screen at art resolution and every art pixel becomes a 2×2 block, so the
 // pixels survive a social network's JPEG recompression and stay crisp on phone screens.
 import { canvasPNG } from './png.js';
@@ -29,6 +30,32 @@ async function fontsReady() {
   const sheet = document.getElementById('webfonts'), t0 = performance.now();
   while (sheet && !sheet.dataset.done && performance.now() - t0 < 4000) await new Promise(r => setTimeout(r, 50));
   await Promise.race([Promise.all([document.fonts.load(`600 40px ${FONT}`), document.fonts.load(`400 20px ${FONT}`)]), new Promise(r => setTimeout(r, 2500))]);
+}
+
+// a person's face as pixel art: their avatar shrunk to FACE × FACE (null when it can't be had: no
+// avatar, offline, or a host that won't let a canvas read it)
+const FACE = 24;
+function pixelFace(src) {
+  if (!src) return Promise.resolve(null);
+  return new Promise(resolve => {
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = () => {
+      const c = document.createElement('canvas');
+      c.width = c.height = FACE;
+      const g = c.getContext('2d');
+      g.imageSmoothingQuality = 'high';
+      g.drawImage(img, 0, 0, FACE, FACE);
+      try { g.getImageData(0, 0, 1, 1); resolve(c); } catch { resolve(null); }
+    };
+    img.onerror = () => resolve(null);
+    setTimeout(() => resolve(null), 4000);
+    img.src = src;
+  });
+}
+async function prepare(info) {
+  await fontsReady();
+  if (info.person && info.person.pix === undefined) info.person.pix = await pixelFace(info.person.img);
 }
 
 // where the text goes on a W × H design (and so the bands the city keeps clear of), and how to paint it
@@ -69,10 +96,87 @@ function layout(g, format, info, { W, H, full, scale }) {
     if (info.years[1] !== info.years[0]) text(String(info.years[1]), x + w, y + h + fs + 4, fs, SOFT, 400, 'right');
   };
   const statLine = info.stats.map(([n, w]) => `${n.toLocaleString('en')} ${w}`);
+  // a person's face, framed in ink: the pixel avatar, or their initial on grey
+  const face = (x, y, s) => {
+    const p = info.person;
+    g.fillStyle = INK; g.fillRect(x - BORDER, y - BORDER, s + BORDER * 2, s + BORDER * 2);
+    if (p.pix) { g.imageSmoothingEnabled = false; g.drawImage(p.pix, x, y, s, s); return; }
+    g.fillStyle = BAR_OFF; g.fillRect(x, y, s, s);
+    text(p.initial, x + s / 2, y + s * 0.72, Math.round(s * 0.55), INK, 600, 'center');
+  };
 
   // where the text goes, and so the band the city has to keep clear of
   let bands, paint;
-  if (full) {
+  if (info.person) {
+    // one person's part: who, how many of the city's buildings, in which repo, where in it
+    const p = info.person, num = p.n.toLocaleString('en'), of = `of ${p.of.toLocaleString('en')} buildings`;
+    const repo = info.owner ? `${info.owner}/${info.repo}` : info.repo;
+    const life = `${p.commits.toLocaleString('en')} commit${p.commits === 1 ? '' : 's'} · ${p.years[0]}${p.years[1] !== p.years[0] ? `–${p.years[1]}` : ''}`;
+    if (full) {
+      const z = n => Math.round(n * (scale || (format === 'story' ? 1.7 : format === 'square' ? 1.25 : 1.6)));
+      const fs = z(56), line = `${p.verb} ${num} ${of} in ${repo}`;
+      const np = fit(p.name, z(30), W * 0.55), lp = fit(line, z(18), W * 0.55, 400);
+      const tagW = fs + P * 3 + Math.max(width(p.name, np, 600), width(line, lp)), tagH = P * 2 + Math.max(fs, np + z(28));
+      const urlP = z(16), urlW = width(info.url, urlP, 600) + z(14) * 2, urlH = urlP + z(14) * 2;
+      bands = { top: 0, bottom: 0, fill: format === 'story' ? 2.8 : 1.8 };
+      paint = date => {
+        if (date) {
+          const dp = z(26), dw = width('0000-00', dp, 600) + z(14) * 2, dh = dp + z(14) * 2;
+          panel(W - M - dw, M, dw, dh);
+          text(date, W - M - z(14), M + z(14) + dp * 0.85, dp, INK, 600, 'right');
+        }
+        const x = M, y = H - M - tagH;
+        panel(x, y, tagW, tagH);
+        face(x + P, y + P, fs);
+        text(p.name, x + P * 2 + fs, y + P + np * 0.9, np, INK, 600);
+        text(line, x + P * 2 + fs, y + P + np + z(24), lp, SOFT);
+        panel(W - M - urlW, H - M - urlH, urlW, urlH);
+        text(info.url, W - M - z(14), H - M - z(14) - urlP * 0.15, urlP, INK, 600, 'right');
+      };
+    } else if (format === 'landscape') {
+      const PW = 384, iw = PW - P * 2, fs = 96;
+      bands = { left: (M + PW + 12) / W, right: 12 / W, top: 16 / H, bottom: 16 / H };
+      paint = () => {
+        panel(M, M, PW, H - M * 2);
+        const x = M + P; let y = M + P + BORDER;
+        face(x + BORDER, y, fs);
+        y += fs + 14;
+        const np = fit(p.name, 38, iw); y += np; text(p.name, x, y, np, INK, 600);
+        if (p.login) { y += 26; text(`@${p.login}`, x, y, 18, SOFT); }
+        y += 46; text(p.verb, x, y, 20, SOFT);
+        y += 62; text(num, x, y, 64, ACCENT, 600); text(` ${of}`, x + width(num, 64, 600), y, 20, SOFT);
+        y += 34; text('in', x, y, 20, SOFT);
+        text(repo, x + width('in ', 20), y, fit(repo, 24, iw - width('in ', 20)), INK, 600);
+        let b = H - M - P - 4;
+        text(info.url, x, b, fit(info.url, 20, iw, 600, 11), INK, 600);
+        b -= 30; text(life, x, b, fit(life, 17, iw, 400, 11), SOFT);
+        if (p.where) for (const l of wrap(p.where, 16, iw, 2).reverse()) { b -= 24; text(l, x, b, 16, SOFT); }
+      };
+    } else {
+      const story = format === 'story', big = story ? 1.7 : 1.2, iw = W - M * 2 - P * 2, z = n => Math.round(n * big);
+      const fs = z(84), np = fit(p.name, z(44), iw - fs - P);
+      const topH = P * 2 + fs + BORDER * 2;
+      const where = p.where ? wrap(p.where, z(16), iw, story ? 2 : 1) : [];
+      const botH = P * 2 + z(22) + z(76) + z(36) + where.length * z(24) + z(26) + z(40);
+      bands = { top: (M + topH + 12) / H, bottom: (M + botH + 12) / H };
+      paint = () => {
+        panel(M, M, W - M * 2, topH);
+        const x = M + P;
+        face(x + BORDER, M + P + BORDER, fs);
+        const tx = x + fs + P + BORDER * 2;
+        text(p.name, tx, M + P + fs * 0.45 + np * 0.35, np, INK, 600);
+        if (p.login) text(`@${p.login}`, tx, M + P + fs * 0.45 + np * 0.35 + z(30), z(18), SOFT);
+        const by = H - M - botH;
+        panel(M, by, W - M * 2, botH);
+        let y = by + P + z(22); text(p.verb, x, y, z(20), SOFT);
+        y += z(76); text(num, x, y, z(68), ACCENT, 600); text(` ${of}`, x + width(num, z(68), 600), y, z(22), SOFT);
+        y += z(36); text('in', x, y, z(20), SOFT); text(repo, x + width('in ', z(20)), y, fit(repo, z(26), iw - width('in ', z(20))), INK, 600);
+        for (const l of where) { y += z(24); text(l, x, y, z(16), SOFT); }
+        y += z(26); text(life, x, y, z(16), SOFT);
+        y += z(40); text(info.url, x, y, fit(info.url, z(24), iw, 600, 11), INK, 600);
+      };
+    }
+  } else if (full) {
     // full bleed: the city is the picture, with a small name tag in one corner and the address in the other
     const z = n => Math.round(n * (scale || (format === 'story' ? 1.7 : format === 'square' ? 1.25 : format === 'social' || format === 'brand' ? 1.6 : 1)));
     const name = info.owner ? `${info.owner}/${info.repo}` : info.repo;
@@ -163,7 +267,7 @@ function layout(g, format, info, { W, H, full, scale }) {
 // capture(artW, artH, bands) → ImageData of the grown city framed inside the bands (fractions of the frame)
 export async function drawCard(format, info, capture, { k = 2, full = false } = {}) {
   const { W, H } = FORMATS[format] || EXTRA[format];
-  await fontsReady();
+  await prepare(info);
   const out = document.createElement('canvas');
   out.width = W * k; out.height = H * k;
   const g = out.getContext('2d');
@@ -192,7 +296,7 @@ export async function filmCity(kind, format, info, stage, { progress = () => {},
   const f = FILM[format], gif = kind === 'gif';
   const k = gif ? f.gif / Math.max(f.W, f.H) : 1;
   const artW = Math.round(f.W * k / 2), artH = Math.round(f.H * k / 2), OW = artW * 2, OH = artH * 2;
-  await fontsReady();
+  await prepare(info);
   const out = document.createElement('canvas');
   out.width = OW; out.height = OH;
   const g = out.getContext('2d', { willReadFrequently: gif });
@@ -272,8 +376,9 @@ export function openShareDialog({ info, capture, stage, link, filename, badge })
   document.getElementById('card-dialog')?.remove();
   const box = document.createElement('div');
   box.id = 'card-dialog';
-  box.innerHTML = `<div class="card-panel" role="dialog" aria-modal="true" aria-label="Share this city">
-    <div class="card-head"><b>share this city</b><button class="card-x" aria-label="Close">×</button></div>
+  const title = info.person ? `share ${info.person.name}'s buildings` : 'share this city';
+  box.innerHTML = `<div class="card-panel" role="dialog" aria-modal="true" aria-label="Share">
+    <div class="card-head"><b></b><button class="card-x" aria-label="Close">×</button></div>
     <div class="card-kinds">${Object.entries(KINDS).map(([id, l]) => `<button data-k="${id}">${l}</button>`).join('')}</div>
     <div class="card-formats">${Object.entries(FORMATS).map(([id, f]) => `<button data-f="${id}">${id}<small>${f.label}</small></button>`).join('')}</div>
     <div class="card-view"><span>drawing…</span><img alt="Share card preview"><video muted loop playsinline controls hidden></video>
@@ -286,6 +391,7 @@ export function openShareDialog({ info, capture, stage, link, filename, badge })
     </div></div>`;
   document.body.append(box);
   const $ = s => box.querySelector(s), img = $('img'), video = $('video'), status = $('.card-view span');
+  $('.card-head b').textContent = title; // (a name is data, never markup)
   if (!canFilmVideo()) $('[data-k=mp4]').hidden = true;
   if (!badge) $('[data-k=badge]').hidden = true; // badges are served by gitropolis.dev, for public repos
   const badgeUrl = st => `${badge}/badge.svg${st ? `?style=${st}` : ''}`;
@@ -355,7 +461,7 @@ export function openShareDialog({ info, capture, stage, link, filename, badge })
     catch { flash(e.target, "can't copy here"); }
   };
   $('[data-a=share]').onclick = async () => {
-    try { await navigator.share({ files: [new File([blob], name(), { type: blob.type })], text: `${info.owner ? info.owner + '/' : ''}${info.repo} is built like ${info.phrase}`, url: link }); }
+    try { await navigator.share({ files: [new File([blob], name(), { type: blob.type })], text: info.person ? `${info.person.name} ${info.person.verb} ${info.person.n} of the ${info.person.of} buildings in ${info.owner ? info.owner + '/' : ''}${info.repo}` : `${info.owner ? info.owner + '/' : ''}${info.repo} is built like ${info.phrase}`, url: link }); }
     catch { /* cancelled */ }
   };
   box.querySelectorAll('[data-md]').forEach(b => {
