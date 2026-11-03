@@ -2,6 +2,7 @@
 //   maquette  — white architectural model under a low raking sun (Panorama of NYC, Gismondi's Rome)
 //   plan      — black-on-paper figure-ground print seen from straight above (Nolli map, Stamen Toner)
 //   nocturne  — dark, hazy city where only recently edited files are lit from inside (Hopper, Todd Hido)
+//   chip      — the easter egg: a circuit board, its parts from chip.js (passed in as ctx.chip)
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { buildingGeometry, shipGeometry } from './buildings.js';
@@ -53,6 +54,17 @@ export const STYLES = {
     toneMapping: THREE.ACESFilmicToneMapping, exposure: 1.1, bloom: { strength: 0.35, radius: 0.4, threshold: 0.85 },
     ink: '#e8e2d6', inkSoft: 'rgba(232,226,214,.55)', font: "'Instrument Serif', Georgia, serif", labelCase: 'none',
   },
+  chip: {
+    background: '#060d09', fog: ['#060d09', 0.9, 3.0], chip: true,
+    sun: { color: '#fff6e8', intensity: 2.6, elevation: 55, azimuth: 130 },
+    hemi: { sky: '#dfe9e1', ground: '#0b2a1a', intensity: 0.9 },
+    building: '#1c1c1f', buildingJitter: 0.03, ground: '#0e4a2b', plate: '#13583a', roughness: 0.5,
+    rail: '#b9bcc2', water: '#121514', land: '#0e4a2b', yard: '#13583a', dirt: '#8a6136', sand: '#13583a', dune: '#10502f', cliff: '#0c3f25', plaza: '#13583a', park: '#13583a', lawn: '#10502f', hill: '#141416', road: '#c8803f',
+    copper: '#c8803f', leads: '#c9ccd2', silk: '#ecebe2',
+    windows: 0, accent: '#d6a648', edges: null,
+    toneMapping: THREE.ACESFilmicToneMapping, exposure: 1.05, bloom: null,
+    ink: '#ecebe2', inkSoft: 'rgba(236,235,226,.55)', font: "'JetBrains Mono', ui-monospace, monospace", uiFont: "'JetBrains Mono', ui-monospace, monospace", labelCase: 'upper',
+  },
 };
 
 const UP = new THREE.Vector3(0, 1, 0);
@@ -98,7 +110,8 @@ function buildTerrain(scene, layout, S, plateStep, shared, street, blockBorn) {
   // when each block opens (from the street field); without one, everything is there from the start
   const bornOf = b => blockBorn ? blockBorn[layout.blocks.indexOf(b)] : 0;
   const landTop = layout.groundIsWater ? plateStep * 0.8 : 0;
-  if (layout.groundIsWater) add(slab([...layout.land, ...layout.shore], 0, landTop), S.land, 'grass-or-street');
+  // (a circuit board comes up nearly to its blocks, so a trace can run from one to the next)
+  if (layout.groundIsWater) add(slab([...layout.land, ...layout.shore], 0, S.chip ? landTop + plateStep * 0.92 : landTop), S.land, 'grass-or-street');
   // lakes and rivers; on a city whose ground is the sea, they're pools sitting on the land
   if (layout.water.length) add(slab(layout.water, layout.groundIsWater ? landTop : 0, plateStep * 0.05), S.water, 'water');
   const colors = { block: S.plate, park: S.park, plaza: S.plaza, lawn: S.lawn, yard: S.yard, beach: S.sand };
@@ -210,12 +223,12 @@ function buildTerrain(scene, layout, S, plateStep, shared, street, blockBorn) {
 }
 
 export function buildStudio(ctx) {
-  const { name, scene, renderer, B, files, districts, unit, SIZE, plateStep, cx, cz, shared, heat, focusAttr, inDeg, hub, t01, layout } = ctx;
+  const { name, scene, renderer, B, files, districts, unit, SIZE, plateStep, cx, cz, shared, heat, focusAttr, inDeg, hub, t01, layout, chip } = ctx;
   // a desert city stands on sand: the open ground and the lawns between blocks become dunes
   const S = layout?.sand ? { ...STYLES[name], land: STYLES[name].sand, lawn: STYLES[name].dune } : STYLES[name];
   const N = files.length;
   // each style sets its own skyline proportions: a model city is squat, a night city can soar
-  const H = B.map(b => S.flat ? plateStep * 0.5 : layout ? b.h : Math.min(b.h * (S.heightScale || 1), unit * (S.maxHeight || 99)));
+  const H = B.map(b => S.flat ? plateStep * 0.5 : S.chip ? chip.chipHeight(b, unit) : layout ? b.h : Math.min(b.h * (S.heightScale || 1), unit * (S.maxHeight || 99)));
 
   renderer.toneMapping = S.toneMapping;
   renderer.toneMappingExposure = S.exposure;
@@ -262,11 +275,12 @@ export function buildStudio(ctx) {
   }
 
   // ---- ground
-  const groundColor = !layout ? S.ground : { water: S.water, land: S.land, road: S.road }[layout.ground];
+  const groundColor = !layout ? S.ground : { water: S.water, land: S.land, road: S.chip ? S.land : S.road }[layout.ground]; // (a board is all solder mask)
   const groundMat = S.flat ? new THREE.MeshBasicMaterial({ color: groundColor })
-    : new THREE.MeshStandardMaterial({ color: groundColor, roughness: layout?.groundIsWater ? 0.35 : 1 });
+    : new THREE.MeshStandardMaterial({ color: groundColor, roughness: S.chip ? 0.9 : layout?.groundIsWater ? 0.35 : 1 }); // (chip: the board's bench, no glare)
   // pixel style: streets come from a distance field over the blocks; asphalt only where streets are
-  const streets = S.pixel && layout ? timed('streets (distance field)', () => buildStreets({ layout, B, files, inDeg, SIZE, t01 })) : null;
+  // (chip: copper traces down them)
+  const streets = (S.pixel || S.chip) && layout ? timed('streets (distance field)', () => buildStreets({ layout, B, files, inDeg, SIZE, t01 })) : null;
   // only what the street shader needs: copying the whole object would keep the routing closures (and the big field arrays they hold) alive
   // a campus has footpaths, not roads: paved stone, no centre line
   const pathC = layout?.paths ? new THREE.Color(layout.paths === 'dirt' ? S.dirt : S.plaza) : null;
@@ -289,7 +303,7 @@ export function buildStudio(ctx) {
   // Venice has no cars, only boats
   if (streets && layout.paths) { streets.lanes = []; streets.boats = []; } // footpaths: no traffic
   if (streets && layout.kind === 'venice') { streets.lanes = []; streets.boats = [...streets.boats, ...streets.boats.map(b => ({ ...b, pts: [...b.pts].reverse() }))]; }
-  const traffic = streets ? timed('traffic', () => buildTraffic({ streets, unit: layout.unit })) : null;
+  const traffic = S.pixel && streets ? timed('traffic', () => buildTraffic({ streets, unit: layout.unit })) : null;
   if (traffic) scene.add(traffic.mesh);
   // the field's lookup tables were only needed to plan routes; the GPU keeps its own copy of the texture
   const trees = S.pixel && layout ? timed('trees', () => buildTrees({ layout, B, streets, unit: layout.unit, plateStep, shared })) : null;
@@ -334,11 +348,14 @@ export function buildStudio(ctx) {
   const mesh = new THREE.InstancedMesh(geo, mat, N);
   const m = new THREE.Matrix4(), q = new THREE.Quaternion(), c = new THREE.Color();
   const maxChurn = Math.max(1, ...files.map(f => f.churn));
+  // chip: the body stands inside its leads, which take the rest of the footprint
+  const leads = S.chip ? chip.leadMargins(B, unit) : null;
   files.forEach((f, i) => {
     const b = B[i];
     const h = H[i];
+    const [lx, lz] = leads ? leads[i] : [0, 0];
     q.setFromAxisAngle(UP, b.rot || 0);
-    m.compose(new THREE.Vector3(b.x, b.y, b.z), q, new THREE.Vector3(b.w, h, b.d));
+    m.compose(new THREE.Vector3(b.x, b.y, b.z), q, new THREE.Vector3(b.w - lx * 2, h, b.d - lz * 2));
     mesh.setMatrixAt(i, m);
     const j = (Math.sin(i * 12.9898) * 43758.5453 % 1) * S.buildingJitter;
     mesh.setColorAt(i, i === hub ? accent : c.copy(base).offsetHSL(0, 0, j));
@@ -377,7 +394,7 @@ export function buildStudio(ctx) {
       .replace('#include <color_fragment>', `#include <color_fragment>
         if (uFocus >= 0.0) diffuseColor.rgb *= mix(0.35, 1.0, vFocus);
         if (abs(vId - uHover) < 0.5) diffuseColor.rgb = mix(diffuseColor.rgb, uAccent, 0.35);
-        diffuseColor.rgb = mix(diffuseColor.rgb, uAccent, vHeat * 0.6);`)
+        diffuseColor.rgb = mix(diffuseColor.rgb, uAccent, vHeat * 0.6);${S.chip ? chip.LID : ''}`)
       .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
         if (uWindows > 0.0 && abs(vON.y) < 0.5) {
           float u = abs(vON.x) > 0.5 ? vObj.z * vSz.z : vObj.x * vSz.x;
@@ -407,6 +424,11 @@ export function buildStudio(ctx) {
   mesh.computeBoundingSphere();
   mesh.frustumCulled = false;
   scene.add(mesh);
+  if (S.chip) {
+    scene.add(chip.buildLeads({ bodies: mesh, B, H, leads, unit, S, shared, grow: growVertex }), chip.buildSilkscreen({ B, unit, S, shared }));
+    const top = (layout.groundIsWater ? plateStep * 0.8 : 0) + plateStep; // where the parts stand
+    scene.add(timed('board (routing)', () => chip.buildBoard({ B, files, leads, unit, top, S, shared })));
+  }
   // pixel style: real architecture per file; the box mesh stays as an invisible picking proxy
   let cityMesh = null;
   if (S.pixel && layout) {
