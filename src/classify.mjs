@@ -199,6 +199,8 @@ export function cityMetrics(city, now = Date.now() / 1000) {
   const recentWindow = 90 * 86400;
   const recentCommits = commits.filter(c => c[0] > end - recentWindow).length;
   const avgPerWindow = commitCount / Math.max(1, seen / recentWindow);
+  // the old walled city: how many of the files still standing were built in the repo's first five years
+  const founded = city.truncated && city.firstCommit ? city.firstCommit : city.start;
 
   return {
     files: n,
@@ -232,6 +234,7 @@ export function cityMetrics(city, now = Date.now() / 1000) {
     commitsPerWeek: commitCount / Math.max(1, seen / (7 * 86400)),
     idleYears: history ? Math.max(0, (now - end) / YEAR) : 0,
     staleShare: F.filter(f => end - f.last > 2 * YEAR).length / Math.max(1, n),
+    foundingShare: F.filter(f => f.born < founded + 5 * YEAR).length / Math.max(1, n),
     recentBoost: avgPerWindow && commitCount >= 200 && recentCommits >= 30 ? recentCommits / avgPerWindow : 0,
     hardware: (city.extras?.hardwareFiles || 0) > 0,
     infraFiles: infraIdx.length,
@@ -353,6 +356,7 @@ const ARCHETYPES = {
 const STATES = {
   ruins: m => m.history && m.staleShare > 0.35 && m.ageYears > 4 && `ancient ruins: ${pct(m.staleShare)} of files untouched for 2+ years`,
   ghost: m => m.history && m.idleYears > 1.5 && `ghost town: no commits for ${m.idleYears.toFixed(1)} years`,
+  walled: m => m.history && m.ageYears >= 20 && m.foundingShare >= 0.2 && `old walled city: ${pct(m.foundingShare)} of files date from its first five years, ${Math.floor(m.ageYears)} years ago`,
   boom: m => m.history && m.recentBoost > 2.5 && `boomtown: ${m.recentBoost.toFixed(1)}× the usual commit rate lately`,
   garden: m => m.testShare > 0.6 && `garden city: ${pct(m.testShare)} of the code is tests`,
   maze: m => m.cycleShare > 0.5 && `old medina: ${pct(m.cycleShare)} of files sit in import cycles`,
