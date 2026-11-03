@@ -59,7 +59,9 @@ if (!/^[1-9]\d*x[1-9]\d*$/.test(frame)) fail(`--size is width x height, like 192
 const [w, h] = frame.split('x').map(Number);
 const maxMB = +num('--max-mb', flag('--max-mb', 9.5)); // GitHub README uploads cap at 10 MB
 const headed = bool('--headed');
-const style = oneOf('--style', flag('--style', 'pixel'), ['pixel', 'maquette', 'plan', 'nocturne', 'neon']);
+// (neon and chip aren't in --help: neon is the first prototype, chip the easter egg a plain visit rolls now and then)
+const styleAsked = args.includes('--style'); // if not, the live view leaves the page to pick (and maybe roll chip)
+const style = oneOf('--style', flag('--style', 'pixel'), ['pixel', 'maquette', 'plan', 'nocturne', 'neon', 'chip']);
 const pxOpt = num('--pixel', flag('--pixel')); // pixel style: size of one art pixel (default 1; 2 for chunkier art)
 const zoomOpt = num('--zoom', flag('--zoom')); // close-up factor (pixel style)
 const cityOpt = oneOf('--city', flag('--city', 'auto'), ['auto', 'classic', 'farm', 'desert', 'capital', 'mountain', 'university', 'port', 'industrial', 'science', 'themepark', 'resort',
@@ -246,7 +248,7 @@ server.listen(port, '127.0.0.1');
 server.on('listening', () => {
   const link = `http://localhost:${port}`;
   if (!rec) {
-    const view = `${link}/?style=${style}&city=${cityOpt}${pxOpt ? `&px=${pxOpt}` : ''}${zoomOpt ? `&zoom=${zoomOpt}` : ''}`;
+    const view = `${link}/?${styleAsked ? `style=${style}&` : ''}city=${cityOpt}${pxOpt ? `&px=${pxOpt}` : ''}${zoomOpt ? `&zoom=${zoomOpt}` : ''}`;
     console.log(`  city open at ${cyan(view)}`);
     if (!noOpen) openBrowser(view);
     return;

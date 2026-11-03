@@ -1205,6 +1205,45 @@ const PLANNERS = {
       height: (i, rel) => i === ctx.hub ? 2.4 : Math.min(0.35 + 0.25 * Math.pow(rel, 0.4), 0.9),
     };
   },
+
+  // not a city: the one plan of the chip style (?style=chip), whatever the repo. A square board, each
+  // directory a rectangular block of it, cut into an even grid of cells with channels between them
+  // for the traces, the parts packed into the cells in order
+  board(ds) {
+    // each block's share counts the channel round it, so a small directory stays a small square
+    // instead of being squeezed to a sliver by the channels
+    const PAD = 1.1, share = d => (Math.sqrt(d.area / 0.6) + PAD) ** 2;
+    const W = Math.sqrt(sum(ds.map(share))) + 1.2;
+    const root = hierarchy({ children: ds.map(d => ({ d, v: share(d) })) }).sum(x => x.v || 0).sort((a, b) => b.value - a.value);
+    treemap().tile(treemapSquarify.ratio(1)).size([W, W]).paddingInner(PAD).paddingOuter(0.6)(root);
+    const lots = [], blocks = [], labels = [], CELL = 6, GAP = 0.45;
+    for (const leaf of root.leaves()) {
+      const d = leaf.data.d, w = leaf.x1 - leaf.x0, h = leaf.y1 - leaf.y0;
+      const cols = Math.max(1, Math.round(w / Math.sqrt(CELL))), rows = Math.max(1, Math.round(h / Math.sqrt(CELL)));
+      const cw = (w - GAP * (cols - 1)) / cols, ch = (h - GAP * (rows - 1)) / rows;
+      // each cell takes an even share of what's left of the block's parts, by area, and a part goes in
+      // if at least half of it fits: a share fixed up front would leave every cell a little short and
+      // the last one crammed with the rest
+      const cells = cols * rows;
+      let k = 0, left = d.area;
+      for (let n = 0; n < cells && k < d.items.length; n++) {
+        const take = [], each = left / (cells - n);
+        let used = 0;
+        while (k < d.items.length && (n === cells - 1 || !take.length || used + d.items[k].a / 2 <= each)) { used += d.items[k].a; take.push(d.items[k++]); }
+        left -= used;
+        const c = n % cols, r = Math.floor(n / cols), x0 = leaf.x0 + c * (cw + GAP), z0 = leaf.y0 + r * (ch + GAP);
+        blocks.push({ poly: rectPoly(x0, z0, x0 + cw, z0 + ch), type: 'block' });
+        lots.push(...packRect(take, x0, z0, x0 + cw, z0 + ch, 0.12));
+      }
+      if (d.name !== '·') labels.push({ text: d.name, x: (leaf.x0 + leaf.x1) / 2, z: leaf.y1 + 0.45 });
+    }
+    // the board itself, on a dark bench
+    return {
+      lots, blocks, labels, ground: 'water', land: [rectPoly(-0.5, -0.5, W + 0.5, W + 0.5)],
+      camera: { az: 90, el: 89, dist: 1.05 }, // from straight above, the board square to the frame
+      height: (i, rel) => Math.min(0.32 + 0.95 * Math.sqrt(rel), 5),
+    };
+  },
 };
 
 // ---------------------------------------------------------------- entry point
