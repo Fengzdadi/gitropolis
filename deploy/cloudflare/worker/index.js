@@ -175,12 +175,10 @@ async function personCard(info, by, most, req, env, ctx) {
   const who = { by, most, key: await personKey(info, { by, most }) };
   const hit = await env.CITIES.get(who.key);
   if (hit) return new Response(hit.body, { headers });
-  const city = env.BROWSER && await env.CITIES.get(cityKey(info));
-  if (!city) return repoCard();
-  const { authors = [], faces = [] } = await city.json();
-  const k = authors.indexOf(by);
+  const known = env.BROWSER && await people(env, info);
+  const k = known ? known.authors.indexOf(by) : -1;
   if (k < 0) return repoCard();
-  who.face = await faceOf(info, faces[k], env).catch(() => null);
+  who.face = await faceOf(info, known.commits[k], env).catch(() => null);
   let png = await drawOnce(info, req.url, env, who);
   for (let i = 0; png === BUSY && i < 12; i++) {
     await sleep(2000);
@@ -191,9 +189,9 @@ async function personCard(info, by, most, req, env, ctx) {
 }
 // "login/id" for a person's GitHub account, from the account that made a commit of theirs: the page
 // draws their avatar from it (it can't ask GitHub itself in the headless browser: no token there)
-async function faceOf(info, face, env) {
-  if (!face?.c) return null;
-  const r = await fetch(`https://api.github.com/repos/${info.full}/commits/${face.c}`, {
+async function faceOf(info, commit, env) {
+  if (!commit) return null;
+  const r = await fetch(`https://api.github.com/repos/${info.full}/commits/${commit}`, {
     headers: { 'user-agent': 'gitropolis', accept: 'application/vnd.github+json', ...(env.GITHUB_TOKEN && { authorization: `Bearer ${env.GITHUB_TOKEN}` }) },
   });
   if (!r.ok) return null;
@@ -209,8 +207,22 @@ const putJSON = (env, key, value) => env.CITIES.put(key, JSON.stringify(value), 
 async function saveSummary(env, info, body) {
   const city = JSON.parse(body);
   const summary = { kind: city.identity?.city || 'smalltown', buildings: city.files?.length || 0 };
-  await Promise.all([putJSON(env, summaryKey(info), summary), putJSON(env, latestKey(info.full), summary)]);
+  await Promise.all([putJSON(env, summaryKey(info), summary), putJSON(env, latestKey(info.full), summary), savePeople(env, info, city)]);
   return summary;
+}
+// who built a city, and a commit of each of theirs (for their face), kept beside it the same way: a
+// link to one person's part is checked against it without reading the whole city
+const peopleKey = info => `meta/v${SCANNER}/${info.full.toLowerCase()}/${info.sha}.people.json`;
+async function savePeople(env, info, city) {
+  const known = { authors: city.authors || [], commits: (city.authors || []).map((a, k) => city.faces?.[k]?.c ?? null) };
+  await putJSON(env, peopleKey(info), known);
+  return known;
+}
+async function people(env, info) {
+  const hit = await env.CITIES.get(peopleKey(info));
+  if (hit) return hit.json();
+  const city = await env.CITIES.get(cityKey(info));
+  return city ? savePeople(env, info, await city.json()) : null; // cities built before this was kept
 }
 async function summary(env, info) {
   const hit = await env.CITIES.get(summaryKey(info));
@@ -242,10 +254,19 @@ async function badge(owner, repo, url, env, ctx) {
 }
 
 // /owner/repo: the page, with link-preview tags for this repo
-async function page(owner, repo, req, env) {
+async function page(owner, repo, req, env, ctx) {
   const res = await env.ASSETS.fetch(new Request(new URL('/', req.url), req));
-  // ?by=Name: a link to one person's part, previewed with their card
-  const asked = new URL(req.url).searchParams, by = asked.get('by')?.slice(0, 200), most = by && asked.has('most');
+  // ?by=Name: a link to one person's part, previewed with their card. Only for someone who built part
+  // of the city (a preview's title says whatever the link says: it mustn't be any text at all)
+  const asked = new URL(req.url).searchParams;
+  let by = asked.get('by')?.slice(0, 200) || null;
+  if (by) {
+    try {
+      const info = await lookup(owner, repo, env, ctx);
+      if (info.missing || info.private || !(await people(env, info))?.authors.includes(by)) by = null;
+    } catch { by = null; }
+  }
+  const most = by && asked.has('most');
   const q = by ? `?${new URLSearchParams({ by, ...(most && { most: '' }) })}`.replace(/=$/, '') : '';
   const name = `${owner}/${repo}`, url = new URL(`/${name}${q}`, req.url).toString();
   const image = new URL(`/api/card/${name}.png${q}`, req.url).toString();
@@ -278,7 +299,7 @@ export default {
     if (url.pathname.startsWith('/api/')) return json(404, { error: 'no such endpoint' });
     // a repo page (two path segments that aren't one of the site's own files)
     const r = /^\/([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+?)(?:\.git)?\/?$/.exec(url.pathname);
-    if (r && req.method === 'GET' && r[1] !== 'vendor' && !/\.(js|css|json|png|gif|html|md|svg|txt)$/.test(r[2])) return page(r[1], r[2], req, env);
+    if (r && req.method === 'GET' && r[1] !== 'vendor' && !/\.(js|css|json|png|gif|html|md|svg|txt)$/.test(r[2])) return page(r[1], r[2], req, env, ctx);
     return env.ASSETS.fetch(req); // pages, and /owner/repo falls through to index.html
   },
 };

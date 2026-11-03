@@ -323,7 +323,6 @@ async function birthsBefore(root, boundary, paths) {
   return { born, first };
 }
 
-// name: the repository's name, when the folder it's cloned into has another (the hosted scanner's)
 // the author with the most of a file's commits (a tie goes to whoever built it, then to whoever came first)
 function most(h) {
   let top = h.by, n = h.who.get(h.by) || 0;
@@ -340,6 +339,7 @@ function githubRepo(root) {
   } catch { return null; }
 }
 
+// name: the repository's name, when the folder it's cloned into has another (the hosted scanner's)
 export async function scanRepo(repo, { maxCommits = 20000, name } = {}) {
   repo = path.resolve(repo);
   const t0 = Date.now();

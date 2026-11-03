@@ -1206,10 +1206,12 @@ function light(k) {
   focus(-1);
   if (k >= 0) {
     lit = k;
+    // someone who built none (only made the most commits on some) is shown by those instead
+    if (!tally[mode][k]) mode = mode === 'b' ? 'm' : 'b';
     // focused on no building in particular (N is none of them): no arcs, only their buildings stand out
     shared.uFocus.value = N; shared.uLit.value = 1;
-    let n = 0;
-    for (let i = 0; i < N; i++) { focusAttr[i] = OWN[mode](files[i]) === k ? 1 : 0; n += focusAttr[i]; }
+    let n = 0; // (the ones standing at the end, as their card counts them)
+    for (let i = 0; i < N; i++) { focusAttr[i] = OWN[mode](files[i]) === k ? 1 : 0; if (i < LIVE) n += focusAttr[i]; }
     buildings.geometry.attributes.aFocus.needsUpdate = true;
     // markers over them when they're few; and they flash, as when a commit touches them, to catch the eye
     marks.material.uniforms.uMarks.value = n <= MARKS_UPTO ? 1 : 0;
@@ -1228,7 +1230,7 @@ function showWho(open) {
 }
 function setMode(m) {
   mode = m;
-  if (lit >= 0) light(tally[m][lit] ? lit : -1);
+  if (lit >= 0) light(lit);
 }
 // the pixel city's camera glides to frame the lit person's buildings (clear of the panel), and back
 // to the whole city after
@@ -1240,8 +1242,11 @@ function frameWho() {
   if (lit >= 0) {
     const only = new Set();
     for (let i = 0; i < LIVE; i++) if (focusAttr[i]) only.add(i);
-    const r = whoPanel.getBoundingClientRect();
-    to = fitFrame(viewW() / viewH(), { ...clearBands(), right: r.width ? (innerWidth - r.left + 16) / innerWidth : 0 }, only);
+    // beside the panel; on a phone, where it spans the screen's foot, above it
+    const r = whoPanel.getBoundingClientRect(), bands = clearBands();
+    if (r.width > innerWidth / 2) bands.bottom = Math.max(bands.bottom, (innerHeight - r.top + 16) / innerHeight);
+    else if (r.width) bands.right = (innerWidth - r.left + 16) / innerWidth;
+    to = fitFrame(viewW() / viewH(), bands, only);
     to.zoom = Math.min(to.zoom, FIT.zoom * 3); // (one small building isn't a close-up)
   }
   const c0 = controls.target.clone(), z0 = camera.zoom, t0 = performance.now(), id = ++glideId;
@@ -1277,7 +1282,7 @@ function listWho() {
     b.title = `Light up ${authors[k]}'s buildings`;
     b.append(tag('span', '', authors[k]), tag('span', '', tally.b[k] ? tally.b[k].toLocaleString() : '–'));
     b.onclick = () => light(k);
-    r.append(faceEl(k, true), b);
+    r.append(faceEl(k, 'lazy'), b);
     return r;
   });
   if (all.length > match.length) rows.push(tag('div', 'more', `and ${(all.length - match.length).toLocaleString()} more: type a name`));
@@ -1305,10 +1310,11 @@ function cardWho(k) {
     b.append(tag('span', '', tally[m][k].toLocaleString()), tag('small', '', text));
     b.title = m === 'b' ? 'Buildings whose file they added' : 'Buildings where they made the most of the commits';
     b.setAttribute('aria-pressed', String(m === mode));
+    b.disabled = !tally[m][k];
     b.onclick = () => setMode(m);
     stats.append(b);
   }
-  const spots = whereOf(k).map(([d, c]) => `${d >= 0 ? labelSource[d].data.name : 'elsewhere'} ${c}`);
+  const spots = whereOf(k);
   const share = tag('button', 'share', 'share their buildings');
   share.onclick = () => $('#share').click();
   whoBody.replaceChildren(top, stats, tag('div', 'sum', `of ${LIVE.toLocaleString()} buildings${spots.length ? ` · in ${spots.join(' · ')}` : ''}`),
@@ -1319,19 +1325,21 @@ function personInfo(k) {
   const f = faces[k] || {}, v = known.get(k);
   const year = t => new Date(t * 1000).getFullYear();
   return {
-    name: authors[k], initial: (authors[k].match(/[\p{L}\p{N}]/u)?.[0] ?? '?').toUpperCase(),
+    name: authors[k], initial: initialOf(k),
     login: v?.login, img: v?.img,
     n: tally[mode][k], of: LIVE, verb: mode === 'b' ? 'built' : 'made the most commits on',
-    where: whereOf(k).map(([d, c]) => `${d >= 0 ? labelSource[d].data.name : 'elsewhere'} ${c}`).join(' · ') || null,
+    where: whereOf(k).join(' · ') || null,
     commits: f.n || 0, years: f.t ? f.t.map(year) : [year(data.start), year(data.end)],
   };
 }
-// the districts someone's buildings stand in, most first (none in a city without named districts)
+// the districts someone's buildings stand in, most first, as "src 11" (none in a city without named districts)
 function whereOf(k) {
   const where = new Map();
   for (let i = 0; i < LIVE; i++) if (OWN[mode](files[i]) === k) where.set(fileLabel[i], (where.get(fileLabel[i]) || 0) + 1);
-  return [...where].some(([d]) => d >= 0) ? [...where].sort((x, y) => y[1] - x[1]).slice(0, 4) : [];
+  if (![...where].some(([d]) => d >= 0)) return [];
+  return [...where].sort((x, y) => y[1] - x[1]).slice(0, 4).map(([d, c]) => `${d >= 0 ? labelSource[d].data.name : 'elsewhere'} ${c}`);
 }
+const initialOf = k => (authors[k].match(/[\p{L}\p{N}]/u)?.[0] ?? '?').toUpperCase();
 
 // Faces: a GitHub avatar, linking to their profile, for an author GitHub knows; otherwise their initial.
 // A login comes from the scan (a no-reply email names it) or from GitHub, asked once which account made
@@ -1340,7 +1348,8 @@ const GH = data.github || (route && `${route[1]}/${route[2]}`);
 const known = new Map(); // author -> { login, img } | null, once settled
 const asking = new Map();
 let ghTired = false; // GitHub said no more for now
-function whoIs(k) {
+// (ask: false never asks GitHub, only says what's known already)
+function whoIs(k, ask = true) {
   if (known.has(k)) return Promise.resolve(known.get(k));
   if (asking.has(k)) return asking.get(k);
   const f = faces[k], settle = v => { known.set(k, v); return v; };
@@ -1354,9 +1363,11 @@ function whoIs(k) {
   if (REC || !GH || !f?.c || ghTired) return Promise.resolve(null);
   const key = `gitropolis.face:${GH}:${f.c}`;
   try { const v = localStorage.getItem(key); if (v !== null) return Promise.resolve(settle(v ? JSON.parse(v) : null)); } catch {}
+  if (!ask) return Promise.resolve(null);
   const p = fetch(`https://api.github.com/repos/${GH}/commits/${f.c}`, { headers: { Accept: 'application/vnd.github+json' } })
     .then(async r => {
-      if (r.status === 403 || r.status === 429) { ghTired = true; asking.delete(k); return null; }
+      // (only a clear answer is remembered: a GitHub hiccup is asked again next time)
+      if (!r.ok && r.status !== 404 && r.status !== 422) { if (r.status === 403 || r.status === 429) ghTired = true; asking.delete(k); return null; }
       const a = r.ok ? (await r.json()).author : null;
       const v = a?.login && /^https:\/\/avatars\.githubusercontent\.com\//.test(a.avatar_url)
         ? { login: a.login, img: `${a.avatar_url}${a.avatar_url.includes('?') ? '&' : '?'}s=64` } : null;
@@ -1367,13 +1378,14 @@ function whoIs(k) {
   asking.set(k, p);
   return p;
 }
-// a face, linking to GitHub once it's known. In a list (lazy) it's only asked for once it scrolls into
-// view: GitHub is asked about everyone seen
+// a face, linking to GitHub once it's known. In a list ('lazy') it's only asked for once it scrolls
+// into view: GitHub is asked about everyone seen. On a district sign ('quiet') GitHub isn't asked at
+// all: there are signs enough to spend a visitor's hourly allowance before they've opened anything
 const sighted = new IntersectionObserver(es => { for (const e of es) if (e.isIntersecting) { sighted.unobserve(e.target); e.target.ask(); } });
-function faceEl(k, lazy = false) {
+function faceEl(k, when = 'now') {
   const el = document.createElement('a');
   el.className = 'face';
-  el.textContent = (authors[k].match(/[\p{L}\p{N}]/u)?.[0] ?? '?').toUpperCase();
+  el.textContent = initialOf(k);
   const show = v => {
     if (!v) return;
     const img = new Image();
@@ -1384,8 +1396,8 @@ function faceEl(k, lazy = false) {
     el.title = `${v.login} on GitHub`;
   };
   if (known.has(k)) show(known.get(k));
-  else if (lazy) { el.ask = () => whoIs(k).then(show); sighted.observe(el); }
-  else whoIs(k).then(show);
+  else if (when === 'lazy') { el.ask = () => whoIs(k).then(show); sighted.observe(el); }
+  else whoIs(k, when !== 'quiet').then(show);
   return el;
 }
 
@@ -1402,13 +1414,13 @@ if (people.length > 1) {
     showWho(!whoOpen);
   });
   const k = authors.indexOf(params.get('by'));
-  if (k >= 0 && tally[mode][k]) { showWho(true); light(k); }
+  if (k >= 0 && people.includes(k)) { showWho(true); light(k); }
   // a sign names who founded its district: whoever built the most of it
   labelEls.forEach(({ el }, d) => {
     const n = new Map();
     for (const i of labelMembers[d]) if (i < LIVE && files[i].b !== undefined) n.set(files[i].b, (n.get(files[i].b) || 0) + 1);
     const [top] = [...n].sort((x, y) => y[1] - x[1])[0] ?? [];
-    if (top !== undefined) el.prepend(faceEl(top));
+    if (top !== undefined) el.prepend(faceEl(top, 'quiet'));
   });
 }
 // Esc steps back: from one person lit to everyone, and from everyone to the city (a focused building
