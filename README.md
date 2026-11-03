@@ -172,7 +172,7 @@ Some repos also get a condition on top of their plan. A repo with no recent comm
 | Ruin | a file nobody has touched in over two years |
 | Flash on a roof | touched by the commit now playing |
 
-Drag to pan and scroll to zoom. The biggest districts carry signposts with their folder's name, and more appear as you zoom in. Hover a building to see its file and light up its whole district, and click it to light up its imports. The timeline under the city shows how busy each stretch of history was: click or drag it to jump, <kbd>Space</kbd> plays or pauses, <kbd>←</kbd> <kbd>→</kbd> step. The signpost button (or <kbd>L</kbd>) hides the names for a clean view, and <kbd>Esc</kbd> clears the selection.
+Drag to pan and scroll to zoom. The biggest districts carry signposts with their folder's name, and more appear as you zoom in. Hover a building to see its file and light up its whole district, and click it to light up its imports. The timeline under the city shows how busy each stretch of history was: click or drag it to jump, <kbd>Space</kbd> plays or pauses, <kbd>←</kbd> <kbd>→</kbd> step. The signpost button (or <kbd>L</kbd>) hides the names for a clean view. The builder button (or <kbd>B</kbd>) lists who built the city, each with the number of buildings they put up (a file's builder is whoever added it), and picking one lights up their buildings; the address then carries `?by=` with their name, so the link shows them too. <kbd>Esc</kbd> clears the selection.
 
 ## Share your city
 

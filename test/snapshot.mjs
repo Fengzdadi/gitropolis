@@ -54,8 +54,9 @@ function checkout({ repo, sha }) {
 
 // What's compared: everything the scanner hands the city, minus timings. File and import references
 // are by path, not by index, so one added file shows as one added file and not as every file shifting.
+// Builders likewise, by name (the list of them is in the order of who built most).
 function normalize(city) {
-  const { scannedAt, scanMs, files, gone, commits, identity, ...rest } = city;
+  const { scannedAt, scanMs, files, gone, commits, identity, authors, ...rest } = city;
   const { idleYears, ...metrics } = identity.metrics; // the frozen clock talking, not the scanner
   const paths = files.map(f => f.p);
   const commitList = commits.map(([t, ...idx]) => [t, ...idx.map(i => paths[i])]);
@@ -64,8 +65,8 @@ function normalize(city) {
     identity: { ...identity, metrics },
     // the timeline is long and every file's born / last / churn already tells its story: keep a fingerprint
     commits: { count: commitList.length, digest: createHash('sha256').update(JSON.stringify(commitList)).digest('hex').slice(0, 16) },
-    files: Object.fromEntries(files.map(({ p, imp, ...f }) => [p, { ...f, imp: imp.map(i => paths[i]) }])),
-    gone: Object.fromEntries(gone.map(({ p, ...f }) => [p, f])),
+    files: Object.fromEntries(files.map(({ p, imp, b, ...f }) => [p, { ...f, imp: imp.map(i => paths[i]), ...(b !== undefined && { by: authors[b] }) }])),
+    gone: Object.fromEntries(gone.map(({ p, b, ...f }) => [p, { ...f, ...(b !== undefined && { by: authors[b] }) }])),
   };
 }
 
