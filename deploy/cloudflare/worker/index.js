@@ -89,9 +89,10 @@ const CARD = 2;               // bump when the card's look (or its encoding) cha
 const esc = t => t.replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const cardKey = (info, v = CARD) => `cards/v${SCANNER}.${v}/${info.full.toLowerCase()}/${info.sha}.png`;
 // a person's card: their name hashed, so any name makes a plain key
+const PERSON = 2; // bump when only a person's card changes (their face, say), not the repo's
 const personKey = async (info, who) => {
   const h = new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(`${who.by}\n${who.most}`)));
-  return `cards/v${SCANNER}.${CARD}/${info.full.toLowerCase()}/${info.sha}/by/${[...h.slice(0, 12)].map(b => b.toString(16).padStart(2, '0')).join('')}.png`;
+  return `cards/v${SCANNER}.${CARD}/${info.full.toLowerCase()}/${info.sha}/by${PERSON}/${[...h.slice(0, 12)].map(b => b.toString(16).padStart(2, '0')).join('')}.png`;
 };
 const cityKey = info => `cities/v${SCANNER}/${info.full.toLowerCase()}/${info.sha}.json`;
 const sleep = ms => new Promise(r => setTimeout(r, ms));
