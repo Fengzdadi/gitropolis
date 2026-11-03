@@ -140,6 +140,7 @@ export function buildTrees({ layout, B, streets, unit, plateStep, shared }) {
       if (c.half < unit * 0.22) continue;
       const pts = c.pts;
       for (let k = 0; k < pts.length; k++) {
+        if (c.bare[k]) continue;
         const a = pts[k], b = pts[(k + 1) % pts.length];
         const L = Math.hypot(b[0] - a[0], b[1] - a[1]);
         for (let t = spacing * 0.6; t < L - spacing * 0.6; t += spacing) {

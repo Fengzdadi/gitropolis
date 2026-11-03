@@ -315,7 +315,9 @@ export function buildStreets({ layout, B, files, inDeg, SIZE, t01 }) {
   const bornAt = (x, z) => { const p = sample(x, z); return p < 0 ? 0 : bornOf(p); };
 
   // --- lanes: every block is circled by a lane halfway between its kerb and the street's centre line,
-  // so the two blocks either side of a street give it traffic in both directions
+  // so the two blocks either side of a street give it traffic in both directions. Each side of a block
+  // keeps its own distance, so a block with a wide road on one side and a canal on another drives
+  // both right
   const lanes = [], curbs = [];
   blocks.forEach((b, id) => {
     if (b.type === 'park') return;
@@ -323,33 +325,51 @@ export function buildStreets({ layout, B, files, inDeg, SIZE, t01 }) {
     let area = 0;
     for (let k = 0, m = poly.length - 1; k < poly.length; m = k++) area += (poly[m][0] - poly[k][0]) * (poly[m][1] + poly[k][1]);
     const out = area > 0 ? 1 : -1; // sign that turns an edge normal outward
-    const gaps = [], roads = [];
+    const gaps = poly.map(() => NaN), roads = poly.map(() => NaN);
     for (let k = 0; k < poly.length; k++) {
       const [ax, az] = poly[k], [bx, bz] = poly[(k + 1) % poly.length];
       const L = Math.hypot(bx - ax, bz - az);
       if (L < tex * 2) continue;
       const nx = out * (bz - az) / L, nz = -out * (bx - ax) / L;
       // walk outward until the distance stops growing: that's the street's centre. A street with no
-      // block across has its centre halfway to the river bank, or to where the asphalt stops
-      let best = 0, road = 0, s = 1;
-      for (; s < maxHalf; s++) {
-        const p = sample((ax + bx) / 2 + nx * s * tex, (az + bz) / 2 + nz * s * tex);
-        if (p < 0 || label[p] >= 0) break;
-        if (wet[p]) { road = s / 2; break; }
-        if (D[p] < best - 0.5) break;
-        best = Math.max(best, D[p]);
-      }
-      gaps.push(best);
-      roads.push(road || (s >= maxHalf ? maxHalf / 2 : best));
+      // block across has its centre halfway to the river bank, or to where the asphalt stops. A long
+      // side is walked from five places and the middle answer kept, so one bridge doesn't decide it
+      const walks = (L > tex * 16 ? [0.2, 0.35, 0.5, 0.65, 0.8] : [0.5]).map(f => {
+        let best = 0, s = 1;
+        for (; s < maxHalf; s++) {
+          const p = sample(ax + (bx - ax) * f + nx * s * tex, az + (bz - az) * f + nz * s * tex);
+          if (p < 0 || label[p] >= 0) break;
+          if (wet[p]) return [best, s / 2];
+          if (D[p] < best - 0.5) break;
+          best = Math.max(best, D[p]);
+        }
+        return [best, s >= maxHalf ? maxHalf / 2 : best];
+      });
+      const mid = i => walks.map(w => w[i]).sort((p, q) => p - q)[walks.length >> 1];
+      gaps[k] = mid(0);
+      roads[k] = mid(1);
     }
-    if (!gaps.length) return;
-    gaps.sort((p, q) => p - q);
-    roads.sort((p, q) => p - q);
-    const half = gaps[Math.floor(gaps.length * 0.3)], road = roads[Math.floor(roads.length * 0.3)];
+    const sides = gaps.filter(g => g === g).sort((p, q) => p - q);
+    if (!sides.length) return;
+    const typical = roads.filter(r => r === r).sort((p, q) => p - q);
+    const half = sides[Math.floor(sides.length * 0.3)], road = typical[Math.floor(typical.length * 0.3)];
     if (half < 1.5) return; // alleys too narrow for a car
-    if (road >= 1.5) lanes.push({ pts: offset(poly, out, road * tex * 0.5), lane: road * tex * 0.5, weight: 0.15 + 0.85 * Math.sqrt(weight[id] / maxW), born: Math.max(0, born[id] - LAND_LEAD) }); // traffic comes with the road
-    // a line just off the kerb, where street trees go
-    curbs.push({ pts: offset(poly, out, half * tex * 0.2), half: half * tex, born: born[id] });
+    // sides too short to measure (rounded corners) take the narrower of the sides either side of them
+    const fill = v => v.map((x, k) => {
+      if (x === x) return x;
+      let p = k, q = k;
+      do p = (p - 1 + v.length) % v.length; while (v[p] !== v[p]);
+      do q = (q + 1) % v.length; while (v[q] !== v[q]);
+      return Math.min(v[p], v[q]);
+    });
+    const lane = fill(roads).map(r => r * tex * 0.5), gap = fill(gaps);
+    if (road >= 1.5) lanes.push({ pts: offset(poly, out, lane), lane: road * tex * 0.5, weight: 0.15 + 0.85 * Math.sqrt(weight[id] / maxW), born: Math.max(0, born[id] - LAND_LEAD) }); // traffic comes with the road
+    // a line just off the kerb, where street trees go, kept far enough in from the lane that a tree's
+    // canopy (up to ~0.18 unit) clears a passing bus (~0.1 unit either side of the lane); a side too
+    // narrow for that gets none (where cars drive)
+    const room = lane.map(l => l - layout.unit * 0.28);
+    const kerb = room.map((r, k) => Math.max(0, Math.min(gap[k] * tex * 0.2, r)));
+    curbs.push({ pts: offset(poly, out, kerb), bare: room.map(r => road >= 1.5 && r < 0), half: half * tex, born: born[id] });
   });
 
   // --- boats: loops out on the water around each island
@@ -371,14 +391,19 @@ export function buildStreets({ layout, B, files, inDeg, SIZE, t01 }) {
 }
 
 // push a polygon outward by `d` (mitred corners, clamped so sharp corners don't spike)
+// d is one distance, or one per side (side k runs from poly[k] to poly[k + 1])
 function offset(poly, out, d) {
   const n = poly.length;
   return poly.map((p, k) => {
     const a = poly[(k - 1 + n) % n], b = poly[(k + 1) % n];
     const e1 = norm([p[0] - a[0], p[1] - a[1]]), e2 = norm([b[0] - p[0], b[1] - p[1]]);
     const n1 = [out * e1[1], -out * e1[0]], n2 = [out * e2[1], -out * e2[0]];
+    const d1 = typeof d === 'number' ? d : d[(k - 1 + n) % n], d2 = typeof d === 'number' ? d : d[k];
+    const det = n1[0] * n2[1] - n1[1] * n2[0];
+    // two sides at different distances meet where their offset lines cross; nearly straight on, halfway
+    if (d1 !== d2 && Math.abs(det) > 0.3) return [p[0] + (d1 * n2[1] - d2 * n1[1]) / det, p[1] + (d2 * n1[0] - d1 * n2[0]) / det];
     const m = norm([n1[0] + n2[0], n1[1] + n2[1]]);
-    const s = d / Math.max(0.35, m[0] * n1[0] + m[1] * n1[1]);
+    const s = (d1 + d2) / 2 / Math.max(0.35, m[0] * n1[0] + m[1] * n1[1]);
     return [p[0] + m[0] * s, p[1] + m[1] * s];
   });
 }
