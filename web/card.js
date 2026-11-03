@@ -32,30 +32,46 @@ async function fontsReady() {
   await Promise.race([Promise.all([document.fonts.load(`600 40px ${FONT}`), document.fonts.load(`400 20px ${FONT}`)]), new Promise(r => setTimeout(r, 2500))]);
 }
 
-// a person's face as pixel art: their avatar shrunk to FACE × FACE (null when it can't be had: no
-// avatar, offline, or a host that won't let a canvas read it)
-const FACE = 24;
-function pixelFace(src) {
-  if (!src) return Promise.resolve(null);
+// a person's avatar, fetched large enough to shrink to any face on a card (null when it can't be had:
+// no avatar, offline, or a host that won't let a canvas read it)
+const FACE_SRC = 256; // (the biggest face, a story's at 3×, is ~215 art pixels)
+function loadFace(src) {
+  let url;
+  try { url = new URL(src); } catch { return Promise.resolve(null); }
+  url.searchParams.set('s', String(FACE_SRC)); // (GitHub's avatars come in any size asked for)
   return new Promise(resolve => {
     const img = new Image();
     img.crossOrigin = 'anonymous';
     img.onload = () => {
       const c = document.createElement('canvas');
-      c.width = c.height = FACE;
+      c.width = c.height = FACE_SRC;
       const g = c.getContext('2d');
       g.imageSmoothingQuality = 'high';
-      g.drawImage(img, 0, 0, FACE, FACE);
+      g.drawImage(img, 0, 0, FACE_SRC, FACE_SRC);
       try { g.getImageData(0, 0, 1, 1); resolve(c); } catch { resolve(null); }
     };
     img.onerror = () => resolve(null);
     setTimeout(() => resolve(null), 4000);
-    img.src = src;
+    img.src = url;
   });
 }
 async function prepare(info) {
   await fontsReady();
-  if (info.person && info.person.pix === undefined) info.person.pix = await pixelFace(info.person.img);
+  if (info.person && info.person.pix === undefined) info.person.pix = await loadFace(info.person.img);
+}
+// the face as pixel art on the card's own grid: one pixel of it per art pixel, as fine as the city
+// around it (shrunk from too few, a detailed avatar turns to mush)
+function pixelFace(p, n) {
+  p.sizes ??= new Map();
+  if (!p.sizes.has(n)) {
+    const c = document.createElement('canvas');
+    c.width = c.height = n;
+    const g = c.getContext('2d');
+    g.imageSmoothingQuality = 'high';
+    g.drawImage(p.pix, 0, 0, n, n);
+    p.sizes.set(n, c);
+  }
+  return p.sizes.get(n);
 }
 
 // where the text goes on a W × H design (and so the bands the city keeps clear of), and how to paint it
@@ -100,7 +116,8 @@ function layout(g, format, info, { W, H, full, scale }) {
   const face = (x, y, s) => {
     const p = info.person;
     g.fillStyle = INK; g.fillRect(x - BORDER, y - BORDER, s + BORDER * 2, s + BORDER * 2);
-    if (p.pix) { g.imageSmoothingEnabled = false; g.drawImage(p.pix, x, y, s, s); return; }
+    // (an art pixel is 2×2 of the output, whatever the card's scale)
+    if (p.pix) { g.imageSmoothingEnabled = false; g.drawImage(pixelFace(p, Math.round(s * g.getTransform().a / 2)), x, y, s, s); return; }
     g.fillStyle = BAR_OFF; g.fillRect(x, y, s, s);
     text(p.initial, x + s / 2, y + s * 0.72, Math.round(s * 0.55), INK, 600, 'center');
   };
