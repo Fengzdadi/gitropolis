@@ -345,14 +345,16 @@ export async function scanRepo(repo, { maxCommits = 20000, name } = {}) {
     // renameLimit: pinned to git's own default, so pairMoves knows when git gave up (and an older git,
     // or one configured otherwise, pairs the same files)
     const proc = spawn('git', ['-C', root, '-c', 'core.quotePath=false', '-c', `diff.renameLimit=${RENAME_LIMIT}`, 'log', `--max-count=${maxCommits}`, '--raw', '--no-abbrev',
-      '--format=@@%ct %H', '-M', '--reverse'], { stdio: ['ignore', 'pipe', 'ignore'] });
+      '--format=@@%ct %H %aN', '-M', '--reverse'], { stdio: ['ignore', 'pipe', 'ignore'] });
     const rl = readline.createInterface({ input: proc.stdout });
     let cur = null, added = [], deleted = [];
     rl.on('line', line => {
       if (line.startsWith('@@')) {
+        // "@@<time> <hash> <author>" (%aN: the name .mailmap gives them, so one person's two emails are one builder)
+        const at = line.indexOf(' '), by = line.indexOf(' ', at + 1);
         if (cur) pairMoves(added, deleted);
-        else boundary = line.slice(line.indexOf(' ') + 1);
-        cur = { t: parseInt(line.slice(2)), f: [] };
+        else boundary = line.slice(at + 1, by);
+        cur = { t: parseInt(line.slice(2)), a: line.slice(by + 1) || undefined, f: [] }; // (a commit can have no name on it)
         commits.push(cur);
         added = []; deleted = [];
         return;
@@ -372,8 +374,8 @@ export async function scanRepo(repo, { maxCommits = 20000, name } = {}) {
       // branches), and stays deleted.
       if (!h && (h = dead.get(to)) && arrives) { dead.delete(to); delete h.died; }
       // (a file seen for the first time by an edit was there before the commits read: it isn't new.
-      // was: its path then, to look up when it was born)
-      if (!h) { h = { born: cur.t, last: 0, churn: 0 }; if (st[0] !== 'A') h.was = from; if (arrives) added.push(to); }
+      // was: its path then, to look up when it was born. by: who added it, when the walk saw them do it)
+      if (!h) { h = { born: cur.t, last: 0, churn: 0 }; if (st[0] !== 'A') h.was = from; else h.by = cur.a; if (arrives) added.push(to); }
       if (st[0] === 'D') {
         alias.delete(from);
         dead.set(from, h);
@@ -472,7 +474,7 @@ export async function scanRepo(repo, { maxCommits = 20000, name } = {}) {
     const idx = index.get(p);
     if (idx === undefined) continue;
     recIdx.set(h, idx);
-    Object.assign(files[idx], { born: h.born, last: h.last, churn: h.churn });
+    Object.assign(files[idx], { born: h.born, last: h.last, churn: h.churn, by: h.by });
   }
   for (const c of commits) c.f = [...new Set(c.f.map(h => recIdx.get(h)).filter(i => i !== undefined))];
   const touched = commits.filter(c => c.f.length);
@@ -509,11 +511,18 @@ export async function scanRepo(repo, { maxCommits = 20000, name } = {}) {
         if (!f || kind(f) && kind(f) !== 'code' && !keep[kind(f)]) continue;
         if (engine && ENGINE_LANG[engine.name].includes(f.lang) && !SAMPLE_DIR.test(p)) f.g = engine.name;
         // last: its last change before it went; churn: its changes, not counting the deletion
-        gone.push({ p, lang: f.lang, loc: f.loc, a: f.a, born: h.born, last: h.edited, died: h.died, churn: h.churn - 1, ...(f.g && { g: f.g }) });
+        gone.push({ p, lang: f.lang, loc: f.loc, a: f.a, born: h.born, last: h.edited, died: h.died, churn: h.churn - 1, ...(f.g && { g: f.g }), by: h.by });
       }
     }
   } catch { gone.length = 0; } // the deleted files are extra: without them the city is still whole
   gone.sort((x, y) => x.died - y.died || (x.p < y.p ? -1 : 1));
+  // who built the city, those who built the most first; each building names its builder by place in the
+  // list (b), and one added before the commits read has none. Names only: the emails stay in the repo
+  const built = new Map();
+  for (const f of [...files, ...gone]) if (f.by !== undefined) built.set(f.by, (built.get(f.by) || 0) + 1);
+  const authors = [...built].sort((x, y) => y[1] - x[1] || (x[0] < y[0] ? -1 : 1)).map(([a]) => a);
+  const builder = new Map(authors.map((a, i) => [a, i]));
+  for (const g of gone) { const { by } = g; delete g.by; if (by !== undefined) g.b = builder.get(by); }
   const edges = files.reduce((n, f) => n + f.imp.size, 0);
   const city = {
     name,
@@ -521,7 +530,8 @@ export async function scanRepo(repo, { maxCommits = 20000, name } = {}) {
     scanMs: Date.now() - t0,
     start, end, ...(truncated && { truncated, firstCommit }),
     stats: { files: files.length, loc: files.reduce((n, f) => n + f.loc, 0), edges, commits: touched.length },
-    files: files.map(f => ({ p: f.p, lang: f.lang, loc: f.loc, imp: [...f.imp], a: f.a, churn: f.churn, born: f.born, last: f.last, ...(status.get(f) && { s: status.get(f) }), ...(f.g && { g: f.g }) })),
+    files: files.map(f => ({ p: f.p, lang: f.lang, loc: f.loc, imp: [...f.imp], a: f.a, churn: f.churn, born: f.born, last: f.last, ...(status.get(f) && { s: status.get(f) }), ...(f.g && { g: f.g }), ...(f.by !== undefined && { b: builder.get(f.by) }) })),
+    authors,
     // files deleted along the way (none of them is in commits: those name the files above)
     gone,
     // compact: [time, fileIdx, fileIdx, ...]; skip giant sweeping commits (formatting, renames)
