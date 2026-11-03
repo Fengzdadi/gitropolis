@@ -92,7 +92,27 @@
   #names .slash { display: none; }
   #names.off .slash { display: block; }
   body.style-pixel #bar #names.off { background: #cdc8d2; }
-  #names svg { display: block; }
+  #names svg, #who svg { display: block; }
+  #bar button[hidden] { display: none; }
+  #bar #who.on { background: rgba(78, 240, 255, .25); }
+  body.studio #bar #who.on { background: rgba(0, 0, 0, .1); }
+  body.style-pixel #bar #who.on { background: #e8833a; }
+  /* who built what: a paper panel over the timeline, one row per builder */
+  #builders { position: fixed; left: 50%; bottom: 96px; transform: translateX(-50%); width: min(360px, calc(100vw - 32px)); max-height: min(420px, 55vh);
+    display: grid; grid-template-rows: auto auto 1fr; gap: 8px; padding: 10px 12px 12px; z-index: 10;
+    background: #f2efe9; color: #14121c; border: 3px solid #14121c; box-shadow: 4px 4px 0 #14121c; font-family: var(--ui-font, monospace); }
+  #builders[hidden] { display: none; }
+  #builders .head { font-size: 15px; }
+  #builders .head small { display: block; font-size: 12px; color: #4a4458; }
+  #builders input { font: inherit; font-size: 14px; padding: 5px 8px; border: 2px solid #14121c; background: #fff; color: #14121c; min-width: 0; }
+  #builders input[hidden] { display: none; }
+  #builders .list { overflow: auto; display: grid; align-content: start; }
+  #builders .list button { all: unset; cursor: pointer; display: flex; gap: 12px; justify-content: space-between; padding: 3px 6px; font-size: 14px; }
+  #builders .list button:hover, #builders .list button:focus-visible { background: #cdc8d2; }
+  #builders .list button.on { background: #f2c14e; }
+  #builders .list span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #builders .list span:last-child { color: #4a4458; }
+  #builders .more { font-size: 12px; color: #4a4458; padding: 3px 6px; }
   /* a short note above the timeline when the names are switched */
   #note { position: fixed; left: 50%; bottom: 96px; transform: translateX(-50%); padding: 4px 10px; font-size: 13px; pointer-events: none;
     background: #f2efe9; color: #14121c; border: 2px solid #14121c; box-shadow: 2px 2px 0 #14121c; font-family: var(--ui-font, monospace);
@@ -268,6 +288,12 @@
   </div>
   <button id="speed" title="Playback speed" aria-label="Playback speed">1×</button>
   <button id="names" title="District names: show or hide (L)" aria-label="Show or hide district names" aria-pressed="true"><svg viewBox="0 0 16 16" width="16" height="16" shape-rendering="crispEdges" aria-hidden="true"><rect x="2" y="3" width="12" height="7" fill="none" stroke="currentColor" stroke-width="2"/><rect x="5" y="6" width="6" height="1" fill="currentColor"/><rect x="7" y="10" width="2" height="5" fill="currentColor"/><rect class="slash" x="1" y="7" width="14" height="2" fill="currentColor" transform="rotate(-45 8 8)"/></svg></button>
+  <button id="who" title="Who built what (B)" aria-label="Who built what" aria-expanded="false" aria-controls="builders" hidden><svg viewBox="0 0 16 16" width="16" height="16" shape-rendering="crispEdges" aria-hidden="true"><rect x="5" y="1" width="6" height="3" fill="currentColor"/><rect x="3" y="4" width="10" height="1" fill="currentColor"/><rect x="6" y="5" width="4" height="3" fill="currentColor"/><rect x="4" y="10" width="8" height="5" fill="none" stroke="currentColor" stroke-width="2"/></svg></button>
+</div>
+<div id="builders" hidden role="dialog" aria-label="Who built what">
+  <div class="head">who built what<small>a building's builder is whoever added its file</small></div>
+  <input id="who-find" placeholder="find a builder" autocomplete="off" spellcheck="false" aria-label="Find a builder">
+  <div class="list"></div>
 </div>
 <div id="note" role="status" aria-live="polite"></div>
 <div id="links">
