@@ -82,3 +82,7 @@ createServer(async (req, res) => {
     res.writeHead(502, { 'content-type': 'text/plain' }).end(err.message);
   }
 }).listen(PORT, () => console.log(`scanner listening on ${PORT}`));
+
+// The Worker sends SIGTERM once the container has been idle for sleepAfter (never mid-request). Node is
+// PID 1 here, and PID 1 ignores a signal it has no handler for: without this the container never sleeps.
+process.on('SIGTERM', () => process.exit(0));
