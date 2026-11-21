@@ -197,19 +197,40 @@ check('in a history read only in part, commit rates are measured over the commit
   return [[city.identity.metrics.commitsPerWeek, 1]];
 });
 
-check('a partial clone is scanned without fetching what it doesn\'t have', async () => {
-  const dir = repo();
+// a clone of `dir` without the blobs of its history (it has those of its checkout), and a count of the
+// objects it's missing: one that goes down means git fetched something
+function blobless(dir) {
   git(dir, ['config', 'uploadpack.allowFilter', 'true']);
-  const t0 = commit(dir, { 'old/x.js': src('x'), 'keep.js': src('k') });
-  commit(dir, { 'old/x.js': null, 'new/x.js': src('x') + 'export const more = 1;\n' }); // git would read both to pair them
-  commit(dir, { 'keep.js': src('k2') });
   const copy = mkdtempSync(path.join(os.tmpdir(), 'gitropolis-history-'));
   made.push(copy);
   git(copy, ['clone', '-q', '--no-local', '--filter=blob:none', `file://${dir}`, '.']);
-  const missing = () => git(copy, ['rev-list', '--objects', '--all', '--missing=print']).split('\n').filter(l => l.startsWith('?')).length;
+  return { copy, missing: () => git(copy, ['rev-list', '--objects', '--all', '--missing=print']).split('\n').filter(l => l.startsWith('?')).length };
+}
+
+check('a partial clone is scanned without fetching what it doesn\'t have', async () => {
+  const dir = repo();
+  const t0 = commit(dir, { 'old/x.js': src('x'), 'keep.js': src('k') });
+  commit(dir, { 'old/x.js': null, 'new/x.js': src('x') + 'export const more = 1;\n' }); // git would read both to pair them
+  commit(dir, { 'keep.js': src('k2') });
+  const { copy, missing } = blobless(dir);
   const before = missing();
   const city = await scanRepo(copy, { maxCommits: 1 });
   return [[before > 0, true], [missing(), before], [born(city, 'new/x.js'), t0]];
+});
+
+check('a partial clone\'s whole history is walked without fetching: names and blob ids say what moved', async () => {
+  const dir = repo();
+  const t0 = commit(dir, { 'old/x.js': src('x'), 'lib/a.js': src('a'), 'lib/same.js': src('s'), 'keep.js': src('k'), 'drop.js': src('d') });
+  commit(dir, { 'old/x.js': null, 'mid/x.js': src('x') + 'export const more = 1;\n' });          // moved and edited: git would read both to pair them …
+  commit(dir, { 'mid/x.js': null, 'new/x.js': src('x') + 'export const more = 2;\n' });          // … twice, the second time from a blob only this commit had
+  commit(dir, { 'lib/same.js': null, 'src/other.js': src('s') });                                // moved as it was, under another name: the blob's id pairs it
+  const t4 = commit(dir, { 'lib/a.js': null, 'drop.js': null, 'lib/b.js': src('b') });           // nothing says b.js was a.js
+  const t5 = commit(dir, { 'keep.js': src('k2') });
+  const { copy, missing } = blobless(dir);
+  const before = missing();
+  const city = await scanRepo(copy);
+  return [[before > 0, true], [missing(), before], [born(city, 'new/x.js'), t0], [born(city, 'src/other.js'), t0], [born(city, 'lib/b.js'), t4],
+    [born(city, 'keep.js'), t0], [city.files.find(f => f.p === 'keep.js')?.last, t5], [city.files.find(f => f.p === 'new/x.js')?.churn, 3]];
 });
 
 check('a deleted file drawn from its size alone is drawn without reading it', async () => {
