@@ -216,9 +216,9 @@ function paint(g, t) {
   }
 }
 
-// one merged mesh for the whole city; per-vertex building id, base height, birth and death time
-// let a shader grow every building from the ground when the timeline reaches it (and take a deleted
-// file's back down when it goes)
+// one merged mesh for the whole city; a per-vertex building id, and each building's base height,
+// birth and death time, let a shader grow every building from the ground when the timeline reaches
+// it (and take a deleted file's back down when it goes)
 export function buildCityMesh({ buildingGeometry, specs, B, files, t01, shared, unit, heat, focus, glow = null, castShadow = true }) {
   // a big repo is ~1M triangles, so the float geometry is never gathered in one place: each building
   // is packed as soon as it's built (colour and normals as bytes: palette art doesn't need floats) and
@@ -234,8 +234,13 @@ export function buildCityMesh({ buildingGeometry, specs, B, files, t01, shared, 
     if (spec.tint) paint(g, spec.tint);
     g.rotateY(B[i].rot || 0).translate(B[i].x, B[i].y, B[i].z);
     const a = g.attributes, n = a.position.count;
+    // the shader stands a vertex at base + (y - base) × grow, which in floats isn't quite y when grow
+    // is 1 and the base isn't 0. Store what it comes to, so a grown building is the same to the last
+    // bit whether the shader worked that out or (at the end of the timeline, below) left it alone
+    const base = Math.fround(B[i].y), pos = a.position.array;
+    if (base) for (let k = 1; k < pos.length; k += 3) pos[k] = Math.fround(base + Math.fround(pos[k] - base));
     pieces.push({
-      i, n, position: a.position.array,
+      i, n, position: pos,
       normal: toBytes(a.normal.array, Int8Array, 127),
       color: toBytes(a.color.array, Uint8Array, 255),
       part: a.part ? Uint8Array.from(a.part.array) : new Uint8Array(n),
@@ -254,38 +259,64 @@ export function buildCityMesh({ buildingGeometry, specs, B, files, t01, shared, 
   join('normal', Int8Array, 3, true);
   join('color', Uint8Array, 3, true);
   join('part', Uint8Array, 1, false);
-  // per-vertex building id, base height, birth and death time, the same for every vertex of a building
-  const meta = new Float32Array(count * 4);
+  // each vertex carries only its building's id. What's the same for every vertex of a building (base
+  // height, birth and death time) is one texel per building in a float texture the vertex shader
+  // reads by that id, 1024 buildings to a row: 16 bytes a building instead of 12 more on every vertex
+  // (a third of the mesh). Float32 texels are what the per-vertex floats were, so the growth
+  // animation is timed exactly as before; float ids are exact up to 16 million buildings. (A Uint16
+  // id only looks smaller: a 2-byte stride is re-packed by the driver, and on Metal the GPU process
+  // ended up holding more than with floats.)
+  const SW = 1024, SH = Math.max(1, Math.ceil(files.length / SW));
+  const id = new Float32Array(count), metaData = new Float32Array(SW * SH * 4);
   let o = 0;
   for (const { i, n } of pieces) {
-    const y = B[i].y, born = t01(files[i].born), died = B[i].died ?? 2;
-    for (let k = 0; k < n; k++, o += 4) { meta[o] = i; meta[o + 1] = y; meta[o + 2] = born; meta[o + 3] = died; }
+    id.fill(i, o, o += n);
+    metaData.set([B[i].y, t01(files[i].born), B[i].died ?? 2], i * 4);
   }
-  geo.setAttribute('aMeta', new THREE.BufferAttribute(meta, 4));
+  geo.setAttribute('aId', new THREE.BufferAttribute(id, 1));
+  const metaTex = new THREE.DataTexture(metaData, SW, SH, THREE.RGBAFormat, THREE.FloatType);
+  metaTex.needsUpdate = true;
   // the pieces would otherwise live as long as any closure from this scope (syncState below)
   pieces.length = 0;
-  // let the GPU keep the only copy once uploaded (picking uses the proxy boxes, not this mesh)
-  const bytes = Object.values(geo.attributes).reduce((n, a) => n + a.array.byteLength, 0);
+  // let the GPU keep the only copy once uploaded (picking uses the proxy boxes, not this mesh).
+  // The per-building texture is counted with the vertex data it was taken out of, and dropped like it.
+  const bytes = Object.values(geo.attributes).reduce((n, a) => n + a.array.byteLength, metaData.byteLength);
   // three.js still needs the bounds (for sorting) after the arrays are gone, so compute them first
   geo.computeBoundingBox();
   geo.computeBoundingSphere();
   for (const a of Object.values(geo.attributes)) a.onUpload(function () { this.array = null; });
+  metaTex.onUpdate = () => { metaTex.image.data = null; };
+  // A vertex whose position waits on a texture read is slow to place: on an Apple GPU about 1 ms a
+  // frame for a 28,000-building city, more than the smaller vertices win back. At the end of the
+  // timeline, where a city spends most of its time, nothing is growing: a building is whole, or it's
+  // a deleted file's and gone, and those come last (main.js adds them after the living), so there the
+  // id alone says which and the read is skipped. (Were they ever not last, it would never be skipped.)
+  const gone = i => (B[i].died ?? 2) <= 1;
+  let live = files.length;
+  while (live > 0 && gone(live - 1)) live--;
+  const own = { tMeta: { value: metaTex }, uLive: { value: live }, uEnd: { value: files.some((f, i) => i < live && gone(i)) ? 9 : 1 } };
+  const vars = 'attribute float aId; uniform float uTimeline, uLive, uEnd; uniform highp sampler2D tMeta;';
+  // (texelFetch reads the texel itself: no filtering or coordinate rounding between an id and its building)
   const grow = `
-    float b0 = aMeta.z * 0.97, d0 = aMeta.w * 0.97;
-    float grow = smoothstep(b0, b0 + 0.03, uTimeline) * (1.0 - smoothstep(d0, d0 + 0.02, uTimeline));
-    transformed.y = aMeta.y + (transformed.y - aMeta.y) * grow;
+    ivec2 cell = ivec2(int(aId) % ${SW}, int(aId) / ${SW});
+    float grow = step(aId + 0.5, uLive);
+    if (uTimeline < uEnd) {
+      vec3 meta = texelFetch(tMeta, cell, 0).xyz; // base height, birth, death
+      float b0 = meta.y * 0.97, d0 = meta.z * 0.97;
+      grow = smoothstep(b0, b0 + 0.03, uTimeline) * (1.0 - smoothstep(d0, d0 + 0.02, uTimeline));
+      transformed.y = meta.x + (transformed.y - meta.x) * grow;
+    }
     transformed *= step(0.001, grow);`;
-  // per-building live state (commit flash, focus) in a small texture the shader looks up by building id
-  const SW = 1024, SH = Math.max(1, Math.ceil(files.length / SW));
+  // per-building live state (commit flash, focus) in a second small texture, looked up the same way
   const stateData = new Uint8Array(SW * SH * 4);
   const stateTex = new THREE.DataTexture(stateData, SW, SH, THREE.RGBAFormat);
   stateTex.needsUpdate = true;
   const mat = new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true });
   mat.onBeforeCompile = sh => {
-    Object.assign(sh.uniforms, { uTimeline: shared.uTimeline, uFocus: shared.uFocus, uLit: shared.uLit, tState: { value: stateTex } });
+    Object.assign(sh.uniforms, { uTimeline: shared.uTimeline, uFocus: shared.uFocus, uLit: shared.uLit, tState: { value: stateTex } }, own);
     sh.vertexShader = sh.vertexShader
-      .replace('#include <common>', `#include <common>\nattribute vec4 aMeta; uniform float uTimeline; uniform sampler2D tState; varying vec3 vState;`)
-      .replace('#include <begin_vertex>', `#include <begin_vertex>\n${grow}\nvState = texture2D(tState, vec2((mod(aMeta.x, ${SW}.0) + 0.5) / ${SW}.0, (floor(aMeta.x / ${SW}.0) + 0.5) / ${SH}.0)).rgb;`);
+      .replace('#include <common>', `#include <common>\n${vars} uniform sampler2D tState; varying vec3 vState;`)
+      .replace('#include <begin_vertex>', `#include <begin_vertex>\n${grow}\nvState = texelFetch(tState, cell, 0).rgb;`);
     sh.fragmentShader = sh.fragmentShader
       .replace('#include <common>', '#include <common>\nvarying vec3 vState; uniform float uFocus, uLit;')
       .replace('#include <color_fragment>', `#include <color_fragment>
@@ -304,9 +335,9 @@ export function buildCityMesh({ buildingGeometry, specs, B, files, t01, shared, 
   addFacadeDetail(mat, { unit, shared });
   const depth = new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking });
   depth.onBeforeCompile = sh => {
-    sh.uniforms.uTimeline = shared.uTimeline;
+    Object.assign(sh.uniforms, { uTimeline: shared.uTimeline }, own);
     sh.vertexShader = sh.vertexShader
-      .replace('#include <common>', '#include <common>\nattribute vec4 aMeta; uniform float uTimeline;')
+      .replace('#include <common>', `#include <common>\n${vars}`)
       .replace('#include <begin_vertex>', `#include <begin_vertex>\n${grow}`);
   };
   const mesh = new THREE.Mesh(geo, mat);
