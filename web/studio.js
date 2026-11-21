@@ -322,6 +322,8 @@ export function buildStudio(ctx) {
   const trees = S.pixel && layout ? timed('trees', () => buildTrees({ layout, B, streets, unit: layout.unit, plateStep, shared })) : null;
   if (trees) scene.add(trees);
   if (streets) { streets.drivable = streets.navigable = streets.clearance = streets.bornAt = null; streets.curbs = null; streets.lanes = streets.boats = null; streets.texture.onUpdate = streets.alongTexture.onUpdate = t => { t.image.data = null; }; }
+  // a board paints no streets, so its textures are never uploaded and onUpdate never lets go of them
+  if (streets && !S.pixel) streets.texture.image.data = streets.alongTexture.image.data = null;
   const roadY = layout?.groundIsWater ? plateStep * 0.8 + 0.05 : 0.05;
 
   // ---- district plinths (classic treemap only)
