@@ -346,6 +346,7 @@ export async function scanRepo(repo, { maxCommits = 20000, name } = {}) {
   const root = git(repo, ['rev-parse', '--show-toplevel']).trim();
   name ||= path.basename(root);
   const listed = git(root, ['ls-files', '-z']).split('\0').filter(Boolean);
+  const partial = isPartial(root);
 
   // ---- git history: one pass over `git log --raw`, oldest first, following renames
   // so a file moved into src/ keeps the birthday of its original path. (Only which files each commit
@@ -361,8 +362,12 @@ export async function scanRepo(repo, { maxCommits = 20000, name } = {}) {
     // quotePath=false: non-ASCII names (中文.md, café.js) come back as raw UTF-8, matching ls-files
     // renameLimit: pinned to git's own default, so pairMoves knows when git gave up (and an older git,
     // or one configured otherwise, pairs the same files)
+    // -M100% in a partial clone: to pair a file that moved and changed git reads both, and there it would
+    // fetch every one it doesn't have. A file that moved as it was is paired from its blob's id alone,
+    // which any git does without reading it; the rest is left to pairMoves. (GIT_NO_LAZY_FETCH only makes
+    // sure: with it and plain -M, git stops at the first blob that isn't here.)
     const proc = spawn('git', ['-C', root, '-c', 'core.quotePath=false', '-c', `diff.renameLimit=${RENAME_LIMIT}`, 'log', `--max-count=${maxCommits}`, '--raw', '--no-abbrev',
-      '--format=@@%ct%x1f%H%x1f%aE%x1f%aN', '-M', '--reverse'], { stdio: ['ignore', 'pipe', 'ignore'] });
+      '--format=@@%ct%x1f%H%x1f%aE%x1f%aN', partial ? '-M100%' : '-M', '--reverse'], { stdio: ['ignore', 'pipe', 'ignore'], env: { ...process.env, GIT_NO_LAZY_FETCH: '1' } });
     const rl = readline.createInterface({ input: proc.stdout });
     let cur = null, added = [], deleted = [];
     rl.on('line', line => {
@@ -423,9 +428,10 @@ export async function scanRepo(repo, { maxCommits = 20000, name } = {}) {
   // (test/samples/each/_config.js → tests/samples/each/_config.js). Where git did compare, two files of
   // the same name in different folders are two files: one example app's register.html going as another's
   // arrives. Either way they're in the same language (results.py giving way to results.csv is new data).
+  // (In a partial clone git never compares them, whatever the commit's size: see -M100% above.)
   function pairMoves(added, deleted) {
     if (!added.length || !deleted.length) return;
-    const gaveUp = added.length * deleted.length > RENAME_LIMIT * RENAME_LIMIT;
+    const gaveUp = partial || added.length * deleted.length > RENAME_LIMIT * RENAME_LIMIT;
     for (const [to, from] of sameFiles(added, deleted, gaveUp ? MOVE_KEYS : [byStem])) {
       // the commit already counts as touching the old file (its deletion); the record made for the
       // new one is dropped, so its touch isn't counted twice
