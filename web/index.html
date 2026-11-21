@@ -206,6 +206,35 @@
   body.recording canvas { width: 100vw !important; height: auto !important; }
   #rec { position: fixed; top: 12px; left: 12px; color: #ff4fd8; font-size: 14px; letter-spacing: .1em; }
   @media (max-width: 700px) { #legend { display: none; } #date .d { font-size: 22px; } #hud h1 { font-size: 20px; } }
+  /* a phone, upright. The stats line wraps there, so the links can't sit under the title: they go down
+     above the timeline. The timeline gets a row of its own (beside four buttons it was too short to
+     scrub), the buttons a row under it, and everything a finger taps is big enough for one. */
+  @media (max-width: 560px) {
+    #hud { top: 14px; left: 16px; right: 16px; }
+    #hud h1 { margin-right: 108px; overflow-wrap: anywhere; line-height: 1.15; }
+    body.style-pixel #hud h1 { font-size: 26px; }
+    body.studio #hud h1 { font-size: 30px; }
+    #hud .stats { margin-top: 12px; line-height: 1.5; }
+    #date { top: 14px; right: 16px; }
+    #bar { bottom: 12px; flex-wrap: wrap; row-gap: 8px; }
+    #track { order: -1; flex-basis: 100%; }
+    #bar #speed { margin-left: auto; }
+    #bar button, body.style-pixel #bar button { width: 44px; height: 44px; }
+    #links { top: auto; bottom: 132px; left: 8px; right: 8px; justify-content: center; flex-wrap: wrap; gap: 0; }
+    #links a, #links button { padding: 10px 6px; }
+    #tip { max-width: calc(100vw - 16px); }
+    #note { bottom: 176px; }
+    #builders { left: 16px; right: 16px; width: auto; bottom: 136px; max-height: calc(100vh - 290px); }
+    #builders .list { max-height: calc(100vh - 400px); }
+    #builders .head .x { padding: 8px 12px; margin: -8px -12px -8px auto; }
+    #builders .head .back { padding: 6px 10px; }
+    #builders .row button { padding: 6px 0; }
+    #builders input { font-size: 16px; } /* (under 16px, iOS zooms the page in to type) */
+    #card-dialog { padding: 8px; }
+    #card-dialog .card-panel { max-height: calc(100vh - 16px); padding: 12px; }
+    #card-dialog .card-x { padding: 8px 10px; margin: -8px -10px; }
+    #landing .eg a { display: inline-block; padding: 8px 0; }
+  }
   /* while the city is on its way: the pixel sky and nothing else (the controls arrive with the city) */
   body.waiting { background: #86bfd9; }
   body.waiting #loading { color: #14121c; font-family: 'Pixelify Sans', monospace; font-size: 18px; letter-spacing: .04em; text-align: center; padding: 0 16px; place-content: center; }
