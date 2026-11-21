@@ -1153,8 +1153,11 @@ function pick(e) {
 }
 renderer.domElement.addEventListener('pointermove', e => {
   const t = performance.now();
-  if (t - lastMove < 40) return;
+  if (t - lastMove < 40 || e.pointerType === 'touch') return; // (a finger moving is panning: its tip comes with a tap)
   lastMove = t;
+  hover(e);
+});
+function hover(e) {
   hoverId = pick(e);
   shared.uHover.value = hoverId;
   hoverDistrict(hoverId >= 0 ? fileLabel[hoverId] : -1);
@@ -1175,13 +1178,19 @@ renderer.domElement.addEventListener('pointermove', e => {
     ...(f.gone ? [row(['deleted', fmtDate(f.died)])] : []),
     ...(hoverLabel >= 0 ? [row(['district', `${labelSource[hoverLabel].path} · ${labelMembers[hoverLabel].filter(i => i < LIVE).length.toLocaleString()} files`])] : []));
   tip.style.display = 'block';
-  tip.style.left = `${Math.min(e.clientX + 16, innerWidth - 380)}px`;
-  tip.style.top = `${e.clientY + 16}px`;
-});
+  // on screen, however narrow it is and wherever the finger was (above the timeline, not under it)
+  tip.style.left = `${Math.max(8, Math.min(e.clientX + 16, innerWidth - 380))}px`;
+  tip.style.top = `${Math.max(8, Math.min(e.clientY + 16, $('#bar').getBoundingClientRect().top - tip.offsetHeight - 8))}px`;
+}
 renderer.domElement.addEventListener('pointerleave', () => { hoverDistrict(-1); });
-renderer.domElement.addEventListener('pointerdown', e => { downAt = [e.clientX, e.clientY]; });
+renderer.domElement.addEventListener('pointerdown', e => {
+  downAt = [e.clientX, e.clientY];
+  if (e.pointerType === 'touch') tip.style.display = 'none'; // (the city is about to move from under it)
+});
 renderer.domElement.addEventListener('pointerup', e => {
   if (!downAt || Math.hypot(e.clientX - downAt[0], e.clientY - downAt[1]) > 4) return;
+  // a phone has no hover: a tap is both, the tip and the focus
+  if (e.pointerType === 'touch') hover(e);
   focus(pick(e));
 });
 let lit = -1; // the builder whose buildings are lit (who built what, below)
