@@ -53,9 +53,9 @@ Filming (`--gif`, `--video`, `--still`, `--card`) also needs Chrome, Chromium, E
 
 ## Checking a change
 
-gitropolis is checked against real repos. `npm test` scans seven public repos, each pinned to a commit in `test/repos.json`, and compares what the scanner found (every file, its imports and history, and which city it chose and why) with the snapshots in `test/snapshots/`. The first run clones the repos into `test/.repos` (about 90 MB); after that it takes a few seconds. When a repo no longer matches, it says what moved: the city type, the file count, and which files changed and how.
+gitropolis is checked against real repos. `npm test` scans eleven public repos, each pinned to a commit in `test/repos.json`, and compares what the scanner found (every file, its imports and history, and which city it chose and why) with the snapshots in `test/snapshots/`. The first run clones the repos into `test/.repos` (about 90 MB); after that it takes a few seconds. When a repo no longer matches, it says what moved: the city type, the file count, and which files changed and how.
 
-If your change is meant to move a repo, run `npm test -- --update`, read the snapshot diff, and commit it with your change. Say in the pull request why each repo moved. CI runs the same test on Node 18 and 22.
+If your change is meant to move a repo, run `npm test -- --update`, read the snapshot diff, and commit it with your change. Say in the pull request why each repo moved. CI runs the same test on Node 18, 22 and 24.
 
 `npm test` first checks that `web/index.html` preloads every module the page imports. If you add or remove an import, `node test/preload.mjs --print` gives the list to paste in.
 
