@@ -45,6 +45,9 @@ async function lookup(owner, repo, env, ctx) {
   return info;
 }
 
+// If-None-Match against a weak tag: weak comparison, so W/ on either side doesn't matter
+const fresh = (asked, tag) => !!asked && (asked.trim() === '*' || asked.split(',').some(t => t.trim().replace(/^W\//, '') === tag.replace(/^W\//, '')));
+
 const slot = name => { let h = 0; for (const ch of name) h = (h * 31 + ch.charCodeAt(0)) >>> 0; return `scanner-${h % POOL}`; };
 
 async function city(owner, repo, req, env, ctx) {
@@ -53,12 +56,24 @@ async function city(owner, repo, req, env, ctx) {
   try { info = await lookup(owner, repo, env, ctx); } catch (err) { return json(502, { error: err.message }); }
   if (info.missing || info.private) return json(404, { error: `github.com/${owner}/${repo} isn't a public repository` });
   if (info.size > MAX_KB) return json(413, { error: `${info.full} is too big to scan here (${Math.round(info.size / 1000)} MB) — run npx gitropolis on your own copy` });
-  const key = `cities/v${SCANNER}/${info.full.toLowerCase()}/${info.sha}.json`;
-  const hit = await env.CITIES.get(key);
+  const key = cityKey(info);
+  // a city never changes for a scanner version and commit, so a browser coming back after max-age asks
+  // with this and gets a 304 instead of megabytes again. Weak: Cloudflare compresses the body on its
+  // way out, which weakens (or drops) a strong tag anyway, and a weak one is all If-None-Match needs.
+  // ?for=card is the same city, so the same tag.
+  const etag = `W/"v${SCANNER}-${info.sha}"`;
   const headers = { 'cache-control': 'public, max-age=300', 'x-city-commit': info.sha };
+  const drawCard = () => { if (!new URL(req.url).searchParams.has('for')) ctx.waitUntil(prepareCard(info, req.url, env)); }; // not when it's the card being drawn
+  // Only once R2 says it's there (a head, no body): a city whose put never landed would otherwise live
+  // on in browsers alone, never rebuilt, and with no card (the card is drawn from the city in R2)
+  if (fresh(req.headers.get('if-none-match'), etag) && await env.CITIES.head(key)) {
+    drawCard();
+    return new Response(null, { status: 304, headers: { 'x-city-cache': 'revalidated', ...headers, etag } });
+  }
+  const hit = await env.CITIES.get(key);
   if (hit) {
-    if (!new URL(req.url).searchParams.has('for')) ctx.waitUntil(prepareCard(info, req.url, env)); // not when it's the card being drawn
-    return new Response(hit.body, { headers: { 'content-type': 'application/json', 'x-city-cache': 'hit', ...headers } });
+    drawCard();
+    return new Response(hit.body, { headers: { 'content-type': 'application/json', 'x-city-cache': 'hit', ...headers, etag } });
   }
   // a new scan costs a container minute: a few per visitor per minute is plenty
   const ip = req.headers.get('cf-connecting-ip') || 'unknown';
@@ -74,7 +89,8 @@ async function city(owner, repo, req, env, ctx) {
   if (res.status === 503) return json(503, { error: 'every city builder is busy — try again in a few minutes' }, { 'retry-after': '120' });
   if (!res.ok) return json(502, { error: `couldn't build the city: ${(await res.text()).slice(0, 300)}` });
   const body = await res.text();
-  // a container still on the image from before a deploy: its city is shown, but not kept as this version's
+  // a container still on the image from before a deploy: its city is shown, but not kept as this
+  // version's, and without the tag (a browser holding it would be told its old city is current)
   if (res.headers.get('x-scanner-version') !== String(SCANNER)) return new Response(body, { headers: { 'content-type': 'application/json', 'x-city-cache': 'old-scanner', ...headers, 'cache-control': 'no-store' } });
   // keep the city, then its summary and its share card (which reads the city back through the API)
   ctx.waitUntil((async () => {
@@ -82,7 +98,7 @@ async function city(owner, repo, req, env, ctx) {
     await saveSummary(env, info, body);
     await prepareCard(info, req.url, env);
   })());
-  return new Response(body, { headers: { 'content-type': 'application/json', 'x-city-cache': 'miss', ...headers } });
+  return new Response(body, { headers: { 'content-type': 'application/json', 'x-city-cache': 'miss', ...headers, etag } });
 }
 
 const CARD = 2;               // bump when the card's look (or its encoding) changes
