@@ -4,6 +4,7 @@
   "type": "module",
   "scripts": {
     "dev": "wrangler dev",
+    "predeploy": "node predeploy.mjs",
     "deploy": "wrangler deploy"
   },
   "dependencies": {
