@@ -537,7 +537,9 @@ const buildings = studio ? studio.buildings : (() => {
 const MARKS_UPTO = 24;
 const marks = (() => {
   const pos = new Float32Array(N * 3), life = new Float32Array(N * 2);
-  B.forEach((b, i) => { pos.set([b.x || 0, (b.y || 0) + (b.h || 0), b.z || 0], i * 3); life.set([b.born ?? 0, b.died ?? 2], i * 2); });
+  // (over the roof that's drawn: a studio's building can be lower or taller than the plan's lot)
+  const tall = studio?.heights;
+  B.forEach((b, i) => { pos.set([b.x || 0, (b.y || 0) + ((tall ? tall[i] : b.h) || 0), b.z || 0], i * 3); life.set([b.born ?? 0, b.died ?? 2], i * 2); });
   const geo = new THREE.BufferGeometry();
   geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
   geo.setAttribute('aLife', new THREE.BufferAttribute(life, 2));
