@@ -1323,7 +1323,7 @@ function cardWho(k) {
   const gh = tag('a', 'gh'); gh.hidden = true; id.append(gh);
   whoIs(k).then(v => { if (!v) return; gh.textContent = `@${v.login} ↗`; gh.href = `https://github.com/${encodeURIComponent(v.login)}`; gh.target = '_blank'; gh.rel = 'noopener'; gh.hidden = false; });
   if (f.n) id.append(tag('small', '', `${f.n.toLocaleString()} commit${f.n > 1 ? 's' : ''} · ${ym(f.t[0])}${f.t[1] !== f.t[0] ? ` → ${ym(f.t[1])}` : ''}`));
-  top.append(faceEl(k), id);
+  top.append(faceEl(k, 'now', 160), id); // (52px, on screens up to 3×)
   // both counts side by side; the one picked says which of their buildings are lit
   const stats = tag('div', 'stats');
   stats.setAttribute('role', 'group'); stats.setAttribute('aria-label', 'Light up the buildings they');
@@ -1404,16 +1404,20 @@ function whoIs(k, ask = true) {
 // into view: GitHub is asked about everyone seen. On a district sign ('quiet') GitHub isn't asked at
 // all: there are signs enough to spend a visitor's hourly allowance before they've opened anything
 const sighted = new IntersectionObserver(es => { for (const e of es) if (e.isIntersecting) { sighted.unobserve(e.target); e.target.ask(); } });
-function faceEl(k, when = 'now') {
+// an avatar at px pixels across (they're remembered at 64: enough for a face in a list on a sharp
+// screen, too few for a big one, which a browser would have to stretch)
+const avatarAt = (img, px) => img.replace(/([?&])s=\d+/, `$1s=${px}`);
+const seen = new Set(); // avatars that have loaded
+function faceEl(k, when = 'now', px = 64) {
   const el = document.createElement('a');
   el.className = 'face';
   el.textContent = initialOf(k);
   const show = v => {
     if (!v) return;
-    const img = new Image();
-    img.alt = ''; img.src = v.img; img.referrerPolicy = 'no-referrer';
+    const img = new Image(), src = avatarAt(v.img, px);
+    img.alt = ''; img.src = src; img.referrerPolicy = 'no-referrer';
     // (once one has loaded, it's there at once: the tooltip is made anew on every move)
-    if (v.loaded) el.replaceChildren(img); else img.onload = () => { v.loaded = true; el.replaceChildren(img); };
+    if (seen.has(src)) el.replaceChildren(img); else img.onload = () => { seen.add(src); el.replaceChildren(img); };
     el.href = `https://github.com/${encodeURIComponent(v.login)}`; el.target = '_blank'; el.rel = 'noopener';
     el.title = `${v.login} on GitHub`;
   };
