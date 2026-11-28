@@ -163,9 +163,14 @@ export function buildTrees({ layout, B, streets, unit, plateStep, shared }) {
     });
   }
 
-  // one instanced mesh per species
+  // one instanced mesh per species. A big city has more trees than it can show, and the ones it keeps
+  // come from all over it (shuffled, the same way every time): the list used to be cut short instead,
+  // which left the last lawns bare and not one tree on a street or in a yard, those being planted last
   const CAP = 8000;
-  if (trees.length > CAP) trees.length = CAP;
+  if (trees.length > CAP) {
+    for (let k = trees.length - 1; k > 0; k--) { const j = Math.floor(hash(k * 7 + 2) * (k + 1)); [trees[k], trees[j]] = [trees[j], trees[k]]; }
+    trees.length = CAP;
+  }
   const group = new THREE.Group();
   const m = new THREE.Matrix4(), q = new THREE.Quaternion(), UP = new THREE.Vector3(0, 1, 0), c = new THREE.Color();
   for (const sp of Object.keys(SPECIES)) {
