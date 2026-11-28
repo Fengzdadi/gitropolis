@@ -365,9 +365,15 @@ export function buildStudio(ctx) {
   const maxChurn = Math.max(1, ...files.map(f => f.churn));
   // chip: the body stands inside its leads, which take the rest of the footprint
   const leads = S.chip ? chip.leadMargins(B, unit) : null;
+  // pixel style: real architecture per file, and the box mesh stays as an invisible picking proxy. A
+  // box is as tall as what the architect draws there, not as the plan's lot: a long test file is a low
+  // house and a short changelog a clock tower, and a box of the plan's height was picked in the empty
+  // air over the one and missed on the upper floors of the other
+  const specs = S.pixel && layout ? timed('building specs', () => buildingSpecs({ files, B, inDeg, hub, unit, kind: layout.kind, t01 })) : null;
+  const tall = specs ? specs.map(sp => sp.h) : H;
   files.forEach((f, i) => {
     const b = B[i];
-    const h = H[i];
+    const h = tall[i];
     const [lx, lz] = leads ? leads[i] : [0, 0];
     q.setFromAxisAngle(UP, b.rot || 0);
     m.compose(new THREE.Vector3(b.x, b.y, b.z), q, new THREE.Vector3(b.w - lx * 2, h, b.d - lz * 2));
@@ -448,8 +454,7 @@ export function buildStudio(ctx) {
   }
   // pixel style: real architecture per file; the box mesh stays as an invisible picking proxy
   let cityMesh = null;
-  if (S.pixel && layout) {
-    const specs = timed('building specs', () => buildingSpecs({ files, B, inDeg, hub, unit, kind: layout.kind, t01 }));
+  if (specs) {
     cityMesh = timed('building geometry + merge', () => buildCityMesh({ buildingGeometry, specs, B, files, t01, shared, unit, heat, focus: focusAttr, glow: ctx.glowAttr }));
     scene.add(cityMesh);
     mesh.material.visible = false;
@@ -521,7 +526,7 @@ export function buildStudio(ctx) {
     traffic,
     get meshBytes() { return cityMesh?.userData.bytes || 0; },
     style: S,
-    heights: H,
+    heights: tall, // (of what's drawn)
     hub,
     buildings: mesh,
     rubble,
