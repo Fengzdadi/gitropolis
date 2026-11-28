@@ -71,13 +71,17 @@ const stemOf = p => p.slice(p.lastIndexOf('/') + 1).replace(/\.[^.]*$/, '');
 // a campus. An engine's own repository (bevy, pygame) is the engine, not a game made with it.
 // (also as part of a folder's name: android-test-app/, sample_app/, demo-web/)
 const SAMPLE_DIR = /(^|\/)(\w+[-_])?(examples?|samples?|demos?|tests?|fixtures?|playgrounds?|benchmarks?|docs?)([-_]\w+)?\//;
-const ML_IMPORT = /^\s*(?:import|from)\s+(torch|tensorflow|jax|flax|keras|transformers|diffusers|lightning|pytorch_lightning|sklearn|triton|accelerate|peft|vllm|timm|xformers|mlx)\b/m;
+// (Where a pattern is tried at the start of every line of a file, the indentation it skips is written
+// as "any space that isn't a line's end", not \s*. Both find the same lines; but \s runs on through
+// blank lines, and does it again from each one of them: 60,000 blank lines in a Python file took
+// seven seconds to read, and 8,000 in a YAML file a minute and a half.)
+const ML_IMPORT = /^[^\S\r\n\u2028\u2029]*(?:import|from)\s+(torch|tensorflow|jax|flax|keras|transformers|diffusers|lightning|pytorch_lightning|sklearn|triton|accelerate|peft|vllm|timm|xformers|mlx)\b/m;
 const ENGINES = [
   ['Godot', (p, lang) => lang === 'gd'],
   ['Unity', (p, lang) => lang === 'cs' && /(^|\/)Assets\//.test(p)],
   ['Unreal', (p, lang) => lang === 'cpp' && /(^|\/)Source\//.test(p)],
   ['Bevy', (p, lang, t) => lang === 'rs' && /\buse\s+bevy::/.test(t)],
-  ['pygame', (p, lang, t) => lang === 'py' && /^\s*(?:import|from)\s+(?:pygame|arcade|pyglet|ursina|panda3d)\b/m.test(t)],
+  ['pygame', (p, lang, t) => lang === 'py' && /^[^\S\r\n\u2028\u2029]*(?:import|from)\s+(?:pygame|arcade|pyglet|ursina|panda3d)\b/m.test(t)],
   ['LÖVE', (p, lang, t) => lang === 'lua' && /\bfunction\s+love\.(?:load|update|draw|run|conf)\b/.test(t)],
   ['Phaser', (p, lang, t) => (lang === 'js' || lang === 'ts') && /\bnew\s+Phaser\.Game\b/.test(t)],
 ];
@@ -646,13 +650,13 @@ function unquote(p) {
 // another import or export: the run ends at the next statement, so a 40,000-line file of exports is read
 // once, not once per export; a // comment runs to its line's end, so it can't be split and re-read either)
 const JS_RE = /(?:import|export)\s(?:\/\/[^\n]*(?![^\n])|\/\*[^*]*\*+(?:[^/*][^*]*\*+)*\/|(?!\b(?:import|export)\b)[\w$\s{},*])*?from\s*['"]([^'"]+)['"]|import\s*\(?\s*['"]([^'"]+)['"]|require\s*\(\s*['"]([^'"]+)['"]/g;
-const PY_RE = /^\s*from\s+(\.*[\w.]*)\s+import\s+([\w*, ()]+)|^\s*import\s+([\w.]+(?:\s*,\s*[\w.]+)*)/gm;
+const PY_RE = /^[^\S\r\n\u2028\u2029]*from\s+(\.*[\w.]*)\s+import\s+([\w*, ()]+)|^[^\S\r\n\u2028\u2029]*import\s+([\w.]+(?:\s*,\s*[\w.]+)*)/gm;
 const GO_BLOCK = /import\s*\(([\s\S]*?)\)|import\s+(?:\w+\s+)?"([^"]+)"/g;
-const RS_RE = /^\s*(?:pub(?:\([^)]*\))?\s+)?mod\s+(\w+)\s*;|use\s+(crate|super|self)((?:::\w+)+)/gm;
+const RS_RE = /^[^\S\r\n\u2028\u2029]*(?:pub(?:\([^)]*\))?\s+)?mod\s+(\w+)\s*;|use\s+(crate|super|self)((?:::\w+)+)/gm;
 const C_RE = /#include\s*"([^"]+)"/g;
-const JVM_PKG = /^\s*package\s+([\w.]+)/m;
-const JVM_IMPORT = /^\s*import\s+(?:static\s+)?([\w.]+?)(\.\*)?\s*;?\s*$/gm;
-const DART_RE = /^\s*(?:import|export|part)\s+['"]([^'"]+\.dart)['"]/gm;
+const JVM_PKG = /^[^\S\r\n\u2028\u2029]*package\s+([\w.]+)/m;
+const JVM_IMPORT = /^[^\S\r\n\u2028\u2029]*import\s+(?:static\s+)?([\w.]+?)(\.\*)?\s*;?\s*$/gm;
+const DART_RE = /^[^\S\r\n\u2028\u2029]*(?:import|export|part)\s+['"]([^'"]+\.dart)['"]/gm;
 // GDScript: scripts load each other by path (preload("res://player.gd"), extends "res://enemy.gd"),
 // and use each other by the global name one declares (class_name Player … extends Player, Player.new())
 const GD_PATH = /\b(?:preload|load|extends)\s*\(?\s*["']((?:res:\/\/)?[^"']+\.gd)["']/g;
@@ -913,8 +917,8 @@ function infraKind(p, text, lang) {
   if (/^kustomization\.ya?ml$/.test(base)) return 'kustomize';
   if (/^values[^/]*\.ya?ml$/.test(base)) return 'values';
   if (/(^|\/)templates\//.test(p) && text.includes('{{')) return 'k8s';
-  if (/^\s*apiVersion:/m.test(text) && /^\s*kind:\s*\S/m.test(text)) return 'k8s';
-  if (/(^|\/)(roles|playbooks?|tasks|handlers|group_vars|host_vars)\//.test(p) || /^\s*-?\s*hosts:\s/m.test(text)) return 'ansible';
+  if (/^[^\S\r\n\u2028\u2029]*apiVersion:/m.test(text) && /^[^\S\r\n\u2028\u2029]*kind:\s*\S/m.test(text)) return 'k8s';
+  if (/(^|\/)(roles|playbooks?|tasks|handlers|group_vars|host_vars)\//.test(p) || /^[^\S\r\n\u2028\u2029]*(?:-\s*)?hosts:\s/m.test(text)) return 'ansible';
   return 'yaml';
 }
 

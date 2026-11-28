@@ -97,7 +97,10 @@ const LANG = {
   dart: {
     brace: true,
     cls: /^\s*(?:(?:abstract|sealed|base|final|interface)\s+)*(?:class|mixin|enum|extension)\s+\w/,
-    fn: /^\s*(?:(?:static|external|factory)\s+)*(?:[\w<>?,\[\] ]+\s+)?(?!(?:if|for|while|switch|catch|return|else)\b)\w+\s*(?:<[^>]*>)?\s*\([^;]*$/,
+    // (the return type begins and ends on a letter or bracket: when it could also begin or end with
+    // spaces, a line that isn't a function had its indentation shared out between the type and the \s
+    // on either side every possible way, and a deeply indented one took milliseconds)
+    fn: /^\s*(?:(?:static|external|factory)\s+)*(?:[\w<>?,\[\]](?: *[\w<>?,\[\]])*\s+)?(?!(?:if|for|while|switch|catch|return|else)\b)\w+\s*(?:<[^>]*>)?\s*\([^;]*$/,
     exp: /^(?:(?:abstract|sealed|base|final|interface)\s+)*(?:class|mixin|enum|extension|typedef)\s+[A-Z]/,
   },
   gd: {
