@@ -74,6 +74,19 @@ export function createPixelPipeline(renderer, scene, camera, { pixel = 3, outlin
   }));
   const postScene = new THREE.Scene(); postScene.add(quad);
   const postCam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+  // That pass is done once for each art pixel, into a picture of the art's own size, and the picture
+  // is then blown up onto the canvas. Done straight onto the canvas it ran for every screen pixel of
+  // an art pixel (four of them on a sharp screen), each working out the same colour from the same
+  // 79 palette entries: nearly half of what a frame of a small city cost.
+  const art = new THREE.WebGLRenderTarget(1, 1, { minFilter: THREE.NearestFilter, magFilter: THREE.NearestFilter, depthBuffer: false });
+  const blown = new THREE.Mesh(quad.geometry, new THREE.ShaderMaterial({
+    depthTest: false, depthWrite: false,
+    uniforms: { tArt: { value: art.texture }, uRes: { value: lowRes } },
+    vertexShader: quad.material.vertexShader,
+    fragmentShader: `uniform sampler2D tArt; uniform vec2 uRes; varying vec2 vUv;
+      void main() { gl_FragColor = texture2D(tArt, (floor(vUv * uRes) + 0.5) / uRes); }`,
+  }));
+  const blowScene = new THREE.Scene(); blowScene.add(blown);
 
   function resize() {
     renderer.getDrawingBufferSize(size);
@@ -81,6 +94,7 @@ export function createPixelPipeline(renderer, scene, camera, { pixel = 3, outlin
     const pr = renderer.getPixelRatio();
     lowRes.set(Math.max(1, Math.floor(size.x / (pixel * pr))), Math.max(1, Math.floor(size.y / (pixel * pr))));
     target.setSize(lowRes.x, lowRes.y);
+    art.setSize(lowRes.x, lowRes.y);
   }
   resize();
 
@@ -92,8 +106,12 @@ export function createPixelPipeline(renderer, scene, camera, { pixel = 3, outlin
     u.uNear.value = camera.near; u.uFar.value = camera.far; u.uOrtho.value = camera.isOrthographicCamera ? 1 : 0;
     renderer.setRenderTarget(target);
     renderer.render(scene, camera);
-    renderer.setRenderTarget(out);
+    // (straight to where it's going when that's already the art's size: a card's picture, or a canvas
+    // with one screen pixel to the art pixel)
+    const direct = out || (size.x === lowRes.x && size.y === lowRes.y);
+    renderer.setRenderTarget(direct ? out : art);
     renderer.render(postScene, postCam);
+    if (!direct) { renderer.setRenderTarget(null); renderer.render(blowScene, postCam); }
     renderer.setRenderTarget(null);
   }
   let shot = null;
