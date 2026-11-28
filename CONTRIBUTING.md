@@ -94,7 +94,7 @@ Pull requests are reviewed as time allows. A pull request that isn't merged isn'
 
 ## The hosted site
 
-`deploy/cloudflare/` is what runs gitropolis.dev. You can run it with `npx wrangler dev` there to work on the Worker, but deploying is done by the maintainer.
+`deploy/cloudflare/` is what runs gitropolis.dev. You can run it with `npx wrangler dev` there to work on the Worker, but deploying is done by the maintainer (`npm run deploy` there, which only goes ahead from a clean checkout of what `main` is on GitHub).
 
 ## Security
 
