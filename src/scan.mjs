@@ -2,7 +2,7 @@
 // files (LOC, language), import edges (regex-based), git history (born / last / churn / commits), and
 // the files deleted along the way.
 import { execFile, execFileSync, spawn } from 'node:child_process';
-import { readFileSync, statSync } from 'node:fs';
+import { lstatSync, readFileSync, realpathSync, statSync } from 'node:fs';
 import path from 'node:path';
 import readline from 'node:readline';
 import { promisify } from 'node:util';
@@ -345,7 +345,8 @@ export async function scanRepo(repo, { maxCommits = 20000, name } = {}) {
   const t0 = Date.now();
   const root = git(repo, ['rev-parse', '--show-toplevel']).trim();
   name ||= path.basename(root);
-  const listed = git(root, ['ls-files', '-z']).split('\0').filter(Boolean);
+  // (each path once: a file in the middle of a merge is in the index once for every side of it)
+  const listed = [...new Set(git(root, ['ls-files', '-z']).split('\0').filter(Boolean))];
   const partial = isPartial(root);
 
   // ---- git history: one pass over `git log --raw`, oldest first, following renames
@@ -456,6 +457,7 @@ export async function scanRepo(repo, { maxCommits = 20000, name } = {}) {
   const index = new Map(); // path -> idx
   const hardwareFiles = listed.filter(p => /\.(v|sv|svh|vhd|vhdl)$/i.test(p)).length;
   let read = 0;
+  const inside = realpathSync(root) + path.sep;
   for (const p of listed) {
     // now and then let git's output drain (a full pipe would stop git until the files are read)
     if (++read % 256 === 0) await new Promise(setImmediate);
@@ -463,7 +465,16 @@ export async function scanRepo(repo, { maxCommits = 20000, name } = {}) {
     if (!lang) continue;
     const full = path.join(root, p);
     let f;
-    try { f = building(p, lang, statSync(full).size, () => readFileSync(full, 'utf8')); } catch { continue; }
+    try {
+      // a link is read as the file it points at when that's a file of this repo's own, and not otherwise:
+      // one to /etc/hosts was a building 33 lines tall, and one to /dev/zero was read until memory ran out
+      let st = lstatSync(full);
+      if (st.isSymbolicLink()) {
+        const to = realpathSync(full);
+        if (!to.startsWith(inside) || to.startsWith(inside + '.git' + path.sep) || !(st = statSync(to)).isFile()) continue;
+      }
+      f = building(p, lang, st.size, () => readFileSync(full, 'utf8'));
+    } catch { continue; }
     if (!f) continue;
     // manifests, scripts and docs often name entry files (package.json exports, Makefile, README): keep their stems
     // (stems, because exports point at built `x.js` while the source is `x.ts`)
