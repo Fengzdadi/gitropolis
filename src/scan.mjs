@@ -293,7 +293,7 @@ async function birthsBefore(root, boundary, paths) {
   for (const p of paths) if (there.has(p)) now.set(p, p);
   // each point's diff from the one before it, all from one git: a line "<commit> <older commit>" on its
   // stdin is diffed as a commit against a parent, and each diff that isn't empty comes back after the
-  // commit's id. (They were a git apiece, some hundred of them: a third of a big repo's scan where the
+  // commit's id. (They were a git apiece, some hundred of them: a fifth of a big repo's scan where the
   // hosted scanner runs, on half a core, with every one of them opening the pack again.)
   const diffs = points.slice(1).map(() => []), where = new Map(points.map((pt, k) => [pt.id, k]));
   const job = execFileAsync('git', ['-C', root, '-c', `diff.renameLimit=${RENAME_LIMIT}`, 'diff-tree', '--stdin', '-r', '-z', partial ? '--no-renames' : '-M', '--diff-filter=ADR', '--name-status'],
