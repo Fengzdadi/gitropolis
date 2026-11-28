@@ -105,8 +105,25 @@ export function buildTrees({ layout, B, streets, unit, plateStep, shared }) {
   };
 
   // terraces: is there a higher block over this point (a terrace nested inside this one)?
-  const raised = layout.blocks.filter(b => b.h > 0);
-  const higher = (x, z, b) => raised.some(o => o !== b && o.h > b.h && inPoly(x, z, o.poly));
+  // A mountain has a terrace for every folder, thousands in a big repo, and every tree asks: so they're
+  // kept by where they are (each in the cells its bounds touch), and a tree asks only the ones near it
+  const raised = layout.blocks.filter(b => b.h > 0).map(o => {
+    let x0 = Infinity, x1 = -Infinity, z0 = Infinity, z1 = -Infinity;
+    for (const [x, z] of o.poly) { x0 = Math.min(x0, x); x1 = Math.max(x1, x); z0 = Math.min(z0, z); z1 = Math.max(z1, z); }
+    return { o, x0, x1, z0, z1 };
+  });
+  const wide = raised.reduce((m, r) => Math.max(m, r.x1 - r.x0, r.z1 - r.z0), 0);
+  const tcell = Math.max(unit * 2, wide / 128), terraces = new Map(); // (the widest terrace touches 128 × 128 cells at most)
+  for (const r of raised) {
+    for (let i = Math.floor(r.x0 / tcell); i <= Math.floor(r.x1 / tcell); i++)
+      for (let j = Math.floor(r.z0 / tcell); j <= Math.floor(r.z1 / tcell); j++) {
+        const k = key(i, j);
+        if (!terraces.has(k)) terraces.set(k, []);
+        terraces.get(k).push(r);
+      }
+  }
+  const higher = (x, z, b) => (terraces.get(key(Math.floor(x / tcell), Math.floor(z / tcell))) || [])
+    .some(r => r.o !== b && r.o.h > b.h && x >= r.x0 && x <= r.x1 && z >= r.z0 && z <= r.z1 && inPoly(x, z, r.o.poly));
   const trees = []; // { x, z, y, s, sp, rot }
   // each tree is planted a moment after the land it stands on opens
   const plant = (x, z, y, size, seed, born = 0) => trees.push({ x, z, y, s: size * (0.8 + hash(seed + 3) * 0.45), sp: pickSpecies(kind, seed), rot: hash(seed + 7) * Math.PI * 2, born: Math.min(1, born + 0.01 + hash(seed + 9) * 0.02) });

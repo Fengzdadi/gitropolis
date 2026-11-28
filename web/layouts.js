@@ -259,6 +259,9 @@ const PLANNERS = {
       if (d.name !== '·') labels.push({ text: downtown ? `${d.name} (downtown)` : d.name, x: (leaf.x0 + leaf.x1) / 2, z: leaf.y1 + 0.8 });
     }
     const roads = [];
+    // (which neighbourhood a file is in, asked once per file: looked up, not searched for)
+    const home = new Map();
+    for (const d of ds) for (const it of d.items) if (!home.has(it.i)) home.set(it.i, d);
     for (const leaf of root.leaves()) {
       const o = 1.6, x0 = leaf.x0 - o, x1 = Math.max(leaf.x1, leaf.x0 + 1.2) + o, z0 = leaf.y0 - o, z1 = Math.max(leaf.y1, leaf.y0 + 1.2) + o;
       roads.push({ a: [x0, z0], b: [x1, z0], w: 0.9 }, { a: [x1, z0], b: [x1, z1], w: 0.9 }, { a: [x1, z1], b: [x0, z1], w: 0.9 }, { a: [x0, z1], b: [x0, z0], w: 0.9 });
@@ -269,7 +272,7 @@ const PLANNERS = {
       lots, blocks, labels, roads, hills, ground: 'land', land: [rectPoly(-1, -1, W + 1, W + 1)],
       camera: { az: 50, el: 17, dist: 0.8 },
       height: (i, rel, d) => d === hubD ? Math.min(0.6 + 2.2 * Math.pow(rel, 0.6), 12) : Math.min(0.22 + 0.3 * Math.pow(rel, 0.4), 1.1),
-      districtOf: i => ds.find(d => d.items.some(it => it.i === i)),
+      districtOf: i => home.get(i),
     };
   },
 
@@ -1285,10 +1288,9 @@ function placeLandmarks(lots, files, hub, frontAz) {
   }
 }
 
-function districtBorn(files, text) {
-  const name = text.replace(/ \(downtown\)$| \+\d+$/, '');
-  let born = Infinity;
-  for (const f of files) if (f.p === name || f.p.startsWith(name + '/')) born = Math.min(born, f.born);
+// when the first file under a name was born (bornUnder: that, for every file and every folder)
+function districtBorn(bornUnder, text) {
+  const born = bornUnder.get(text.replace(/ \(downtown\)$| \+\d+$/, ''));
   return born < Infinity ? born : null;
 }
 
@@ -1352,8 +1354,14 @@ export function buildLayout(kind, { files, inDeg, hub, SIZE, frontAz }) {
   // every district gets a name: a planner may leave some out (the desert's palm villas, a small
   // town's single street), so those are named at the middle of their lots
   // (none for a district whose files have all been deleted: its name went with them)
-  const held = new Set();
-  for (const f of files) if (!f.gone) for (let k = f.p.length; k > 0; k = f.p.lastIndexOf('/', k - 1)) held.add(f.p.slice(0, k));
+  // (and when each name's first file was born, deleted ones too, kept as the files go by: a capital
+  // names every package, and asking all the files again for each name took seconds in a big one)
+  const held = new Set(), bornUnder = new Map();
+  for (const f of files) for (let k = f.p.length; k > 0; k = f.p.lastIndexOf('/', k - 1)) {
+    const at = f.p.slice(0, k);
+    if (!f.gone) held.add(at);
+    bornUnder.set(at, Math.min(bornUnder.get(at) ?? Infinity, f.born));
+  }
   const here = path => held.has(path);
   const labelled = L.labels.map(l => ({ ...l, path: l.path ?? l.text.replace(/ \(downtown\)$| \+\d+$/, '') })).filter(l => here(l.path));
   const lotOf = new Map(L.lots.map(l => [l.i, l]));
@@ -1388,7 +1396,7 @@ export function buildLayout(kind, { files, inDeg, hub, SIZE, frontAz }) {
     cables: (L.cables || []).map(c => ({ a: [...P(c.a), c.a[2] * s], b: [...P(c.b), c.b[2] * s] })),
     ships: (L.ships || []).map(sh => ({ ...sh, x: (sh.x - mx) * s, z: (sh.z - mz) * s, len: sh.len * s, beam: sh.beam * s })),
     // a label appears with its district: when the first file under that name was born
-    labels: labelled.map(l => ({ bornRaw: districtBorn(files, l.path), path: l.path, text: shortLabel(l.text), weight: l.weight ?? (areaOf.get(l.text.replace(' (downtown)', '')) || 0), x: (l.x - mx) * s, z: (l.z - mz) * s, y: (l.y || 0) * s }))
+    labels: labelled.map(l => ({ bornRaw: districtBorn(bornUnder, l.path), path: l.path, text: shortLabel(l.text), weight: l.weight ?? (areaOf.get(l.text.replace(' (downtown)', '')) || 0), x: (l.x - mx) * s, z: (l.z - mz) * s, y: (l.y || 0) * s }))
       .sort((a, b) => b.weight - a.weight),
   };
 }
