@@ -291,20 +291,27 @@ async function birthsBefore(root, boundary, paths) {
   const there = new Set((await run(['ls-tree', '-r', '-z', '--name-only', points[0].id])).split('\0'));
   const now = new Map(); // path before the boundary -> its path at the point being looked at
   for (const p of paths) if (there.has(p)) now.set(p, p);
-  // each point's diff from the one before it, a few at a time
-  const diffs = new Array(points.length - 1);
-  let next = 0;
-  await Promise.all(Array.from({ length: 4 }, async () => {
-    while (next < diffs.length) {
-      const k = next++;
-      diffs[k] = await run(['-c', `diff.renameLimit=${RENAME_LIMIT}`, 'diff-tree', '-r', '-z', partial ? '--no-renames' : '-M', '--diff-filter=ADR', '--name-status', points[k + 1].id, points[k].id]);
-    }
-  }));
+  // each point's diff from the one before it, all from one git: a line "<commit> <older commit>" on its
+  // stdin is diffed as a commit against a parent, and each diff that isn't empty comes back after the
+  // commit's id. (They were a git apiece, some hundred of them: a third of a big repo's scan where the
+  // hosted scanner runs, on half a core, with every one of them opening the pack again.)
+  const diffs = points.slice(1).map(() => []), where = new Map(points.map((pt, k) => [pt.id, k]));
+  const job = execFileAsync('git', ['-C', root, '-c', `diff.renameLimit=${RENAME_LIMIT}`, 'diff-tree', '--stdin', '-r', '-z', partial ? '--no-renames' : '-M', '--diff-filter=ADR', '--name-status'],
+    { encoding: 'utf8', maxBuffer: 1 << 30, env: { ...process.env, GIT_NO_LAZY_FETCH: '1' } });
+  job.child.stdin.on('error', () => {}); // (a git that left early says why when it's awaited)
+  job.child.stdin.end(points.slice(0, -1).map((pt, k) => `${pt.id} ${points[k + 1].id}\n`).join(''));
+  // "<id>\0", then "A\0path\0", "D\0path\0", "R097\0old\0new\0"
+  const tok = (await job).stdout.split('\0');
+  for (let i = 0, cur = null; i < tok.length - 1;) {
+    const st = tok[i++];
+    if (st.length >= 40) { cur = diffs[where.get(st)]; continue; } // (an id: a status is a letter, or R and a score)
+    cur.push(st, tok[i++]);
+    if (st[0] === 'R') cur.push(tok[i++]);
+  }
   for (let k = 1; k < points.length && now.size; k++) {
-    // "A\0path\0", "D\0path\0", "R097\0old\0new\0"
-    const out = diffs[k - 1].split('\0');
+    const out = diffs[k - 1];
     const added = new Set(), deleted = [], moved = new Map(); // new path -> old
-    for (let i = 0; i < out.length - 1;) {
+    for (let i = 0; i < out.length;) {
       const st = out[i++];
       if (st[0] !== 'R') { (st === 'A' ? added.add(out[i]) : deleted.push(out[i])); i++; continue; }
       const from = out[i++], to = out[i++];
